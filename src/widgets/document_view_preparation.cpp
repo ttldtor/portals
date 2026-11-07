@@ -56,13 +56,44 @@ void discardFirst(DocumentScan &scan) {
 }
 
 bool enoughRows(const DocumentScan &scan, const DocumentPrepareIntent &intent) {
-  return !intent.tail && scan.reached && scan.rows.size() >= static_cast<std::size_t>(intent.viewport.height);
+  return !intent.tail && scan.reached && !scan.precedingRows &&
+         scan.rows.size() >= static_cast<std::size_t>(intent.viewport.height);
+}
+
+bool needsCrLfLookahead(const DocumentScan &scan, const DocumentPrepareIntent &intent) noexcept {
+  // Resolve only the CR on the last displayed row. A subsequent CR creates
+  // a hidden row and must not extend this lookahead again.
+  return scan.afterCR && scan.rows.size() == static_cast<std::size_t>(intent.viewport.height);
+}
+
+void checkPayload(const DocumentScan &scan, const DocumentPrepareIntent &intent, std::size_t current = 0,
+                  std::size_t incoming = 0) {
+  // A full screen can leave one flushed and one pending grapheme in the
+  // decoder's final drain. Charge their combined scratch once; never enlarge
+  // the rendered frame limit. The fixed preparation envelope covers this.
+  constexpr std::size_t LOOKAHEAD_BYTES = DOCUMENT_CLUSTER_BYTES * 2;
+  auto remaining = intent.config.maxFrameBytes;
+  auto scratch = !scan.precedingRows && scan.rows.size() >= static_cast<std::size_t>(intent.viewport.height)
+                   ? LOOKAHEAD_BYTES
+                   : std::size_t{};
+  for (auto bytes : {scan.payload, current, incoming}) {
+    const auto covered = std::min(bytes, remaining);
+    remaining -= covered;
+    bytes -= covered;
+    if (bytes > scratch) {
+      fail(SourceError::PAGE_TOO_LARGE);
+    }
+    scratch -= bytes;
+  }
 }
 
 void finishRow(DocumentScan &scan, const DocumentPrepareIntent &intent, std::uint64_t end) {
   const auto height = static_cast<std::size_t>(intent.viewport.height);
-  const auto preceding =
-    intent.rowDelta < 0 ? std::min<std::uint64_t>(static_cast<std::uint64_t>(-(intent.rowDelta + 1)) + 1, height) : 0;
+  const bool forward = intent.rowDelta > 0;
+  const auto preceding = forward ? height
+                         : intent.rowDelta < 0
+                           ? std::min<std::uint64_t>(static_cast<std::uint64_t>(-(intent.rowDelta + 1)) + 1, height)
+                           : 0;
   const bool contains = scan.rowOffset <= intent.anchor && (intent.anchor < end || scan.rowOffset == intent.anchor);
 
   if (!scan.reached && contains && !intent.tail) {
@@ -71,17 +102,38 @@ void finishRow(DocumentScan &scan, const DocumentPrepareIntent &intent, std::uin
     while (scan.rows.size() > preceding) {
       discardFirst(scan);
     }
+    scan.precedingRows = forward ? scan.rows.size() : 0;
   }
 
-  if (scan.reached && scan.skipRows) {
+  const bool skipped = scan.reached && scan.skipRows;
+  if (skipped) {
     --scan.skipRows;
-  } else {
+  }
+  if (!skipped || forward) {
     DocumentPreparedRow row;
     row.offset = scan.rowOffset;
     row.line = scan.line;
+    const auto horizontal = intent.config.wrap ? 0 : intent.horizontal;
+    const bool rightEdgeVisible = intent.config.wrap || scan.column <= horizontal ||
+                                  scan.column - horizontal <= static_cast<std::uint64_t>(contentWidth(intent));
+    row.end = rightEdgeVisible ? end : scan.rowEnd;
     row.bytes.swap(scan.row);
     scan.payload += row.bytes.size();
     scan.rows.push_back(std::move(row));
+    if (skipped) {
+      ++scan.precedingRows;
+    }
+  }
+
+  // A forward request retains at most one screen, including predecessors.
+  // At EOF this fills the last screen instead of scrolling content into air.
+  if (forward && scan.reached && scan.precedingRows) {
+    while (scan.rows.size() > height) {
+      discardFirst(scan);
+      if (scan.precedingRows) {
+        --scan.precedingRows;
+      }
+    }
   }
 
   if (!scan.reached || intent.tail) {
@@ -91,14 +143,13 @@ void finishRow(DocumentScan &scan, const DocumentPrepareIntent &intent, std::uin
     }
   }
 
-  if (scan.payload > intent.config.maxFrameBytes) {
-    fail(SourceError::PAGE_TOO_LARGE);
-  }
+  checkPayload(scan, intent);
 
   scan.row.clear();
   scan.rowTouched = false;
   scan.column = 0;
   scan.rowOffset = end;
+  scan.rowEnd = end;
 }
 
 void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
@@ -147,6 +198,14 @@ void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
     saveCheckpoint(scan, scan.clusterCheckpoint);
   }
 
+  // The newly touched row replaces a predecessor before consuming its
+  // payload allowance, including when a grapheme started a wrapped row.
+  if (intent.rowDelta > 0 && !scan.rowTouched && scan.precedingRows &&
+      scan.rows.size() >= static_cast<std::size_t>(intent.viewport.height)) {
+    discardFirst(scan);
+    --scan.precedingRows;
+  }
+
   const auto horizontal = intent.config.wrap ? 0 : intent.horizontal;
   const auto endColumn = scan.column + cells;
   if (endColumn < scan.column) {
@@ -154,13 +213,13 @@ void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
   }
 
   if (scan.column >= horizontal && (endColumn <= horizontal + width || (intent.config.wrap && !scan.rowTouched))) {
-    if (scan.payload + scan.row.size() + bytes.size() > intent.config.maxFrameBytes) {
-      fail(SourceError::PAGE_TOO_LARGE);
-    }
+    checkPayload(scan, intent, scan.row.size(), bytes.size());
     scan.row.append(bytes);
+    scan.rowEnd = scan.clusterEnd;
   } else if (scan.column < horizontal && endColumn > horizontal) {
     // Preserve alignment when a horizontal window starts inside a wide cluster.
     scan.row.append(static_cast<std::size_t>(endColumn - horizontal), ' ');
+    scan.rowEnd = scan.clusterEnd;
   }
 
   scan.column = endColumn;
@@ -192,6 +251,10 @@ void addScalar(DocumentScan &scan, const DocumentPrepareIntent &intent, const De
       ++scan.line;
     } else {
       scan.rowOffset = end;
+      scan.rowEnd = end;
+      if (!scan.rows.empty() && scan.rows.back().end == decoded.byteOffset) {
+        scan.rows.back().end = end;
+      }
     }
 
     scan.afterCR = scalar == U'\r';
@@ -261,8 +324,9 @@ void addScalar(DocumentScan &scan, const DocumentPrepareIntent &intent, const De
 
 std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, DocumentMetadata metadata,
                                           const std::shared_ptr<const DocumentScan> &previous) {
-  const bool resume = previous && (intent.resume || (previous->waiting && previous->requestedAnchor == intent.anchor &&
-                                                     previous->horizontal == intent.horizontal));
+  // The caller qualifies the complete navigation intent before requesting resume.
+  // Matching only anchor/horizontal would retain a different rowDelta's skip state.
+  const bool resume = previous && intent.resume;
   auto scan = resume ? std::make_shared<DocumentScan>(*previous) : std::make_shared<DocumentScan>();
   if (resume) {
     scan->waiting = false;
@@ -447,16 +511,8 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
   frame->viewport = intent.viewport;
   frame->status.revision = scan.metadata.revision;
   frame->status.byteOffset = intent.anchor;
-  frame->status.visibleByteOffset = scan.rows.empty() ? scan.rowOffset : scan.rows.front().offset;
   frame->status.anchorBeyondExtent = scan.metadata.byteExtent && intent.anchor > *scan.metadata.byteExtent;
   frame->status.byteExtent = scan.metadata.byteExtent;
-  frame->status.logicalLine = scan.anchorLine;
-  if (scan.lineKnown && !scan.rows.empty() && (intent.tail || intent.rowDelta || !scan.anchorLine)) {
-    frame->status.logicalLine = scan.rows.front().line;
-  }
-  if (intent.tail || intent.rowDelta) {
-    frame->status.byteOffset = frame->status.visibleByteOffset;
-  }
   frame->status.totalLines = scan.totalLines;
   frame->status.preparing = false;
   frame->status.waiting = scan.waiting;
@@ -471,10 +527,29 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
   frame->anchors.reserve(scan.rows.size() + 1);
 
   auto rows = scan.rows;
+  if (!scan.done && scan.precedingRows) {
+    rows.erase(rows.begin(), rows.begin() + static_cast<std::ptrdiff_t>(scan.precedingRows));
+  }
   if (scan.reached && !scan.skipRows && scan.rowTouched &&
       rows.size() < static_cast<std::size_t>(intent.viewport.height)) {
-    rows.push_back({scan.rowOffset, scan.line, scan.row});
+    rows.push_back({scan.rowOffset, scan.line, scan.row, scan.rowEnd});
   }
+  // Derive the published position from displayed rows, after excluding
+  // predecessors that are still hidden while a provider is waiting.
+  frame->status.visibleByteOffset = rows.empty() ? scan.rowOffset : rows.front().offset;
+  frame->status.logicalLine = scan.anchorLine;
+  if (scan.lineKnown && !rows.empty() && (intent.tail || intent.rowDelta || !scan.anchorLine)) {
+    frame->status.logicalLine = rows.front().line;
+  }
+  if (intent.tail || intent.rowDelta) {
+    frame->status.byteOffset = frame->status.visibleByteOffset;
+  }
+
+  // DONE has flushed decoder/cluster state; every retained text row must fit.
+  // An empty logical row after the final separator adds no unseen content.
+  frame->finalEndVisible =
+    scan.done && !scan.waiting && !rows.empty() && rows.size() <= static_cast<std::size_t>(intent.viewport.height);
+
   std::size_t renderedBytes{};
   for (const auto &row :
        std::span(rows).first(std::min(rows.size(), static_cast<std::size_t>(intent.viewport.height)))) {
@@ -512,20 +587,22 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
     }
     frame->rows.push_back(std::move(*text));
     frame->anchors.push_back(row.offset);
+    frame->visibleByteEnd = std::max(row.offset, row.end);
   }
 
   std::array<char, 192> footer{};
-  if (scan.metadata.byteExtent && *scan.metadata.byteExtent) {
-    const auto percent =
-      100.0L * std::min(frame->status.byteOffset, *scan.metadata.byteExtent) / *scan.metadata.byteExtent;
-    std::snprintf(footer.data(), footer.size(), "byte %llu | %.1Lf%% bytes%s%s",
-                  static_cast<unsigned long long>(frame->status.byteOffset), percent, scan.waiting ? " | waiting" : "",
-                  scan.fragmented ? " | cluster continuation" : "");
+  std::array<char, 32> progress{};
+
+  if (const auto value = documentProgress(frame->status, frame->finalEndVisible && frame->visibleByteEnd == scan.offset,
+                                          frame->visibleByteEnd)) {
+    std::snprintf(progress.data(), progress.size(), "%u.%u%%", static_cast<unsigned>(*value / 10),
+                  static_cast<unsigned>(*value % 10));
   } else {
-    std::snprintf(footer.data(), footer.size(), "byte %llu | %s%s",
-                  static_cast<unsigned long long>(frame->status.byteOffset),
-                  scan.metadata.byteExtent ? "empty" : "extent unknown", scan.waiting ? " | waiting" : "");
+    std::snprintf(progress.data(), progress.size(), "progress unknown");
   }
+
+  std::snprintf(footer.data(), footer.size(), "%s%s%s", progress.data(), scan.waiting ? " | waiting" : "",
+                scan.fragmented ? " | cluster continuation" : "");
   auto caption = GraphemeText::from(footer.data(), intent.width);
   if (!caption) {
     fail(SourceError::INVALID_ARGUMENT);
@@ -571,8 +648,8 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
     bool drain{};
     const bool localReady = prepareLocalStart(*scan, *source, intent, generation, work, stop);
 
-    while (localReady && !scan->done && !scan->waiting && !enoughRows(*scan, intent) &&
-           work < intent.config.workBytes) {
+    while (localReady && !scan->done && !scan->waiting &&
+           (!enoughRows(*scan, intent) || needsCrLfLookahead(*scan, intent)) && work < intent.config.workBytes) {
       if (stop.stop_requested()) {
         fail(SourceError::CANCELLED);
       }
@@ -630,13 +707,18 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
         if (decoded.status == DocumentDecodeStatus::DONE) {
           flushCluster(*scan, intent);
           scan->totalLines = scan->lineKnown ? std::optional(scan->line) : std::nullopt;
-          if (scan->rowTouched || !enoughRows(*scan, intent)) {
+          // A terminal separator ends the last row; it does not create a
+          // new display row in a read-only viewer. Keep the empty document.
+          if (scan->rowTouched || (scan->rows.empty() && scan->line == 1)) {
             finishRow(*scan, intent, scan->offset);
           }
           scan->done = true;
           break;
         }
-        if (enoughRows(*scan, intent)) {
+        // A final page may leave only the decoder's bounded empty-input drain.
+        // Prove DONE now instead of requiring another scroll past a final LF.
+        if (enoughRows(*scan, intent) && !needsCrLfLookahead(*scan, intent) &&
+            !(input.empty() && page->finalEnd() && drain)) {
           break;
         }
         if (!decoded.inputConsumed && !decoded.outputProduced && !drain) {
@@ -651,7 +733,8 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
     // that asks to skip that line continues bounded turns until it finds LF/EOF.
     const bool horizontalReady = !intent.config.wrap && scan->reached && !scan->skipRows &&
                                  scan->column >= intent.horizontal + static_cast<std::uint64_t>(contentWidth(intent));
-    result->continueWork = !scan->done && !scan->waiting && !enoughRows(*scan, intent) && !horizontalReady;
+    result->continueWork = !scan->done && !scan->waiting &&
+                           (!enoughRows(*scan, intent) || needsCrLfLookahead(*scan, intent)) && !horizontalReady;
     if (!result->continueWork) {
       result->frame = makeFrame(source, intent, *scan);
     }

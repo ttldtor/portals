@@ -81,6 +81,7 @@ public:
   std::atomic<std::size_t> metadataCalls{};
   std::atomic<bool> uiOperation{};
   bool unknown{};
+  bool finalUnknown{};
   bool emptyMore{};
   bool failRead{};
   bool providerWouldBlock{};
@@ -135,7 +136,7 @@ public:
     const auto offset = std::min<std::uint64_t>(command.offset, text.size());
     const auto count = std::min(destination.size(), text.size() - static_cast<std::size_t>(offset));
     std::memcpy(destination.data(), text.data() + offset, count);
-    return ByteReadResult{count, !unknown && offset + count == text.size()};
+    return ByteReadResult{count, (!unknown || finalUnknown) && offset + count == text.size()};
   }
 };
 
@@ -885,7 +886,7 @@ TEST_CASE("cold known EOF and beyond retain the actual non-LF tail row") {
   }
 }
 
-TEST_CASE("cold known final LF selects the empty final line at EOF and beyond") {
+TEST_CASE("cold known final LF shows content without inventing an empty display row") {
   constexpr std::uint64_t EXTENT = std::uint64_t{8} << 30;
   constexpr std::string_view TAIL = "TAIL-MARKER!\n";
   for (const auto anchor : {EXTENT, EXTENT + 1}) {
@@ -898,11 +899,13 @@ TEST_CASE("cold known final LF selects the empty final line at EOF and beyond") 
     f.settle(3);
     REQUIRE(f.frame());
     REQUIRE(f.frame()->rows.size() == 1);
-    CHECK(f.frame()->rows.front().bytes().empty());
+    CHECK(f.frame()->rows.front().bytes() == "xTAIL-MARKER!");
     CHECK(f.frame()->status.byteOffset == anchor);
-    CHECK(f.frame()->status.visibleByteOffset == EXTENT);
+    CHECK(f.frame()->status.visibleByteOffset < EXTENT);
     CHECK(f.frame()->status.anchorBeyondExtent == (anchor > EXTENT));
     CHECK(f.frame()->status.finalEnd);
+    CHECK(f.frame()->finalEndVisible);
+    CHECK(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
     CHECK(provider->bytesRead.load() <= 128 * 1024);
   }
 }
@@ -920,6 +923,8 @@ TEST_CASE("known empty source keeps an empty final line without a fabricated dec
     CHECK(f.frame()->status.visibleByteOffset == 0);
     CHECK(f.frame()->status.anchorBeyondExtent == (anchor > 0));
     CHECK(f.frame()->status.finalEnd);
+    CHECK(f.frame()->finalEndVisible);
+    CHECK(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
     CHECK(f.frame()->status.logicalLine == 1);
     CHECK(f.frame()->status.totalLines == 1);
   }
@@ -1096,5 +1101,640 @@ TEST_CASE("document paint rejects sink removal and preserves every prepared role
   CHECK(sink.captured.part("      1  ").foreground == RgbColor{4, 5, 6});
   CHECK(sink.captured.part(footer).foreground == RgbColor{7, 8, 9});
   CHECK(f.app->tree().read(f.node, [](const DocumentView &) {
+  }));
+}
+
+TEST_CASE("PRTLS-359 two wheel events before completion preserve six accepted rows") {
+  std::string rows;
+  for (unsigned row = 0; row < 40; ++row) {
+    rows += "row-" + std::to_string(row) + "\n";
+  }
+  auto provider = std::make_shared<Provider>();
+  provider->text = rows;
+  Fixture f(ui::document(provider));
+  take(f.app->tree().edit(f.node, [](DocumentView &widget) {
+    detail::ScrollWidgetAccess::state(widget).area.wheelStep = 3;
+  }));
+  f.settle(3);
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->viewport.height == 6);
+  REQUIRE(f.frame()->rows.front().bytes() == "row-0");
+  REQUIRE_FALSE(f.executor.job);
+  const auto before = f.executor.submissions;
+  const InputEvent wheel = MouseInputEvent{
+    .column = 2, .row = 2, .button = MouseButton::WHEEL_DOWN, .action = MouseAction::SCROLL, .wheelDelta = 1.0};
+  const auto inspected = take(f.app->tree().inspect(f.node));
+  REQUIRE(inspected.geometry.clip.contains({2, 2}));
+  unsigned accepted{};
+  if (take(f.scene->input(*f.app, wheel))) {
+    ++accepted;
+  }
+  f.pump();
+  REQUIRE(f.executor.job);
+  if (take(f.scene->input(*f.app, wheel))) {
+    ++accepted;
+  }
+  REQUIRE(accepted == 2);
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+  f.settle(5);
+  REQUIRE(f.frame());
+  const auto actual = std::string(f.frame()->rows.front().bytes());
+  const auto status = take(f.reference.status());
+  const auto sink = paint(f);
+  const auto displayed = std::any_of(sink.texts.begin(), sink.texts.end(), [](const PartSink::Text &text) {
+    return text.bytes == "row-6" && text.origin == CellPoint{1, 1};
+  });
+  std::printf("PRTLS-359 accepted=%u wheelDelta=1 wheelStep=3 viewportHeight=6 expectedMarker=row-6 actualMarker=%s "
+              "byteOffset=%llu submissions=%zu uiProviderIO=%d\n",
+              accepted, actual.c_str(), static_cast<unsigned long long>(status.byteOffset),
+              f.executor.submissions - before, static_cast<int>(provider->uiOperation.load()));
+  CHECK(actual == "row-6");
+  CHECK(status.byteOffset == 36);
+  CHECK(displayed);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("PRTLS-359 Viewer default wheel moves one screen row") {
+  Fixture f(source("row-0\nrow-1\nrow-2\nrow-3\nrow-4\nrow-5\nrow-6\nrow-7\nrow-8\nrow-9"));
+  f.settle(3);
+  double wheelStep{};
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    wheelStep = detail::ScrollWidgetAccess::state(widget).area.wheelStep;
+  }));
+  const InputEvent wheel = MouseInputEvent{
+    .column = 2, .row = 2, .button = MouseButton::WHEEL_DOWN, .action = MouseAction::SCROLL, .wheelDelta = 1.0};
+  REQUIRE(take(f.scene->input(*f.app, wheel)));
+  f.settle(3);
+  REQUIRE(f.frame());
+  const auto actual = std::string(f.frame()->rows.front().bytes());
+  std::printf("PRTLS-359 ViewerDefault expectedStep=1 actualStep=%.1f expectedMarker=row-1 actualMarker=%s\n",
+              wheelStep, actual.c_str());
+  CHECK(ScrollAreaOptions{}.wheelStep == 3);
+  CHECK(wheelStep == 1);
+  CHECK(actual == "row-1");
+}
+
+namespace {
+std::string scrollRows(unsigned count, std::string_view prefix = "row-") {
+  std::string rows;
+  for (unsigned row = 0; row < count; ++row) {
+    if (row) {
+      rows += "\n";
+    }
+    rows += std::string(prefix) + std::to_string(row);
+  }
+  return rows;
+}
+
+void wheel(Fixture &fixture, bool up = false, double magnitude = 1) {
+  const InputEvent event = MouseInputEvent{.column = 2,
+                                           .row = 1,
+                                           .button = up ? MouseButton::WHEEL_UP : MouseButton::WHEEL_DOWN,
+                                           .action = MouseAction::SCROLL,
+                                           .wheelDelta = magnitude};
+  REQUIRE(take(fixture.scene->input(*fixture.app, event)));
+}
+
+void checkTop(Fixture &fixture, std::string_view marker) {
+  const auto frame = fixture.frame();
+  REQUIRE(frame);
+  REQUIRE_FALSE(frame->rows.empty());
+  CHECK(frame->rows.front().bytes() == marker);
+  CHECK_FALSE(take(fixture.reference.status()).error);
+  const auto sink = paint(fixture);
+  CHECK(std::any_of(sink.texts.begin(), sink.texts.end(), [&](const PartSink::Text &text) {
+    return text.origin == CellPoint{1, 1} && text.bytes == marker;
+  }));
+}
+} // namespace
+
+TEST_CASE("pending wheel reversals and negative distance beyond one viewport are retained") {
+  const auto rows = scrollRows(50);
+  Fixture f(source(rows));
+  f.settle(3);
+  take(f.reference.seekByte(rows.find("row-20\n")));
+  f.settle(3);
+  checkTop(f, "row-20");
+
+  for (unsigned event = 0; event < 4; ++event) {
+    wheel(f, true, 3);
+  }
+  f.settle(8);
+  checkTop(f, "row-8");
+
+  const auto submissions = f.executor.submissions;
+  wheel(f, true, 3);
+  wheel(f, false, 3);
+  f.settle(2);
+  checkTop(f, "row-8");
+  CHECK(f.executor.submissions == submissions);
+
+  wheel(f, false, 3);
+  f.pump();
+  const auto job = f.executor.job;
+  REQUIRE(job);
+  wheel(f, true, 3);
+  f.pump();
+  CHECK_FALSE(job->stopToken().stop_requested());
+  f.executor.runOne();
+  f.settle(5);
+  checkTop(f, "row-8");
+}
+
+TEST_CASE("continuing relative input cannot starve the current viewer batch") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = scrollRows(80);
+  Fixture f(ui::document(provider));
+  f.settle(3);
+  wheel(f);
+  f.pump();
+  unsigned accepted = 1;
+  std::uint64_t previousAnchor{};
+
+  for (unsigned turn = 0; turn < 3; ++turn) {
+    const auto job = f.executor.job;
+    REQUIRE(job);
+    for (unsigned event = 0; event < 3; ++event) {
+      wheel(f);
+      ++accepted;
+      f.pump();
+      CHECK_FALSE(job->stopToken().stop_requested());
+    }
+    f.executor.runOne();
+    f.pump();
+    const auto anchor = take(f.reference.status()).byteOffset;
+    CHECK(anchor > previousAnchor);
+    previousAnchor = anchor;
+  }
+
+  f.settle(6);
+  CHECK(accepted == 10);
+  checkTop(f, "row-10");
+  const auto submissions = f.executor.submissions;
+  const auto reads = provider->reads.load();
+  f.settle(3);
+  CHECK(f.executor.submissions == submissions);
+  CHECK(provider->reads.load() == reads);
+  CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("absolute viewer commands replace old queued rows and rebase subsequent input") {
+  const auto rows = scrollRows(40);
+  Fixture f(source(rows));
+  f.settle(3);
+  take(f.reference.seekByte(rows.find("row-20\n")));
+  f.settle(3);
+  wheel(f, false, 5);
+  f.pump();
+  REQUIRE(f.executor.job);
+  wheel(f, false, 3);
+
+  std::string expected;
+  SUBCASE("Home then relative input") {
+    REQUIRE(f.input(InputKey::HOME));
+    wheel(f);
+    expected = "row-1";
+  }
+  SUBCASE("absolute byte seek then relative input") {
+    take(f.reference.seekByte(rows.find("row-5\n")));
+    wheel(f);
+    expected = "row-6";
+  }
+  SUBCASE("End then relative input") {
+    REQUIRE(f.input(InputKey::END));
+    wheel(f, true);
+    expected = "row-33";
+  }
+  SUBCASE("source replacement then relative input") {
+    take(f.reference.setModel(source(scrollRows(20, "new-"))));
+    wheel(f);
+    expected = "new-1";
+  }
+
+  f.pump();
+  f.executor.runOne();
+  f.settle(8);
+  checkTop(f, expected);
+}
+
+TEST_CASE("long viewer overshoot reaches the real partial EOF row without blank error or busy loop") {
+  const auto rows = scrollRows(230);
+  Fixture f(source(rows));
+  unsigned height{};
+  SUBCASE("ordinary six-row viewport") {
+    height = 6;
+  }
+  SUBCASE("one-row viewport") {
+    height = 1;
+    f.size.height = 3;
+  }
+  f.settle(3);
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->viewport.height == static_cast<std::int32_t>(height));
+  REQUIRE_FALSE(f.frame()->status.finalEnd);
+  wheel(f, false, 1000);
+  f.settle(260);
+  checkTop(f, "row-" + std::to_string(230 - height));
+  CHECK(take(f.reference.status()).byteOffset == rows.find("row-" + std::to_string(230 - height)));
+  CHECK(take(f.reference.status()).finalEnd);
+  CHECK_FALSE(take(f.reference.status()).preparing);
+
+  wheel(f, false, 1000);
+  f.settle(2);
+  checkTop(f, "row-" + std::to_string(230 - height));
+  const auto submissions = f.executor.submissions;
+  wheel(f, true, 1000);
+  f.settle(260);
+  checkTop(f, "row-0");
+  wheel(f, true, 1000);
+  f.settle(2);
+  checkTop(f, "row-0");
+  CHECK(f.executor.submissions > submissions);
+  const auto idle = f.executor.submissions;
+  f.settle(2);
+  CHECK(f.executor.submissions == idle);
+  CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+}
+
+TEST_CASE("resize restores an interrupted viewer batch without duplicating its accepted rows") {
+  Fixture f(source(scrollRows(50)));
+  f.settle(3);
+  wheel(f, false, 3);
+  f.pump();
+  const auto job = f.executor.job;
+  REQUIRE(job);
+  wheel(f, false, 4);
+  f.size = {18, 6};
+  f.pump();
+  CHECK(job->stopToken().stop_requested());
+  f.executor.runOne();
+  f.settle(10);
+  checkTop(f, "row-7");
+  REQUIRE(f.frame());
+  CHECK(f.frame()->viewport == CellSize{16, 4});
+}
+
+TEST_CASE("explicit relative input retries a stopped provider without idle polling") {
+  bool ioError{};
+  SUBCASE("provider WOULD_BLOCK") {
+  }
+  SUBCASE("provider IO_ERROR") {
+    ioError = true;
+  }
+
+  auto provider = std::make_shared<Provider>();
+  provider->text = scrollRows(20);
+  provider->providerWouldBlock = !ioError;
+  provider->failRead = ioError;
+  Fixture f(ui::document(provider));
+  f.settle(3);
+  if (ioError) {
+    REQUIRE(take(f.reference.status()).error);
+  } else {
+    REQUIRE(take(f.reference.status()).waiting);
+  }
+  const auto reads = provider->reads.load();
+  f.settle(2);
+  CHECK(provider->reads.load() == reads);
+
+  provider->providerWouldBlock = false;
+  provider->failRead = false;
+  wheel(f);
+  f.settle(5);
+  checkTop(f, "row-1");
+  CHECK_FALSE(take(f.reference.status()).waiting);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("overflowed configured key distance leaves accepted viewer intent unchanged") {
+  Fixture f(source(scrollRows(30)));
+  f.settle(3);
+  const auto submissions = f.executor.submissions;
+
+  SUBCASE("pending counter overflow") {
+    take(f.app->tree().edit(f.node, [](DocumentView &widget) {
+      detail::ScrollWidgetAccess::state(widget).area.keyStep = std::numeric_limits<std::int64_t>::max();
+    }));
+    REQUIRE(f.input(InputKey::DOWN));
+    const auto overflow = f.scene->input(*f.app, KeyEvent{.key = InputKey::DOWN});
+    REQUIRE_FALSE(overflow);
+    CHECK(overflow.error() == TreeError::INVALID_ARGUMENT);
+    REQUIRE(f.input(InputKey::UP));
+    f.settle(2);
+    checkTop(f, "row-0");
+    CHECK(f.executor.submissions == submissions);
+  }
+  SUBCASE("in-flight plus pending overflow") {
+    REQUIRE(f.input(InputKey::DOWN));
+    f.pump();
+    const auto job = f.executor.job;
+    REQUIRE(job);
+    take(f.app->tree().edit(f.node, [](DocumentView &widget) {
+      detail::ScrollWidgetAccess::state(widget).area.keyStep = std::numeric_limits<std::int64_t>::max();
+    }));
+    const auto overflow = f.scene->input(*f.app, KeyEvent{.key = InputKey::DOWN});
+    REQUIRE_FALSE(overflow);
+    CHECK(overflow.error() == TreeError::INVALID_ARGUMENT);
+    CHECK_FALSE(job->stopToken().stop_requested());
+    f.executor.runOne();
+    f.settle(3);
+    checkTop(f, "row-1");
+    CHECK(f.executor.submissions == submissions + 1);
+  }
+}
+
+TEST_CASE("waiting relative viewer retry does not resume a scan with another row delta") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = scrollRows(17);
+  Fixture f(ui::document(provider));
+  f.settle(3);
+  checkTop(f, "row-0");
+  REQUIRE(f.frame()->viewport.height == 6);
+  REQUIRE_FALSE(f.frame()->status.finalEnd);
+
+  provider->providerWouldBlock = true;
+  wheel(f, false, 3);
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+  f.pump();
+  REQUIRE(take(f.reference.status()).waiting);
+  std::int64_t waitingDelta{};
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    waitingDelta = detail::DocumentViewAccess::state(widget).rowDelta;
+  }));
+  REQUIRE(waitingDelta == 3);
+
+  provider->providerWouldBlock = false;
+  wheel(f);
+  f.settle(6);
+  REQUIRE(f.frame());
+  REQUIRE_FALSE(f.frame()->rows.empty());
+  const auto actual = std::string(f.frame()->rows.front().bytes());
+  const auto status = take(f.reference.status());
+  std::printf(
+    "PRTLS-359 F1 waitingDelta=%lld retryDelta=1 expectedTop=row-4 actualTop=%s byteOffset=%llu finalEnd=%d\n",
+    static_cast<long long>(waitingDelta), actual.c_str(), static_cast<unsigned long long>(status.byteOffset),
+    static_cast<int>(status.finalEnd));
+  checkTop(f, "row-4");
+  CHECK(status.byteOffset == provider->text.find("row-4\n"));
+  CHECK_FALSE(status.waiting);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("proven viewer boundaries cannot accrue impossible wheel debt") {
+  Fixture f(source(scrollRows(40)));
+  f.settle(3);
+  std::string expected;
+  bool upFirst{};
+  SUBCASE("committed BOF clips UP before a later DOWN") {
+    checkTop(f, "row-0");
+    upFirst = true;
+    expected = "row-3";
+  }
+  SUBCASE("committed final row clips DOWN before a later UP") {
+    wheel(f, false, 1000);
+    f.settle(12);
+    checkTop(f, "row-34");
+    REQUIRE(f.frame()->status.finalEnd);
+    expected = "row-31";
+  }
+
+  wheel(f, upFirst, 3);
+  wheel(f, !upFirst, 3);
+  f.settle(5);
+  REQUIRE(f.frame());
+  const auto actual = std::string(f.frame()->rows.front().bytes());
+  std::printf("PRTLS-359 knownBoundary upFirst=%d expectedTop=%s actualTop=%s\n", static_cast<int>(upFirst),
+              expected.c_str(), actual.c_str());
+  checkTop(f, expected);
+}
+
+TEST_CASE("visible final EOF projects both text position and scrollbar end without changing byte anchor") {
+  Fixture f(source(scrollRows(40)));
+  f.settle(3);
+  REQUIRE(f.input(InputKey::END));
+  f.settle(4);
+  const auto status = take(f.reference.status());
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->footer);
+  REQUIRE(status.finalEnd);
+  REQUIRE(status.byteExtent);
+  CHECK(status.byteOffset < *status.byteExtent);
+  CHECK(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
+  CHECK(f.frame()->footer->bytes().find("byte ") == std::string_view::npos);
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    const auto &scroll = detail::ScrollWidgetAccess::state(widget);
+    const auto position = take(scroll.controller->snapshot());
+    CHECK(position.vertical.offset.raster == scrollRange(position.vertical.metrics).maximum);
+  }));
+  CHECK(take(f.reference.status()).byteOffset == status.byteOffset);
+}
+
+TEST_CASE("byte approximation never rounds to100 before the final rows are visible") {
+  auto provider = std::make_shared<Provider>();
+  provider->syntheticExtent = (std::uint64_t{1} << 63) + 101;
+  Fixture f(ui::document(provider));
+  f.settle(3);
+  take(f.reference.seekByte(*provider->syntheticExtent - 100));
+  f.settle(4);
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->footer);
+  REQUIRE_FALSE(f.frame()->status.finalEnd);
+  CHECK(f.frame()->footer->bytes().find("100.0%") == std::string_view::npos);
+  CHECK(f.frame()->footer->bytes().find("99.9%") != std::string_view::npos);
+  CHECK(f.frame()->footer->bytes().find("line ") == std::string_view::npos);
+  CHECK(take(f.reference.status()).byteOffset == *provider->syntheticExtent - 100);
+}
+
+TEST_CASE("line-number no-op and rapid presentation reflow retain accepted relative navigation") {
+  Fixture f(source(scrollRows(40)));
+  f.settle(3);
+  SUBCASE("same configuration is an exact no-op") {
+    const auto serial = navigationSerial(f);
+    const auto frame = f.frame();
+    const auto submitted = f.executor.submissions;
+    take(f.app->tree().consumeFrameRequest());
+    take(setDocumentLineNumbers(*f.scene, f.node, false));
+    CHECK(navigationSerial(f) == serial);
+    CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+    f.settle(2);
+    CHECK(f.frame() == frame);
+    CHECK(f.executor.submissions == submitted);
+  }
+  SUBCASE("toggle and toggle back while a batch is held") {
+    wheel(f, false, 3);
+    f.pump();
+    REQUIRE(f.executor.job);
+    wheel(f, false, 4);
+    take(setDocumentLineNumbers(*f.scene, f.node, true));
+    take(setDocumentLineNumbers(*f.scene, f.node, false));
+    take(setDocumentWrap(*f.scene, f.node, false));
+    f.pump();
+    f.executor.runOne();
+    f.settle(8);
+    checkTop(f, "row-7");
+  }
+}
+
+TEST_CASE("Unicode final cluster and LF in a one-row viewport require real displayed EOF proof") {
+  std::string text = "abcdefghij"
+                     "e\xCC\x81\n";
+  DocumentViewConfig config;
+  std::uint64_t expectedAnchor = 10;
+  SUBCASE("UTF-8 combining cluster") {
+  }
+  SUBCASE("UTF-16LE BOM and combining cluster") {
+    text.assign("\xFF\xFE", 2);
+    for (const char16_t unit : std::u16string(u"abcdefghije\u0301\n")) {
+      text.push_back(static_cast<char>(unit & 0xff));
+      text.push_back(static_cast<char>(unit >> 8));
+    }
+    config.decoder.explicitEncoding = DocumentEncoding::UTF16LE;
+    expectedAnchor = 22;
+  }
+
+  Fixture f(source(std::move(text)), config);
+  f.size = {12, 3};
+  f.settle(3);
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->viewport == CellSize{10, 1});
+  CHECK(f.frame()->rows.front().bytes() == "abcdefghij");
+  CHECK_FALSE(f.frame()->finalEndVisible);
+  CHECK(f.frame()->footer->bytes().find("100.0%") == std::string_view::npos);
+
+  wheel(f);
+  f.settle(3);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows.front().bytes() == "e\xCC\x81");
+  CHECK(f.frame()->finalEndVisible);
+  CHECK(f.frame()->status.finalEnd);
+  CHECK(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
+  const auto anchor = take(f.reference.status()).byteOffset;
+  REQUIRE(f.input(InputKey::HOME));
+  f.pump();
+  CHECK(take(f.reference.status()).byteOffset == 0);
+  f.settle(3);
+  CHECK_FALSE(f.frame()->finalEndVisible);
+  CHECK(f.frame()->footer->bytes().find("100.0%") == std::string_view::npos);
+  CHECK(anchor == expectedAnchor);
+}
+
+TEST_CASE("unknown extent final read proof differs from nonfinal waiting") {
+  auto provider = std::make_shared<Provider>();
+  provider->unknown = true;
+  provider->text = "short";
+  SUBCASE("explicit final read proves EOF without an invented denominator") {
+    provider->finalUnknown = true;
+    Fixture f(ui::document(provider));
+    f.settle(3);
+    REQUIRE(f.frame());
+    CHECK_FALSE(f.frame()->status.byteExtent);
+    CHECK(f.frame()->finalEndVisible);
+    CHECK(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
+    CHECK_FALSE(provider->uiOperation.load());
+  }
+  SUBCASE("a stopped provider hides a retained old EOF caption") {
+    provider->finalUnknown = true;
+    Fixture f(ui::document(provider));
+    f.settle(3);
+    REQUIRE(f.frame());
+    REQUIRE(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
+    provider->providerWouldBlock = true;
+    take(f.reference.refresh());
+    f.pump();
+    f.executor.runOne();
+    f.pump();
+    REQUIRE(take(f.reference.status()).waiting);
+    REQUIRE(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
+    const auto sink = paint(f);
+    CHECK(std::none_of(sink.texts.begin(), sink.texts.end(), [](const PartSink::Text &text) {
+      return text.bytes.find("100.0%") != std::string::npos;
+    }));
+    CHECK_FALSE(take(f.reference.status()).byteExtent);
+  }
+  SUBCASE("empty nonfinal read does not prove EOF") {
+    provider->emptyMore = true;
+    Fixture f(ui::document(provider));
+    f.settle(3);
+    REQUIRE(f.frame());
+    CHECK(f.frame()->status.waiting);
+    CHECK_FALSE(f.frame()->finalEndVisible);
+    CHECK(f.frame()->footer->bytes().find("100.0%") == std::string_view::npos);
+    CHECK(f.frame()->footer->bytes().find("progress unknown") != std::string_view::npos);
+  }
+}
+
+TEST_CASE("hot gutter reflow preserves the requested original byte anchor across wrapping") {
+  Fixture f(source(std::string(100, 'x')));
+  f.settle(3);
+  take(f.reference.seekByte(17));
+  f.settle(3);
+  REQUIRE(take(f.reference.status()).byteOffset == 17);
+  take(setDocumentLineNumbers(*f.scene, f.node, true));
+  f.settle(3);
+  CHECK(take(f.reference.status()).byteOffset == 17);
+  REQUIRE(f.frame()->gutters);
+  take(setDocumentWrap(*f.scene, f.node, false));
+  f.settle(3);
+  CHECK(take(f.reference.status()).byteOffset == 17);
+  take(setDocumentLineNumbers(*f.scene, f.node, false));
+  f.settle(3);
+  CHECK_FALSE(f.frame()->gutters);
+  CHECK(take(f.reference.status()).byteOffset == 17);
+}
+
+TEST_CASE("a tall reading viewport stops at its last full page for wheel and burst input") {
+  Fixture f(source(scrollRows(120)));
+  f.size = {40, 50};
+  f.settle(4);
+  REQUIRE(f.frame()->viewport.height == 48);
+  wheel(f, false, 71);
+  f.settle(12);
+  checkTop(f, "row-71");
+  CHECK_FALSE(f.frame()->finalEndVisible);
+  wheel(f);
+  f.settle(4);
+  checkTop(f, "row-72");
+  REQUIRE(f.frame()->rows.size() == 48);
+  CHECK(f.frame()->rows.back().bytes() == "row-119");
+  CHECK(f.frame()->finalEndVisible);
+  const auto submissions = f.executor.submissions;
+  wheel(f);
+  wheel(f, false, 1000);
+  f.settle(4);
+  checkTop(f, "row-72");
+  CHECK(f.executor.submissions == submissions);
+  wheel(f, true);
+  f.settle(4);
+  checkTop(f, "row-71");
+}
+
+TEST_CASE("the last wheel step does not switch scrollbar coordinate systems") {
+  Fixture f(source(scrollRows(120)));
+  f.size = {40, 50};
+  f.settle(4);
+  wheel(f, false, 71);
+  f.settle(12);
+  REQUIRE(f.frame());
+  REQUIRE_FALSE(f.frame()->finalEndVisible);
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    const auto &scroll = detail::ScrollWidgetAccess::state(widget);
+    const auto value = take(scroll.controller->snapshot());
+    const auto maximum = scrollRange(value.vertical.metrics).maximum;
+    REQUIRE(maximum > 0);
+    CHECK(value.vertical.offset.raster < maximum);
+    CHECK(value.vertical.offset.raster * 100 > maximum * 95);
+  }));
+  wheel(f);
+  f.settle(4);
+  REQUIRE(f.frame()->finalEndVisible);
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    const auto &scroll = detail::ScrollWidgetAccess::state(widget);
+    const auto value = take(scroll.controller->snapshot());
+    CHECK(value.vertical.offset.raster == scrollRange(value.vertical.metrics).maximum);
   }));
 }

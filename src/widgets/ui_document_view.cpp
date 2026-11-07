@@ -76,6 +76,17 @@ namespace {
 constexpr std::size_t VIEW_METADATA_BYTES = 64 * 1024;
 constexpr std::size_t BOOKMARK_COUNT = 16;
 
+std::optional<std::int64_t> checkedRowSum(std::int64_t first, std::int64_t second) noexcept {
+  constexpr auto MIN = std::numeric_limits<std::int64_t>::min();
+  constexpr auto MAX = std::numeric_limits<std::int64_t>::max();
+
+  if ((second > 0 && first > MAX - second) || (second < 0 && first < MIN - second)) {
+    return std::nullopt;
+  }
+
+  return first + second;
+}
+
 ManagedError documentFailure(Node<DocumentView> node, DocumentError error) {
   const auto bridge = error.code == SourceError::NO_MEMORY      ? TreeError::NO_MEMORY
                       : error.code == SourceError::WRONG_THREAD ? TreeError::WRONG_THREAD
@@ -270,11 +281,15 @@ public:
     }
     bool focused{};
     bool enabled{};
+    bool arranged{};
+    CellSize inputViewport;
     ScrollAreaOptions navigation;
     auto read = app_.tree().read(node_, [&](const DocumentView &widget) {
       const auto &scroll = ScrollWidgetAccess::state(widget);
       focused = scroll.focused;
       enabled = scroll.enabled;
+      arranged = scroll.arranged;
+      inputViewport = scroll.geometry.viewport;
       navigation = scroll.area;
     });
     if (!read) {
@@ -288,6 +303,7 @@ public:
     const auto *mouse = std::get_if<MouseInputEvent>(&event);
     std::int64_t delta{};
     bool recognized{};
+    bool absolute{};
     if (key && focused && key->action != KeyAction::RELEASE && !key->modifiers.alt && !key->modifiers.super &&
         !key->modifiers.shift && (!key->modifiers.control || key->key == InputKey::HOME || key->key == InputKey::END)) {
       const auto height = static_cast<std::uint64_t>(viewport_.height);
@@ -309,12 +325,14 @@ public:
         delta = page;
         break;
       case InputKey::HOME:
+        absolute = true;
         state->anchor = 0;
         state->rowDelta = 0;
         state->tail = false;
         recognized = true;
         break;
       case InputKey::END:
+        absolute = true;
         state->rowDelta = 0;
         state->tail = true;
         recognized = true;
@@ -358,21 +376,74 @@ public:
     }
 
     if (delta) {
-      if (delta > 0 && state->frame && static_cast<std::uint64_t>(delta) < state->frame->anchors.size()) {
-        state->anchor = state->frame->anchors[static_cast<std::size_t>(delta)];
-        state->rowDelta = 0;
-      } else {
-        state->rowDelta = delta;
+      const bool sameTarget = navigationSerial_ == state->serial;
+      const auto pending = checkedRowSum(sameTarget ? pendingRows_ : 0, delta);
+      const auto outstanding = pending ? checkedRowSum(*pending, sameTarget ? inFlightRows_ : 0) : std::nullopt;
+
+      if (!outstanding) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
-      state->tail = false;
-      recognized = true;
+
+      auto bounded = *outstanding;
+      const auto &frame = state->frame;
+      const bool committedFrame = sameTarget && arranged && frame && !state->refresh && state->serial == serial_ &&
+                                  (!commandPending_ || inFlightRows_) && frame->viewport == inputViewport &&
+                                  frame->status.byteOffset == state->anchor && !frame->anchors.empty() &&
+                                  frame->anchors.front() == state->anchor &&
+                                  frame->status.revision.source == state->source->stamp() &&
+                                  (!scan_ || scan_->metadata.revision == frame->status.revision);
+
+      if (committedFrame) {
+        // Clamp the outstanding target, including the active batch, only against
+        // this exact committed frame. Absolute/geometry changes cannot borrow it.
+        if (state->anchor == 0) {
+          bounded = std::max<std::int64_t>(bounded, 0);
+        }
+        if (frame->finalEndVisible) {
+          bounded = std::min<std::int64_t>(bounded, 0);
+        }
+      }
+
+      const auto queued = checkedRowSum(bounded, sameTarget ? -inFlightRows_ : 0);
+      if (!queued) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
+      }
+
+      if (!sameTarget) {
+        clearRelative(state->serial);
+        state->rowDelta = 0;
+      }
+
+      pendingRows_ = *queued;
+      if (state->status.waiting || state->status.error) {
+        // Explicit input may retry a stopped provider; idle preparation may not.
+        pendingRows_ = bounded;
+        inFlightRows_ = 0;
+        state->rowDelta = 0;
+        state->refresh = true;
+        state->status.preparing = true;
+      } else if (!commandPending_ && !state->refresh && state->serial == serial_) {
+        state->status.preparing = pendingRows_ != 0;
+      }
+      (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
+      return true;
     }
+
     if (!recognized) {
       return false;
     }
+
+    if (absolute || navigationSerial_ != state->serial) {
+      clearRelative(state->serial);
+    } else {
+      restoreRelative();
+    }
+
+    state->rowDelta = 0;
     state->refresh = true;
     state->status.preparing = true;
     ++state->serial;
+    navigationSerial_ = state->serial;
     (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
     return true;
   }
@@ -451,12 +522,68 @@ public:
     state->status = {};
     state->refresh = true;
     ++state->serial;
+    clearRelative(state->serial);
     credit_ = std::move(*reserved);
     (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
     return {};
   }
 
+  void presentationReflow(std::uint64_t previousSerial, std::uint64_t nextSerial) noexcept {
+    if (navigationSerial_ != previousSerial) {
+      clearRelative(previousSerial);
+    } else {
+      restoreRelative();
+    }
+    navigationSerial_ = nextSerial;
+  }
+
 private:
+  void clearRelative(std::uint64_t serial) noexcept {
+    pendingRows_ = 0;
+    inFlightRows_ = 0;
+    navigationSerial_ = serial;
+  }
+
+  void restoreRelative() noexcept {
+    // Input checked pending + in-flight together before accepting each event.
+    pendingRows_ += inFlightRows_;
+    inFlightRows_ = 0;
+  }
+
+  void beginRelative(DocumentViewState &state) {
+    if (commandPending_ || busy_ || continuation_ || capacityBlocked_ || state.status.error || !pendingRows_ ||
+        !state.frame) {
+      return;
+    }
+
+    if (pendingRows_ < 0 && state.anchor == 0) {
+      pendingRows_ = 0;
+    } else if (pendingRows_ > 0 && state.frame->finalEndVisible) {
+      pendingRows_ = 0;
+    }
+
+    if (!pendingRows_) {
+      state.status.preparing = false;
+      return;
+    }
+
+    // Backward preparation retains at most one viewport of preceding rows.
+    // Drain rather than enlarging that retained window with the event count.
+    const auto limit = static_cast<std::int64_t>(std::max(1, viewport_.height - 1));
+    const auto batch = std::clamp(pendingRows_, -limit, limit);
+    pendingRows_ -= batch;
+    inFlightRows_ = batch;
+    state.rowDelta = batch;
+    state.tail = false;
+    state.status.preparing = true;
+    ++state.serial;
+    navigationSerial_ = state.serial;
+    serial_ = state.serial;
+    supersede();
+    intent_ = {state.config, state.width, viewport_, state.anchor, state.horizontal, batch, false};
+    commandPending_ = true;
+  }
+
   void supersede() noexcept {
     ++generation_;
     if (latest_) {
@@ -465,6 +592,7 @@ private:
     busy_ = false;
     completion_.reset();
     continuation_ = false;
+    commandPending_ = false;
     capacity_.disarm();
     capacityBlocked_ = false;
     waitingDemand_ = {};
@@ -493,6 +621,11 @@ private:
       cancel();
       return;
     }
+    if (navigationSerial_ != state->serial) {
+      clearRelative(state->serial);
+      state->rowDelta = 0;
+    }
+
     const auto &area = *layout->scrollArea;
     bool visible{};
     if (layout->visible && layout->geometry.valid) {
@@ -524,6 +657,8 @@ private:
     visible = visible && viewport.width > 0 && viewport.height > 0;
     if (!visible) {
       if (visible_ || busy_) {
+        restoreRelative();
+        state->rowDelta = 0;
         supersede();
         state->refresh = true;
       }
@@ -549,13 +684,24 @@ private:
     const auto extent = state->frame ? state->frame->status.byteExtent : std::nullopt;
     const bool byteCommand = scrollSerial != scrollSerial_ && extent && scrollMaximum;
     if (byteCommand) {
-      state->anchor = scrollMultiplyDivide(std::min(scrollOffset, scrollMaximum), *extent, scrollMaximum).quotient;
+      const auto range = documentScrollByteRange(*state->frame);
+      state->anchor = scrollOffset >= scrollMaximum
+                        ? *extent
+                        : scrollMultiplyDivide(std::min(scrollOffset, scrollMaximum), range, scrollMaximum).quotient;
       state->rowDelta = 0;
       state->tail = false;
       ++state->serial;
+      clearRelative(state->serial);
       state->refresh = true;
     } else if (extent && *extent && scrollMaximum) {
-      const auto offset = scrollMultiplyDivide(std::min(state->anchor, *extent), scrollMaximum, *extent).quotient;
+      const auto &frame = state->frame;
+      const bool visibleEnd = frame && frame->finalEndVisible && !state->status.waiting && !state->status.error &&
+                              frame->status.byteOffset == state->anchor && frame->viewport == viewport &&
+                              frame->status.revision.source == state->source->stamp();
+      const auto range = documentScrollByteRange(*frame);
+      const auto offset = visibleEnd ? scrollMaximum
+                          : range ? scrollMultiplyDivide(std::min(state->anchor, range), scrollMaximum, range).quotient
+                                  : 0;
       if (offset != scrollOffset) {
         if (!synchronizeBar(offset)) {
           return;
@@ -565,6 +711,11 @@ private:
     scrollSerial_ = scrollSerial;
     if (viewport.width != viewport_.width || viewport.height != viewport_.height || state->serial != serial_ ||
         state->refresh) {
+      if (inFlightRows_) {
+        restoreRelative();
+        state->rowDelta = 0;
+      }
+
       const bool resumeWaiting = state->status.waiting && scan_ && state->anchor == intent_.anchor &&
                                  state->horizontal == intent_.horizontal && state->rowDelta == intent_.rowDelta &&
                                  state->tail == intent_.tail;
@@ -582,6 +733,7 @@ private:
       intent_ = {state->config, state->width, viewport, state->anchor, state->horizontal, state->rowDelta, state->tail};
       intent_.seed = std::exchange(restored_, {});
       intent_.resume = resumeWaiting;
+      commandPending_ = true;
     }
 
     if (completion_) {
@@ -607,6 +759,14 @@ private:
       continuation_ = completed->continueWork;
       state->status.preparing = completed->continueWork;
       if (completed->frame) {
+        if (inFlightRows_ && completed->frame->anchors.empty()) {
+          fail({SourceError::NO_PROGRESS, {}, {}});
+          return;
+        }
+
+        const auto previousAnchor = state->anchor;
+        const auto batch = std::exchange(inFlightRows_, 0);
+        commandPending_ = false;
         state->frame = completed->frame;
         state->status = completed->frame->status;
         state->rowDelta = 0;
@@ -614,9 +774,23 @@ private:
           state->anchor = state->frame->anchors.front();
           state->status.byteOffset = state->anchor;
         }
+
+        if (batch && state->anchor == previousAnchor) {
+          const bool knownBoundary = batch < 0 ? state->anchor == 0 : state->frame->finalEndVisible;
+          if (!knownBoundary) {
+            inFlightRows_ = batch;
+            fail({SourceError::NO_PROGRESS, {}, {}});
+            return;
+          }
+          if ((batch < 0 && pendingRows_ < 0) || (batch > 0 && pendingRows_ > 0)) {
+            pendingRows_ = 0;
+          }
+        }
+
         (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
       }
     }
+    beginRelative(*state);
     if (busy_ || capacityBlocked_ || state->status.error || (!state->status.preparing && !continuation_)) {
       return;
     }
@@ -785,6 +959,10 @@ private:
   std::uint64_t generation_{};
   std::uint64_t serial_{};
   std::uint64_t scrollSerial_{};
+  std::uint64_t navigationSerial_{};
+  std::int64_t pendingRows_{};
+  std::int64_t inFlightRows_{};
+  bool commandPending_{};
   bool visible_{};
   bool busy_{};
   bool continuation_{};
@@ -955,15 +1133,30 @@ namespace {
 template <class Change>
 std::expected<void, ManagedError> configureDocument(ManagedScene &scene, Node<DocumentView> node, Change change) {
   auto &tree = ui::detail::SceneAccess::application(scene).tree();
+  bool changed{};
   auto edited = tree.edit(node, [&](DocumentView &widget) {
     auto &state = detail::DocumentViewAccess::state(widget);
-    change(state.config);
+    changed = change(state.config);
+    if (!changed) {
+      return;
+    }
+
+    const auto previousSerial = state.serial;
     state.refresh = true;
+    state.rowDelta = 0;
     ++state.serial;
+    if (state.activity) {
+      std::static_pointer_cast<detail::DocumentActivity>(state.activity)
+        ->presentationReflow(previousSerial, state.serial);
+    }
   });
   if (!edited) {
     return std::unexpected(ui::detail::error(node, edited.error()));
   }
+  if (!changed) {
+    return {};
+  }
+
   auto invalidated = tree.invalidate(node, Invalidation::LAYOUT);
   return invalidated ? std::expected<void, ManagedError>{}
                      : std::unexpected(ui::detail::error(node, invalidated.error()));
@@ -972,13 +1165,21 @@ std::expected<void, ManagedError> configureDocument(ManagedScene &scene, Node<Do
 
 std::expected<void, ManagedError> setDocumentLineNumbers(ManagedScene &scene, Node<DocumentView> node, bool enabled) {
   return configureDocument(scene, node, [enabled](DocumentViewConfig &config) {
+    if (config.lineNumbers == enabled) {
+      return false;
+    }
     config.lineNumbers = enabled;
+    return true;
   });
 }
 
 std::expected<void, ManagedError> setDocumentWrap(ManagedScene &scene, Node<DocumentView> node, bool enabled) {
   return configureDocument(scene, node, [enabled](DocumentViewConfig &config) {
+    if (config.wrap == enabled) {
+      return false;
+    }
     config.wrap = enabled;
+    return true;
   });
 }
 
@@ -988,7 +1189,11 @@ std::expected<void, ManagedError> setDocumentEncoding(ManagedScene &scene, Node<
     return std::unexpected(ui::detail::error(node, TreeError::INVALID_ARGUMENT));
   }
   return configureDocument(scene, node, [encoding](DocumentViewConfig &config) {
+    if (config.decoder.explicitEncoding == encoding) {
+      return false;
+    }
     config.decoder.explicitEncoding = encoding;
+    return true;
   });
 }
 } // namespace portals
@@ -1001,6 +1206,31 @@ std::expected<void, ManagedError> setDocumentModel(const std::shared_ptr<RefTarg
     return std::unexpected(scene.error());
   }
   auto result = portals::setDocumentModel(**scene, node, source);
+  if (!result) {
+    result.error().registrationOrigin = origin;
+  }
+  return result;
+}
+
+std::expected<void, ManagedError> documentLineNumbers(const std::shared_ptr<RefTarget> &target,
+                                                      std::shared_ptr<const Node<DocumentView>> node,
+                                                      std::optional<bool> enabled, std::source_location origin) {
+  auto scene = eventScene(target);
+  if (!scene) {
+    return std::unexpected(scene.error());
+  }
+  if (!node) {
+    return std::unexpected(error({}, TreeError::INVALID_ARGUMENT));
+  }
+
+  auto result = portals::configureDocument(**scene, *node, [enabled](DocumentViewConfig &config) {
+    const auto next = enabled.value_or(!config.lineNumbers);
+    if (next == config.lineNumbers) {
+      return false;
+    }
+    config.lineNumbers = next;
+    return true;
+  });
   if (!result) {
     result.error().registrationOrigin = origin;
   }

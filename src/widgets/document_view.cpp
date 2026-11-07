@@ -6,6 +6,7 @@
 namespace portals::detail {
 ScrollAreaOptions documentScrollOptions() {
   ScrollAreaOptions options;
+  options.wheelStep = 1;
   options.horizontal = ScrollBarPolicy::NEVER;
   options.vertical = ScrollBarPolicy::AUTO;
   options.placement = ScrollPlacement::ON_FRAME;
@@ -86,7 +87,9 @@ std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
   const auto position = roleStyle("position");
   const auto *options = detail::scrollFrameOptions(scroll);
   std::optional<CellRect> footer;
-  if (frame && frame->footer && options && options->sides.bottom && scroll.allocation.width > 2 &&
+  const bool currentPosition =
+    frame && frame->footer && !document_->status.error && (!document_->status.waiting || frame->status.waiting);
+  if (currentPosition && options && options->sides.bottom && scroll.allocation.width > 2 &&
       scroll.allocation.height > 1) {
     auto area = CellRect::from({1, scroll.allocation.height - 1}, {scroll.allocation.width - 2, 1});
     if (area) {

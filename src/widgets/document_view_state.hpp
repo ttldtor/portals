@@ -39,8 +39,9 @@ inline std::expected<std::size_t, SourceError> documentPreparationBytes(CellSize
     return true;
   };
   constexpr auto GUTTER_ROW_BYTES = sizeof(GraphemeText) + DOCUMENT_GUTTER_CELLS * DOCUMENT_PREPARED_CELL_BYTES;
+  // Original-byte endpoints live in the retained scan and its frame copy.
   if (!include(config.maxFrameBytes, 4) || !include(width * height, DOCUMENT_PREPARED_CELL_BYTES) ||
-      (config.lineNumbers && !include(height, GUTTER_ROW_BYTES))) {
+      !include(height, sizeof(std::uint64_t) * 2) || (config.lineNumbers && !include(height, GUTTER_ROW_BYTES))) {
     return std::unexpected(SourceError::PAGE_TOO_LARGE);
   }
   return bytes;
@@ -65,6 +66,7 @@ struct DocumentPreparedRow {
   std::uint64_t offset{};
   std::uint64_t line{1};
   std::string bytes = std::string(0, '\0');
+  std::uint64_t end{};
 };
 
 // Only a worker mutates a new copy. Published snapshots are never modified again.
@@ -92,6 +94,7 @@ struct DocumentScan {
   std::uint64_t line{1};
   std::uint64_t column{};
   std::uint64_t rowOffset{};
+  std::uint64_t rowEnd{};
   std::uint64_t clusterOffset{};
   std::uint64_t clusterEnd{};
   DocumentLayoutCheckpoint clusterCheckpoint;
@@ -109,6 +112,7 @@ struct DocumentScan {
   bool afterCR{};
   bool rowTouched{};
   std::uint64_t skipRows{};
+  std::size_t precedingRows{};
   std::optional<std::uint64_t> anchorLine;
   std::optional<std::uint64_t> totalLines;
   bool reached{};
@@ -129,7 +133,33 @@ struct DocumentPreparedFrame {
   std::vector<std::uint64_t> anchors = std::vector<std::uint64_t>(0);
   std::unique_ptr<GraphemeText> footer;
   CellSize viewport;
+  bool finalEndVisible{};
+  std::uint64_t visibleByteEnd{};
 };
+
+inline std::optional<std::uint16_t> documentProgress(const DocumentViewStatus &status, bool finalByteVisible,
+                                                     std::uint64_t visibleByteEnd) noexcept {
+  constexpr std::uint64_t FULL = 1000;
+
+  if (finalByteVisible && !status.waiting && !status.error) {
+    return static_cast<std::uint16_t>(FULL);
+  }
+  if (!status.byteExtent || !*status.byteExtent) {
+    return std::nullopt;
+  }
+
+  const auto value = scrollMultiplyDivide(std::min(visibleByteEnd, *status.byteExtent), FULL, *status.byteExtent);
+  return static_cast<std::uint16_t>(std::min(value.quotient, FULL - 1));
+}
+
+// The bar measures window position, independently of lower-edge read coverage.
+// Variable row lengths make this local page-span projection approximate.
+inline std::uint64_t documentScrollByteRange(const DocumentPreparedFrame &frame) noexcept {
+  const auto extent = frame.status.byteExtent.value_or(0);
+  const auto first = std::min(frame.status.visibleByteOffset, extent);
+  const auto last = std::clamp(frame.visibleByteEnd, first, extent);
+  return extent - (last - first);
+}
 
 struct DocumentViewState {
   WidthPolicy width;
