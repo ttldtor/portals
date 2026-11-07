@@ -75,6 +75,9 @@ std::expected<void, ManagedError> setDocumentModel(const std::shared_ptr<RefTarg
 std::expected<void, ManagedError> seekDocument(const std::shared_ptr<RefTarget> &, Node<DocumentView>, std::uint64_t,
                                                bool, std::source_location);
 std::expected<DocumentViewStatus, ManagedError> documentStatus(const std::shared_ptr<RefTarget> &, Node<DocumentView>);
+std::expected<void, ManagedError> documentLineNumbers(const std::shared_ptr<RefTarget> &,
+                                                      std::shared_ptr<const Node<DocumentView>>, std::optional<bool>,
+                                                      std::source_location);
 struct RefAccess;
 std::expected<bool, ManagedError> checkedValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Switch>> node);
 std::expected<PropertyUpdate<bool>, ManagedError> setChecked(std::shared_ptr<RefTarget> target,
@@ -1208,6 +1211,54 @@ public:
     if (!result) {
       detail::reportEventError(observation, result.error(), origin);
     }
+    return result.has_value();
+  }
+
+  /** @param enabled Show proven logical line numbers; defaults remain off.
+   * @param origin Original command site.
+   * @return Checked deferred reflow, preserving byte anchor and pending relative input; no source I/O.
+   * Assigning the existing value is an exact no-op. Failure is not automatically reported.
+   */
+  std::expected<void, ManagedError> setLineNumbers(bool enabled,
+                                                   std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return detail::documentLineNumbers(target(), std::move(node), enabled, origin);
+  }
+
+  /** @param enabled Show proven logical line numbers. @param origin Original command site.
+   * @return Checked reflow admission; the existing scene collector receives a failure exactly once.
+   */
+  bool lineNumbers(bool enabled, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    const auto result = detail::documentLineNumbers(observation, std::move(node), enabled, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @param origin Original command site. @return Toggle admission, with one collected failure on rejection.
+   * Reads and changes the live setting on its UI owner; no client-side bool or source I/O is needed.
+   */
+  bool toggleLineNumbers(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    const auto result = detail::documentLineNumbers(observation, std::move(node), std::nullopt, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
     return result.has_value();
   }
 

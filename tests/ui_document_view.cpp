@@ -1559,6 +1559,8 @@ TEST_CASE("line-number no-op and rapid presentation reflow retain accepted relat
     const auto submitted = f.executor.submissions;
     take(f.app->tree().consumeFrameRequest());
     take(setDocumentLineNumbers(*f.scene, f.node, false));
+    take(f.reference.setLineNumbers(false));
+    CHECK(f.reference.lineNumbers(false));
     CHECK(navigationSerial(f) == serial);
     CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE);
     f.settle(2);
@@ -1570,8 +1572,8 @@ TEST_CASE("line-number no-op and rapid presentation reflow retain accepted relat
     f.pump();
     REQUIRE(f.executor.job);
     wheel(f, false, 4);
-    take(setDocumentLineNumbers(*f.scene, f.node, true));
-    take(setDocumentLineNumbers(*f.scene, f.node, false));
+    CHECK(f.reference.toggleLineNumbers());
+    CHECK(f.reference.toggleLineNumbers());
     take(setDocumentWrap(*f.scene, f.node, false));
     f.pump();
     f.executor.runOne();
@@ -1668,20 +1670,58 @@ TEST_CASE("unknown extent final read proof differs from nonfinal waiting") {
   }
 }
 
+TEST_CASE("compact line-number commands preserve aliases and reject foreign or retired owners") {
+  Fixture f(source("first\nsecond"));
+  f.settle(3);
+  auto alias = f.reference;
+  CHECK(alias.toggleLineNumbers());
+  f.settle(3);
+  REQUIRE(f.frame()->gutters);
+  CHECK((*f.frame()->gutters)[0].bytes() == "      1  ");
+  CHECK(take(f.reference.status()).byteOffset == 0);
+  CHECK(f.reference.lineNumbers(false));
+  f.settle(3);
+  CHECK_FALSE(f.frame()->gutters);
+
+  const auto serial = navigationSerial(f);
+  std::optional<ManagedError> foreign;
+  std::thread worker([ref = alias, &foreign] {
+    auto result = ref.setLineNumbers(true);
+    if (!result) {
+      foreign = result.error();
+    }
+  });
+  worker.join();
+  REQUIRE(foreign);
+  CHECK(std::get<TreeError>(foreign->cause) == TreeError::WRONG_THREAD);
+  CHECK(navigationSerial(f) == serial);
+
+  unsigned callbacks{};
+  take(f.scene->onError([&](const ManagedDiagnostic &) {
+    ++callbacks;
+    f.reference = {};
+  }));
+  take(f.app->tree().remove(f.node));
+  CHECK_FALSE(alias.setLineNumbers(true));
+  CHECK(callbacks == 0);
+  CHECK_FALSE(f.reference.toggleLineNumbers());
+  CHECK(callbacks == 1);
+}
+
 TEST_CASE("hot gutter reflow preserves the requested original byte anchor across wrapping") {
   Fixture f(source(std::string(100, 'x')));
   f.settle(3);
   take(f.reference.seekByte(17));
   f.settle(3);
   REQUIRE(take(f.reference.status()).byteOffset == 17);
-  take(setDocumentLineNumbers(*f.scene, f.node, true));
+  CHECK(f.reference.lineNumbers(true));
   f.settle(3);
   CHECK(take(f.reference.status()).byteOffset == 17);
   REQUIRE(f.frame()->gutters);
   take(setDocumentWrap(*f.scene, f.node, false));
   f.settle(3);
   CHECK(take(f.reference.status()).byteOffset == 17);
-  take(setDocumentLineNumbers(*f.scene, f.node, false));
+  CHECK(f.reference.toggleLineNumbers());
   f.settle(3);
   CHECK_FALSE(f.frame()->gutters);
   CHECK(take(f.reference.status()).byteOffset == 17);
