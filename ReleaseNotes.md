@@ -56,6 +56,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
   and scrollbar carry the focus accent. Refresh the model-switching recording.
 
 ### Added
+
+- Add opt-in semantic paint roles to runtime PSS and layered styles. DocumentView
+  exposes separate body, line-number gutter and position styles; palette changes
+  repaint prepared data without re-reading documents. Role declarations are
+  runtime-only; existing compile-time styles remain supported.
+
 - Add a read-only DocumentView with background text windows, original-byte navigation,
   optional line numbers, encoding selection and source switching. Native declarative
   and resource recipes share frame, size and scrollbar settings.

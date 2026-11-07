@@ -259,6 +259,41 @@ that recomputes the defaults beneath the active sheet. Replacing with an empty
 sheet restores the latest defaults. Destroying the engine leaves the last
 computed styles installed; it does not mutate the tree from a destructor.
 
+### Semantic role properties {#styles-semantic-role-properties}
+
+Semantic roles use the explicit `role-<name>-<leaf>` property family. `<name>` is
+1–63 ASCII bytes: it starts with a lowercase letter, then uses lowercase letters,
+digits or hyphens, and cannot end in a hyphen. A hyphen is optional. The five
+leaves and their values are:
+
+| Leaf | Value | Meaning |
+| --- | --- | --- |
+| `foreground`, `background` | `#RRGGBB` | Role text and fill colors |
+| `bold`, `italic`, `underline` | `true` or `false` | Role text attributes |
+
+For example, `role-gutter-foreground` names the `gutter` role's foreground.
+Role declarations may name a part that no consumer registers; such a declaration
+has no recipient and cannot affect paint. A custom consumer opts in with
+`StyleEngine::registerRoles(node, names)`. Its `StyleRoleLimits` default to at
+most 256 live registrations (also bounded by `maxBindings`), 32 names per
+registration, and 4,096 registered names total. Only explicit `role-` properties use this syntax. A bare `gutter-foreground` or
+a typo such as `frame-lnie-foreground` remains `UNKNOWN_PROPERTY`. Role names identify semantic parts,
+while the existing `:normal`, `:focused`, `:disabled`, `:selected`, `:header`,
+and `:caret` selectors continue to choose presentation states.
+
+For the DocumentView `body`, `gutter`, and `position` parts, see the
+[DocumentView style reference](document-view.md#document-view-styling-reference).
+
+For each registered part and state, sparse role declarations overlay the
+resolved ordinary surface using the same selectors, theme/application/user
+layers, specificity and source order. Missing leaves inherit the resolved
+ordinary paint; an explicit `false` remains an override. Built-in themes provide
+the ordinary base surface, and role declarations customize only named parts.
+Role declarations are runtime PSS properties. Compile-time PSS declarations do
+not accept them, and runtime `$name` parameter references for role properties
+are not implemented.
+
+
 ## Reading an installed style
 
 `Widget::computedStyle()` returns a borrowed
