@@ -17,10 +17,9 @@ planned work is not included. An **Unreleased** heading has no publication date.
   terminal line feed does not add an extra empty display row, while real blank
   rows remain. End requests the last full page. The scrollbar is a separate
   approximate window-position projection over the known byte extent, accounting
-  for the visible span. Its maximum endpoint preserves the raw byte anchor at
-  extent (`tail=false`), so a direct EOF drag or `seekByte(extent)` may place the
-  final row at the top instead of showing the last full page. These seeks remain
-  bounded and do not scan the entire preceding file.
+  for the visible span. Dragging to its maximum endpoint requests the last full
+  page like End; background scanning retains a bounded row window. Explicit
+  `seekByte(offset)` keeps its raw-byte anchor and bounded local seek behavior.
 
 - Clarify the separate MIT attribution of adapted Textual palette values, retain
   their complete notice in the browser gallery bundle, and document the existing
@@ -66,6 +65,15 @@ planned work is not included. An **Unreleased** heading has no publication date.
   consumers for the selector qualifier API and widget virtual hook.
 
 ### Fixed
+
+- Keep the final DocumentView page full on repeated End and EOF drags with
+  long unwrapped lines or a late bookmark seed. Tail checkpoint reuse now
+  requires a proven full row window; preparation retains bounded memory.
+
+- Keep the held DocumentView scrollbar stable while background windows arrive.
+  A gesture uses one byte-position scale; an unchanged pointer no longer
+  schedules another seek, and moving down does not jump backward when visible
+  rows have different byte lengths.
 
 - Accumulate rapid DocumentView wheel/key navigation while background work is
   running instead of repeating a target from the old frame. Keep accepted motion
