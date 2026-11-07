@@ -153,8 +153,8 @@ TEST_CASE("work budget yields and resumes") {
 }
 
 TEST_CASE("WHATWG single-byte golden mappings") {
-  constexpr auto &expected1251 = document_encoding_fixture::EXPECTED1251;
-  constexpr auto &expected1252 = document_encoding_fixture::EXPECTED1252;
+  constexpr auto &EXPECTED_1251 = document_encoding_fixture::EXPECTED1251;
+  constexpr auto &EXPECTED_1252 = document_encoding_fixture::EXPECTED1252;
   for (auto encoding : {DocumentEncoding::WINDOWS1251, DocumentEncoding::WINDOWS1252}) {
     for (unsigned byte = 0; byte < 256; ++byte) {
       DocumentDecoder decoder({encoding});
@@ -165,7 +165,7 @@ TEST_CASE("WHATWG single-byte golden mappings") {
       REQUIRE(result.outputProduced == 1);
       auto expected =
         byte < 128 ? char32_t(byte)
-                   : (encoding == DocumentEncoding::WINDOWS1251 ? expected1251[byte - 128] : expected1252[byte - 128]);
+                   : (encoding == DocumentEncoding::WINDOWS1251 ? EXPECTED_1251[byte - 128] : EXPECTED_1252[byte - 128]);
       CHECK(output[0].scalar == expected);
       CHECK(output[0].byteOffset == 0);
       CHECK(output[0].byteLength == 1);

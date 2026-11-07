@@ -491,8 +491,8 @@ struct ControlSettings {
 
   /** @return Immutable document settings, or a shared empty value when absent. */
   const ControlDocumentSettings &documentSettings() const noexcept {
-    static const ControlDocumentSettings empty;
-    return document ? *document : empty;
+    static const ControlDocumentSettings EMPTY;
+    return document ? *document : EMPTY;
   }
 };
 
