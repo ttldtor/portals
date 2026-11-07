@@ -147,7 +147,7 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
     StyleDeclarations effective;
     std::optional<StyleSizing> sizing;
     detail::ScrollbarGlyphRefs glyphs;
-    std::vector<StyleRolePatch> roles;
+    std::optional<std::vector<StyleRolePatch>> roles;
 
     last.fill(NO_PSS_DECLARATION);
 
@@ -260,7 +260,17 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
 
       last[property] = index;
       if (role) {
-        detail::assignPssRole(declaration.property, value, *declaration.roleName, roles);
+        try {
+          if (!roles) {
+            roles.emplace(0);
+          }
+          detail::assignPssRole(declaration.property, value, *declaration.roleName, *roles);
+        } catch (const std::bad_alloc &) {
+          auto failure =
+            detail::pssError(PssErrorCode::ALLOCATION, declaration.location, "Semantic validation allocation failed");
+          failure.cause = TreeError::NO_MEMORY;
+          return std::unexpected(failure);
+        }
       } else if (declaration.property >= PssProperty::WIDTH) {
         if (!sizing) {
           sizing.emplace();
@@ -272,15 +282,15 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
       }
     }
 
-    if ((!roles.empty() != bool(rule.roles)) || (rule.roles && *rule.roles != roles)) {
+    if ((bool(roles) != bool(rule.roles)) || (roles && *rule.roles != *roles)) {
       return invalid(origin.selector, "Semantic provenance disagrees with final declarations");
     }
     if (rule.roles) {
-      if (!charge(sizeof(std::vector<StyleRolePatch>)) || !chargeRecords(roles.size(), sizeof(StyleRolePatch))) {
+      if (!charge(sizeof(std::vector<StyleRolePatch>)) || !chargeRecords(roles->size(), sizeof(StyleRolePatch))) {
         return std::unexpected(
           detail::pssError(PssErrorCode::DOCUMENT_LIMIT, origin.selector, "Semantic declarations exceed budget"));
       }
-      for (const auto &patch : roles) {
+      for (const auto &patch : *roles) {
         if (!charge(patch.name.size())) {
           return std::unexpected(
             detail::pssError(PssErrorCode::DOCUMENT_LIMIT, origin.selector, "Semantic names exceed budget"));

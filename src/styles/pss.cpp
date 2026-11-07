@@ -107,7 +107,7 @@ public:
         if (!admitted) {
           return admitted;
         }
-        roles_ = std::make_shared<std::vector<StyleRolePatch>>();
+        roles_ = std::make_shared<std::vector<StyleRolePatch>>(0);
       }
       if (std::ranges::find(*roles_, value.roleName, &StyleRolePatch::name) == roles_->end()) {
         if (rolePatches_ == MAX_STYLE_ROLE_PATCHES) {

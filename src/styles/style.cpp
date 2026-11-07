@@ -1609,7 +1609,7 @@ std::expected<StyleRoleRegistration, StyleError> StyleEngine::registerRoles(Node
   LayerMutationGuard guard(stagingLayers_, true);
 
   try {
-    RoleRegistry registrations;
+    RoleRegistry registrations(0);
     std::size_t roles = names.size();
     for (const auto &weak : roleRegistrations_ ? std::span(*roleRegistrations_)
                                                : std::span<const std::weak_ptr<detail::StyleRoleState>>{}) {
@@ -1664,7 +1664,7 @@ std::expected<Invalidation, StyleError> StyleEngine::unregisterRoles(const Style
   LayerMutationGuard guard(stagingLayers_, true);
 
   try {
-    RoleRegistry registrations;
+    RoleRegistry registrations(0);
     for (const auto &weak : roleRegistrations_ ? std::span(*roleRegistrations_)
                                                : std::span<const std::weak_ptr<detail::StyleRoleState>>{}) {
       if (auto current = weak.lock(); current && current != state && current->active) {
@@ -1966,7 +1966,7 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
             }
           }
           if (!transaction->roles) {
-            transaction->roles.emplace();
+            transaction->roles.emplace(0);
           }
           transaction->roles->push_back({std::move(registration), std::move(published)});
         }
