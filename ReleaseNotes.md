@@ -50,6 +50,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
   The sparse `:read-only` qualifier composes with `:focused` or `:selected`. Rebuild SDK
   consumers for the selector qualifier API and widget virtual hook.
 
+### Fixed
+
+- Keep the focused LogView text surface in its normal theme colors; its frame
+  and scrollbar carry the focus accent. Refresh the model-switching recording.
+
 ### Added
 - Add a bounded streaming document decoder for UTF-8, UTF-16LE/BE, UTF-32LE/BE,
   Windows-1251 and Windows-1252, with source byte spans and opaque checkpoints.

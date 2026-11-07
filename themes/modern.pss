@@ -66,3 +66,6 @@ RadioGroup:read-only:focused {
   scrollbar-corner-background: #181c24;
   scrollbar-corner-bold: true;
 }
+
+/* Text surfaces retain their palette while focused chrome carries the accent. */
+LogView:focused { foreground: #dce1e8; background: #181c24; bold: false; }

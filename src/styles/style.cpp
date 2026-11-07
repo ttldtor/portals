@@ -522,6 +522,16 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
   // Reverse the focused field palette so the caret remains visible over any glyph.
   stateRule(StyleState::CARET, tokens.accent, tokens.background, false);
 
+  // A text viewport keeps its surface; focus is carried by its frame and scrollbar.
+  StyleRule logFocus;
+
+  logFocus.selector.type = "LogView";
+  logFocus.selector.state = StyleState::FOCUSED;
+  logFocus.declarations.foreground = tokens.foreground;
+  logFocus.declarations.background = tokens.background;
+  logFocus.declarations.bold = false;
+  sheet.rules.push_back(std::move(logFocus));
+
   StyleRule selectedMarker;
   selectedMarker.selector.type = "RadioGroup";
   selectedMarker.selector.state = StyleState::SELECTED;
