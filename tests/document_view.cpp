@@ -295,7 +295,7 @@ TEST_CASE("empty and trailing-separator documents agree with source222 logical l
     REQUIRE_FALSE(result->error);
     REQUIRE(result->frame);
     CHECK(result->frame->status.totalLines == (sample.empty() ? 1 : 2));
-    CHECK(result->frame->rows.back().bytes().empty());
+    CHECK(result->frame->rows.back().bytes() == (sample.empty() ? "" : "a"));
   }
 }
 
@@ -320,4 +320,184 @@ TEST_CASE("separate gutter storage is charged without changing original row anch
   const auto tooSmall = f.finish();
   REQUIRE(tooSmall->error);
   CHECK(tooSmall->error->code == SourceError::PAGE_TOO_LARGE);
+}
+
+TEST_CASE("prepared text position shows only percent while advanced status retains the proven line") {
+  Fixture f("first\nsecond\nthird");
+  f.intent.viewport = {30, 6};
+  const auto result = f.finish();
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->footer);
+  REQUIRE(result->frame->status.finalEnd);
+  const auto caption = result->frame->footer->bytes();
+  CHECK(caption == "100.0%");
+  CHECK(result->frame->status.logicalLine == 1);
+  CHECK(result->frame->status.byteOffset == 0);
+}
+
+TEST_CASE("full viewport terminal LF needs no extra scroll to report visible text end") {
+  Fixture f("one\ntwo\nthree\n");
+  f.intent.viewport = {20, 3};
+  const auto result = f.finish();
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->footer);
+  REQUIRE(result->frame->rows.size() == 3);
+  CHECK(result->frame->footer->bytes().find("100.0%") != std::string_view::npos);
+  CHECK(result->frame->finalEndVisible);
+  CHECK(result->frame->status.finalEnd);
+  CHECK(result->frame->status.byteOffset == 0);
+}
+
+TEST_CASE("position arithmetic stays exact at uint64 boundaries and unknown progress stays unknown") {
+  DocumentViewStatus status;
+  status.byteExtent = std::numeric_limits<std::uint64_t>::max();
+  for (const auto [anchor, expected] : std::array<std::pair<std::uint64_t, std::uint16_t>, 5>{
+         {{0, 0}, {1, 0}, {*status.byteExtent / 2, 499}, {*status.byteExtent - 1, 999}, {*status.byteExtent, 999}}}) {
+    status.byteOffset = anchor;
+    CHECK(detail::documentProgress(status, false, status.byteOffset) == expected);
+    CHECK(status.byteOffset == anchor);
+  }
+  CHECK(detail::documentProgress(status, true, status.byteOffset) == 1000);
+  status.waiting = true;
+  CHECK(detail::documentProgress(status, true, status.byteOffset) == 999);
+  status.byteExtent.reset();
+  CHECK_FALSE(detail::documentProgress(status, false, status.byteOffset));
+  CHECK_FALSE(detail::documentProgress(status, true, status.byteOffset));
+  status.waiting = false;
+  CHECK(detail::documentProgress(status, true, status.byteOffset) == 1000);
+}
+
+TEST_CASE("forward navigation stops at the last full reading screen") {
+  std::string text;
+  for (int index = 1; index <= 120; ++index) {
+    text += "row" + std::to_string(index) + "\n";
+  }
+  for (const auto delta : {1, 2, 100}) {
+    Fixture f(text);
+    f.intent.viewport = {40, 48};
+    f.intent.anchor = text.find("row72\n");
+    f.intent.rowDelta = delta;
+    const auto result = f.finish();
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 48);
+    CHECK(result->frame->rows.front().bytes() == "row73");
+    CHECK(result->frame->rows.back().bytes() == "row120");
+    CHECK(result->frame->finalEndVisible);
+  }
+}
+
+TEST_CASE("reading a terminal separator does not invent another display row") {
+  for (const auto &ending : {std::string("\n"), std::string("\r\n")}) {
+    Fixture f("one" + ending + ending);
+    const auto result = f.finish();
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 2);
+    CHECK(result->frame->rows.front().bytes() == "one");
+    CHECK(result->frame->rows.back().bytes().empty());
+  }
+}
+
+TEST_CASE("waiting forward frames report the first rendered row") {
+  Fixture f("a\nb\n");
+  f.provider->unknown = true;
+  f.intent.viewport = {20, 3};
+  f.intent.rowDelta = 1;
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->status.waiting);
+  REQUIRE(result->frame->rows.size() == 1);
+  CHECK(result->frame->rows.front().bytes() == "b");
+  REQUIRE(result->frame->anchors.size() == 1);
+  CHECK(result->frame->anchors.front() == 2);
+  CHECK(result->frame->status.visibleByteOffset == 2);
+  CHECK(result->frame->status.byteOffset == 2);
+  CHECK(result->frame->status.logicalLine == 2);
+}
+
+TEST_CASE("predecessor retention fits the same text payload budget as the visible screen") {
+  for (const auto wrap : {false, true}) {
+    Fixture f(wrap ? "aabbccdd" : "aa\nbb\ncc\ndd\n");
+    f.intent.viewport = {wrap ? 2 : 20, 2};
+    f.intent.config.wrap = wrap;
+    f.intent.config.maxFrameBytes = 4;
+    f.intent.rowDelta = 1;
+    const auto result = f.finish();
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 2);
+    CHECK(result->frame->rows.front().bytes() == "bb");
+    CHECK(result->frame->rows.back().bytes() == "cc");
+  }
+}
+
+TEST_CASE("coverage uses the bottom of the displayed original byte range") {
+  Fixture f("a\nbb\nccc\ndddd\n");
+  f.intent.viewport = {20, 2};
+  auto result = f.finish();
+  REQUIRE(result->frame);
+  CHECK(result->frame->footer->bytes() == "35.7%");
+  CHECK(result->frame->status.byteOffset == 0);
+  f.intent.rowDelta = 1;
+  result = f.finish();
+  REQUIRE(result->frame);
+  CHECK(result->frame->rows.front().bytes() == "bb");
+  CHECK(result->frame->footer->bytes() == "64.2%");
+  f.intent.rowDelta = 20;
+  result = f.finish();
+  REQUIRE(result->frame);
+  CHECK(result->frame->footer->bytes() == "100.0%");
+}
+
+TEST_CASE("coverage counts original UTF16 bytes rather than rendered UTF8 bytes") {
+  Fixture f(std::string("A\0\n\0B\0\n\0C\0\n\0", 12), 1);
+  f.intent.config.decoder.explicitEncoding = DocumentEncoding::UTF16LE;
+  f.intent.viewport = {20, 2};
+  const auto result = f.finish();
+  REQUIRE(result->frame);
+  CHECK(result->frame->footer->bytes() == "66.6%");
+}
+
+TEST_CASE("coverage excludes a hidden final wrapped grapheme") {
+  Fixture f("a\xCC\x81\xE7\x95\x8C");
+  f.intent.viewport = {2, 1};
+  const auto result = f.finish();
+  REQUIRE(result->frame);
+  CHECK(result->frame->rows.front().bytes() == "a\xCC\x81");
+  CHECK_FALSE(result->frame->finalEndVisible);
+  CHECK(result->frame->footer->bytes() == "50.0%");
+}
+
+TEST_CASE("coverage reaches the real terminal CRLF without another wheel step") {
+  Fixture f("a\r\nbb\r\n", 1);
+  f.intent.viewport = {20, 2};
+  const auto result = f.finish();
+  REQUIRE(result->frame);
+  CHECK(result->frame->footer->bytes() == "100.0%");
+  CHECK(result->frame->finalEndVisible);
+}
+
+TEST_CASE("coverage of a partial unwrapped line excludes decoder lookahead") {
+  Fixture f("abcdefghij");
+  f.intent.viewport = {3, 1};
+  f.intent.config.wrap = false;
+  const auto result = f.finish();
+  REQUIRE(result->frame);
+  CHECK(result->frame->rows.front().bytes() == "abc");
+  CHECK(result->frame->footer->bytes() == "30.0%");
+}
+
+TEST_CASE("CRLF lookahead cannot retain an arbitrary run of carriage returns") {
+  Fixture f(std::string(128, '\r'));
+  f.intent.viewport = {20, 1};
+  f.intent.config.workBytes = 16;
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  CHECK(result->frame->rows.size() == 1);
+  CHECK(result->scan->rows.size() <= 2);
+  CHECK(f.provider->admittedBytes.load() <= 16);
+  CHECK_FALSE(result->frame->finalEndVisible);
 }
