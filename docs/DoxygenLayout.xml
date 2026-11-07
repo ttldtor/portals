@@ -28,6 +28,7 @@
           <tab type="user" title="VirtualTable" url="@ref docs/virtual-table.md" />
           <tab type="user" title="Chart" url="@ref docs/chart.md" />
           <tab type="user" title="LogView" url="@ref docs/log-view.md" />
+          <tab type="user" title="DocumentView" url="@ref docs/document-view.md" />
           <tab type="user" title="DataStateView" url="@ref docs/data-presentation.md" />
         </tab>
         <tab type="usergroup" title="Layout and scrolling">
@@ -181,6 +182,7 @@
           <tab type="user" title="VirtualTable" url="@ref docs/ru/virtual-table.md" />
           <tab type="user" title="Chart" url="@ref docs/ru/chart.md" />
           <tab type="user" title="LogView" url="@ref docs/ru/log-view.md" />
+          <tab type="user" title="DocumentView" url="@ref docs/ru/document-view.md" />
           <tab type="user" title="DataStateView" url="@ref docs/ru/data-presentation.md" />
         </tab>
         <tab type="usergroup" title="Компоновка и прокрутка">

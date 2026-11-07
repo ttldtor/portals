@@ -70,6 +70,7 @@ The linked guides include recordings where available and instructions for runnin
   <article class="widget-gallery-card"><h3><a href="md_docs_2virtual-table.html">VirtualTable</a></h3><a href="md_docs_2virtual-table.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/virtual-table-guide.png" alt="VirtualTable"></a></article>
   <article class="widget-gallery-card"><h3><a href="md_docs_2chart.html">Chart</a></h3><a href="md_docs_2chart.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/chart-guide.png" alt="Chart"></a></article>
   <article class="widget-gallery-card"><h3><a href="log-view.html">LogView</a></h3><a href="log-view.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/log-view-guide.png" alt="LogView"></a></article>
+  <article class="widget-gallery-card"><h3><a href="document-view.html">DocumentView</a></h3><a href="document-view.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/document-view.png" alt="DocumentView"></a><p>Read large text sources through bounded background windows.</p></article>
   <article class="widget-gallery-card"><h3><a href="gauge-guide.html">Gauge</a></h3><a href="gauge-guide.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/gauge-guide.png" alt="Gauge"></a></article>
   <article class="widget-gallery-card"><h3><a href="md_docs_2grid.html">Grid</a></h3><a href="md_docs_2grid.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/grid-guide.png" alt="Grid"></a></article>
   <article class="widget-gallery-card"><h3><a href="dialogs.html">Dialog</a></h3><a href="dialogs.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/dialog-guide.png" alt="Dialog"></a></article>
@@ -104,6 +105,7 @@ Each group documents its supported parts, values and limits. The common PSS tabl
 | VirtualList / List | [Customize](virtual-list.md#virtual-list-styling-reference) |
 | VirtualTable / Table | [Customize](virtual-table.md#virtual-table-styling-reference) |
 | LogView | [Customize](log-view.md#log-view-styling-reference) |
+| DocumentView | [Customize](document-view.md#document-view-styling-reference) |
 | Chart | [Customize](chart.md#chart-styling-reference) |
 | Border | [Customize](border.md#border-styling-reference) |
 | Gauge | [Customize](gauge.md#gauge-styling-reference) |

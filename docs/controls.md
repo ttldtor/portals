@@ -119,6 +119,10 @@ rolling variant retains recent appended records within line and byte limits.
 Both wrap by grapheme and support follow-tail navigation. See [LogView](log-view.md)
 for complete programs, configuration and the separate source/append contracts.
 
+## Document viewing
+
+`ui::viewer(...)` reads text from a file, immutable memory or a custom source on workers. Its bounded window does not limit document or logical line length. See [DocumentView](document-view.md) for source switching, encodings, positions and styling.
+
 ## Loading indicators {#spinner-control}
 
 `ui::spinner()` creates an animated, scene-owned `Spinner`. Presets, custom

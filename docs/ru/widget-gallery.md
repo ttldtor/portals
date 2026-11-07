@@ -70,6 +70,7 @@
   <article class="widget-gallery-card"><h3><a href="virtual-table-ru.html">Виртуальная таблица</a></h3><a href="virtual-table-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/virtual-table-guide.png" alt="Виртуальная таблица"></a></article>
   <article class="widget-gallery-card"><h3><a href="chart-ru.html">График</a></h3><a href="chart-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/chart-guide.png" alt="График"></a></article>
   <article class="widget-gallery-card"><h3><a href="log-view-ru.html">Журнал</a></h3><a href="log-view-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/log-view-guide.png" alt="Журнал"></a></article>
+  <article class="widget-gallery-card"><h3><a href="document-view-ru.html">Просмотр документов</a></h3><a href="document-view-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/document-view.png" alt="Просмотр документов"></a><p>Чтение больших текстовых источников ограниченными окнами.</p></article>
   <article class="widget-gallery-card"><h3><a href="gauge-guide-ru.html">Прогресс</a></h3><a href="gauge-guide-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/gauge-guide.png" alt="Прогресс"></a></article>
   <article class="widget-gallery-card"><h3><a href="grid-ru.html">Сетка</a></h3><a href="grid-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/grid-guide.png" alt="Сетка"></a></article>
   <article class="widget-gallery-card"><h3><a href="dialogs-ru.html">Диалог</a></h3><a href="dialogs-ru.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/dialog-guide.png" alt="Диалог"></a></article>
@@ -104,6 +105,7 @@
 | VirtualList / List | [Настройка](virtual-list.md#virtual-list-styling-reference-ru) |
 | VirtualTable / Table | [Настройка](virtual-table.md#virtual-table-styling-reference-ru) |
 | LogView | [Настройка](log-view.md#log-view-styling-reference-ru) |
+| DocumentView | [Настройка](document-view.md#document-view-styling-reference-ru) |
 | Chart | [Настройка](chart.md#chart-styling-reference-ru) |
 | Border | [Настройка](border.md#border-styling-reference-ru) |
 | Gauge | [Настройка](gauge.md#gauge-styling-reference-ru) |
