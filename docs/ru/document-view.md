@@ -47,6 +47,8 @@
 | Заменить источник | `reader.model(source)` | `reader.setModel(source)` |
 | Запросить исходную байтовую позицию | `reader.byte(offset)` | `reader.seekByte(offset)` |
 | Обновить данные у текущего якоря | `reader.reload()` | `reader.refresh()` |
+| Показать или скрыть номера строк | `reader.lineNumbers(enabled)` | `reader.setLineNumbers(enabled)` |
+| Переключить номера строк | `reader.toggleLineNumbers()` | — |
 | Прочитать сохранённый статус без I/O | `reader.currentStatus()` | `reader.status()` |
 
 Краткие команды передают ошибки в существующий коллектор сцены. Checked-команды возвращают `std::expected`, оставляя обработку вызывающему коду. Принятие команды не означает, что данные уже показаны: подготовка может продолжаться. Вызывайте команды в UI-потоке владельца, например из обработчика кнопки или клавиши. `runApp` управляет фоновой службой и восстановлением терминала.
@@ -91,14 +93,14 @@ DocumentView регистрирует три семантические част
 | `gutter` | `role-gutter-foreground` | `role-gutter-background` | `role-gutter-bold` | `role-gutter-italic` | `role-gutter-underline` |
 | `position` | `role-position-foreground` | `role-position-background` | `role-position-bold` | `role-position-italic` | `role-position-underline` |
 
-Запускайте пример из каталога исходников Portals, где доступен `README.md`.
+Запускайте пример из каталога исходников Portals, где доступен `README.md`. F2 показывает или скрывает поле номеров во время чтения. Источник и якорь чтения сохраняются, включая уже принятую прокрутку во время загрузки. Повторное назначение прежнего значения не запускает новую загрузку или перерисовку.
 
 [Полный пример приложения](../examples/guide_document_view_styles.cpp)
 
 \include guide_document_view_styles.cpp
 
 @image html document-view-styles.png "Светлый текст документа, серые номера строк и голубой индикатор позиции."
-@image html document-view-styles.gif "Прокрутка по одной строке, быстрая серия событий и переход к видимому концу."
+@image html document-view-styles.gif "Переключение номеров строк, прокрутка по одной строке и переход к видимому концу."
 
 ## Ограничения ресурсов {#document-view-limits-ru}
 

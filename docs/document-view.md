@@ -47,6 +47,8 @@ Files are one source family. `ui::document(provider, budget)` accepts a worker-s
 | Replace source | `reader.model(source)` | `reader.setModel(source)` |
 | Request original byte position | `reader.byte(offset)` | `reader.seekByte(offset)` |
 | Refresh at the current anchor | `reader.reload()` | `reader.refresh()` |
+| Show or hide line numbers | `reader.lineNumbers(enabled)` | `reader.setLineNumbers(enabled)` |
+| Toggle line numbers | `reader.toggleLineNumbers()` | — |
 | Observe cached status without I/O | `reader.currentStatus()` | `reader.status()` |
 
 Collected commands report failures through the receiving scene's existing error collector. Checked commands return `std::expected` and leave error handling to the caller. Admission means the operation was accepted; the requested data may still be preparing. Use these commands on the owning UI thread, for example from a button or key handler. `runApp` owns the background service and terminal cleanup.
@@ -91,14 +93,14 @@ reloading the document source.
 | `gutter` | `role-gutter-foreground` | `role-gutter-background` | `role-gutter-bold` | `role-gutter-italic` | `role-gutter-underline` |
 | `position` | `role-position-foreground` | `role-position-background` | `role-position-bold` | `role-position-italic` | `role-position-underline` |
 
-Run this sample from the Portals source directory so `README.md` is available.
+Run this sample from the Portals source directory so `README.md` is available. Press F2 to show or hide the line-number gutter while reading. The source and reading anchor are preserved, including wheel input already accepted during loading. Setting the existing value again does not start another load or redraw.
 
 [Complete application example](examples/guide_document_view_styles.cpp)
 
 \include guide_document_view_styles.cpp
 
 @image html document-view-styles.png "Light document text, gray line numbers and a blue position footer."
-@image html document-view-styles.gif "Scroll one row per wheel step, retain a rapid burst and reach the visible end."
+@image html document-view-styles.gif "Toggle line numbers, scroll one row per wheel step, and reach the visible end."
 
 ## Resource limits {#document-view-limits}
 
