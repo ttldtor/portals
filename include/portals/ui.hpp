@@ -6,6 +6,7 @@
 #include <portals/ui_combo_box.hpp>
 #include <portals/ui_controls.hpp>
 #include <portals/ui_dialogs.hpp>
+#include <portals/ui_document_view.hpp>
 #include <portals/ui_find_bar.hpp>
 #include <portals/ui_form_field.hpp>
 #include <portals/ui_layout.hpp>
@@ -21,5 +22,5 @@
 #include <portals/ui_scene_resource.hpp>
 #include <portals/ui_slider.hpp>
 #include <portals/ui_spin_box.hpp>
-#include <portals/ui_virtual.hpp>
 #include <portals/ui_switch.hpp>
+#include <portals/ui_virtual.hpp>

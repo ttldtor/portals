@@ -1899,3 +1899,64 @@ TEST_CASE("SpinBox and Slider numeric leaves coexist with RadioGroup selection p
   CHECK(radioPresence.count() == 1);
   CHECK(radioPresence.test(263));
 }
+
+TEST_CASE("document settings use immutable sparse snapshots and their own schema") {
+  ControlContext controls;
+  take(ui::detail::ControlContextAccess::installScrollSchema(controls, "DocumentView"));
+  auto initial = std::make_shared<ControlDocumentSettings>();
+  initial->file = "first.txt";
+  initial->lineNumbers = true;
+  ControlSettings defaults;
+  defaults.document = initial;
+  controls.defaults("DocumentView", defaults);
+  REQUIRE(controls.validate());
+
+  auto changed = std::make_shared<ControlDocumentSettings>();
+  changed->wrap = false;
+  ControlSettings patch;
+  patch.document = changed;
+  const auto resolved = controls.resolve("DocumentView", patch);
+  REQUIRE(resolved);
+  CHECK(*resolved->settings.documentSettings().file == "first.txt");
+  CHECK(*resolved->settings.documentSettings().lineNumbers);
+  CHECK_FALSE(*resolved->settings.documentSettings().wrap);
+  CHECK_FALSE(initial->wrap);
+  CHECK_FALSE(defaults.documentSettings().wrap);
+  CHECK_FALSE(ControlSettings{}.document);
+
+  ControlSettings unrelated;
+  ui::detail::mergeRecipeControlSettings(unrelated, ControlSettings{});
+  CHECK_FALSE(unrelated.document);
+  ui::detail::mergeRecipeControlSettings(defaults, patch);
+  CHECK_FALSE(*defaults.documentSettings().wrap);
+  CHECK_FALSE(initial->wrap);
+
+  ControlContext other;
+  take(ui::detail::ControlContextAccess::installScrollSchema(other, "ScrollArea"));
+  other.defaults("ScrollArea", patch);
+  CHECK_FALSE(other.validate());
+}
+
+TEST_CASE("context captures document bags independently of mutable aliases") {
+  ControlContext controls;
+  take(ui::detail::ControlContextAccess::installScrollSchema(controls, "DocumentView"));
+  auto defaultsBag = std::make_shared<ControlDocumentSettings>();
+  defaultsBag->file = "original.txt";
+  ControlSettings defaults;
+  defaults.document = defaultsBag;
+  controls.defaults("DocumentView", defaults);
+  auto definitionBag = std::make_shared<ControlDocumentSettings>();
+  definitionBag->wrap = false;
+  ControlSettings definition;
+  definition.document = definitionBag;
+  controls.define("Reader", "DocumentView", definition);
+  auto copy = controls;
+  defaultsBag->file = "changed.txt";
+  definitionBag->wrap = true;
+  for (const auto *context : {&controls, &copy}) {
+    const auto resolved = context->resolve("Reader");
+    REQUIRE(resolved);
+    CHECK(*resolved->settings.documentSettings().file == "original.txt");
+    CHECK_FALSE(*resolved->settings.documentSettings().wrap);
+  }
+}

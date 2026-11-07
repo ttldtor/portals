@@ -67,6 +67,7 @@ public:
    */
   Description &&settings(ControlSettings patch) && {
     if (state_) {
+      detail::freezeControlDocumentSettings(patch);
       state_->controlPatch = std::move(patch);
       state_->settingsRequested = true;
 
@@ -81,6 +82,32 @@ public:
     return std::move(*this);
   }
 
+  /** @param enabled Show proven logical line numbers. @return Consuming text viewer recipe. */
+  Description &&lineNumbers(bool enabled = true) &&
+    requires std::same_as<T, DocumentView>
+  {
+    return std::move(*this).setup([enabled](ManagedScene &scene, Node<T> node) {
+      return setDocumentLineNumbers(scene, node, enabled);
+    });
+  }
+
+  /** @param enabled Wrap complete ordinary graphemes. @return Consuming text viewer recipe. */
+  Description &&wrap(bool enabled = true) &&
+    requires std::same_as<T, DocumentView>
+  {
+    return std::move(*this).setup([enabled](ManagedScene &scene, Node<T> node) {
+      return setDocumentWrap(scene, node, enabled);
+    });
+  }
+
+  /** @param value Explicit byte encoding. @return Consuming text viewer recipe preserving its byte anchor. */
+  Description &&encoding(DocumentEncoding value) &&
+    requires std::same_as<T, DocumentView>
+  {
+    return std::move(*this).setup([value](ManagedScene &scene, Node<T> node) {
+      return setDocumentEncoding(scene, node, value);
+    });
+  }
   /** @return Consuming checkbox recipe selecting THREE_STATE without changing its model type.
    * Explicit bool models reject this setting at mount with INVALID_ARGUMENT.
    */
@@ -1949,7 +1976,8 @@ private:
   static std::expected<void, ControlContextError> installControlSchema(const State &state, ControlContext &controls) {
     if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
       return detail::ControlContextAccess::installPrimitiveSchema(controls, *state.controlType);
-    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> || std::same_as<T, LogView>) {
+    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> || std::same_as<T, LogView> ||
+                         std::same_as<T, DocumentView>) {
       return detail::ControlContextAccess::installScrollSchema(controls, *state.controlType);
     } else if constexpr (std::same_as<T, DataStateView>) {
       return detail::ControlContextAccess::installDataStateSchema(controls);
@@ -1984,7 +2012,8 @@ private:
   static bool matchesControlFactory(const State &state, const ResolvedControl &effective) {
     if constexpr (std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner>) {
       return effective.factoryKind == detail::ControlFactoryKind::PRIMITIVE_FALLBACK;
-    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> || std::same_as<T, LogView>) {
+    } else if constexpr (std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> || std::same_as<T, LogView> ||
+                         std::same_as<T, DocumentView>) {
       return effective.factoryKind == detail::ControlFactoryKind::SCROLL_FALLBACK;
     } else if constexpr (std::same_as<T, DataStateView>) {
       return effective.factoryKind == detail::ControlFactoryKind::DATA_STATE_FALLBACK;
@@ -2311,7 +2340,8 @@ private:
 
       if constexpr (std::derived_from<T, ScrollArea>) {
         // Only the native factory consumes constructor-scoped advanced frame settings.
-        if (!state->controlType || (*state->controlType != "ScrollArea" && *state->controlType != "LogView")) {
+        if (!state->controlType || (*state->controlType != "ScrollArea" && *state->controlType != "LogView" &&
+                                    *state->controlType != "DocumentView")) {
           return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
         }
       } else {

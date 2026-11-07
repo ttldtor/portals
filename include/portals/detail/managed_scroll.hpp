@@ -4,6 +4,7 @@
 
 namespace portals {
 class KeyHints;
+class DocumentView;
 
 template <class T, class... Args>
   requires std::derived_from<T, Widget>
@@ -83,6 +84,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "Border";
       } else if constexpr (std::same_as<T, Gauge>) {
         type = "Gauge";
+      } else if constexpr (std::same_as<T, DocumentView>) {
+        type = "DocumentView";
       } else if constexpr (std::same_as<T, LogView>) {
         type = "LogView";
       } else if constexpr (std::derived_from<T, ScrollArea>) {

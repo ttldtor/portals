@@ -11,7 +11,7 @@
 
 namespace portals::ui::detail {
 
-inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 264; ///< Complete canonical scalar vocabulary size.
+inline constexpr std::size_t CONTROL_PROPERTY_COUNT = 268; ///< Complete canonical scalar vocabulary size.
 inline constexpr std::size_t CONTROL_PRESENCE_BITS =
   CONTROL_PROPERTY_COUNT < 32 ? 32 : CONTROL_PROPERTY_COUNT;        ///< Retain all legacy mask bits.
 using ControlPropertyPresence = std::bitset<CONTROL_PRESENCE_BITS>; ///< Allocation-free internal leaf presence.
@@ -22,6 +22,11 @@ using ControlPropertyPresence = std::bitset<CONTROL_PRESENCE_BITS>; ///< Allocat
  * Copy and allocation failures propagate without validation or error translation.
  */
 void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &patch);
+
+/** @brief Detach externally mutable document storage before retaining a settings snapshot.
+ * @param settings Owning patch; a present document bag is copied and published as const.
+ */
+void freezeControlDocumentSettings(ControlSettings &settings);
 
 /** @brief Loader-only bounded schema installation in an effective context copy. */
 struct ControlContextAccess {

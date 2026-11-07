@@ -5,6 +5,7 @@
 #include <portals/ui_switch.hpp>
 #include <portals/ui_combo_box.hpp>
 #include <portals/ui_log_view.hpp>
+#include <portals/ui_document_view.hpp>
 #include <portals/ui_radio_group.hpp>
 
 #include <algorithm>
@@ -255,7 +256,7 @@ std::expected<void, ControlContextError> ResourceAccess::installPrimitives(Scene
 
 std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneResourceRegistry &registry,
                                                                         ControlContext &controls) {
-  for (const auto name : {"ScrollArea", "ScrollBar", "LogView"}) {
+  for (const auto name : {"ScrollArea", "ScrollBar", "LogView", "DocumentView"}) {
     if (find(registry, name) || ControlContextAccess::hasDeclaredType(controls, name)) {
       continue;
     }
@@ -266,7 +267,19 @@ std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneRes
       return installed;
     }
 
-    if (std::string_view(name) == "LogView") {
+    if (std::string_view(name) == "DocumentView") {
+      const auto added = registry.add<DocumentView>(name, [](SceneResourceArguments arguments) {
+        const auto &document = arguments.settings.documentSettings();
+        DocumentViewConfig config;
+        config.lineNumbers = document.lineNumbers.value_or(config.lineNumbers);
+        config.wrap = document.wrap.value_or(config.wrap);
+        config.decoder.explicitEncoding = document.encoding.value_or(config.decoder.explicitEncoding);
+        return viewer(documentFile(*document.file), config).settings(arguments.settings);
+      });
+      if (!added) {
+        return std::unexpected(ControlContextError{ControlContextErrorCode::DUPLICATE_TYPE, {}});
+      }
+    } else if (std::string_view(name) == "LogView") {
       const auto added = registry.add<LogView>(name, [](SceneResourceArguments arguments) {
         return logView(arguments.text, controlLogViewConfig(arguments.settings, {}));
       });

@@ -5,6 +5,7 @@
 #include <portals/combo_box.hpp>
 #include <portals/detail/dialog_command_result.hpp>
 #include <portals/detail/quit_command.hpp>
+#include <portals/document_view.hpp>
 #include <portals/find_bar.hpp>
 #include <portals/form_field.hpp>
 #include <portals/help_view.hpp>
@@ -18,6 +19,7 @@ namespace portals { class PopupMenu; }
 
 namespace portals::ui {
 class LogSource;
+class DocumentSource;
 template <class T> class Description;
 template <class T> class Ref;
 class DynamicRef;
@@ -68,6 +70,11 @@ struct RefTarget {
 std::expected<void, ManagedError> setLogModel(const std::shared_ptr<RefTarget> &target, Node<LogView> node,
                                               const LogSource &source, std::source_location origin);
 
+std::expected<void, ManagedError> setDocumentModel(const std::shared_ptr<RefTarget> &, Node<DocumentView>,
+                                                   const DocumentSource &, std::source_location);
+std::expected<void, ManagedError> seekDocument(const std::shared_ptr<RefTarget> &, Node<DocumentView>, std::uint64_t,
+                                               bool, std::source_location);
+std::expected<DocumentViewStatus, ManagedError> documentStatus(const std::shared_ptr<RefTarget> &, Node<DocumentView>);
 struct RefAccess;
 std::expected<bool, ManagedError> checkedValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Switch>> node);
 std::expected<PropertyUpdate<bool>, ManagedError> setChecked(std::shared_ptr<RefTarget> target,
@@ -1133,6 +1140,96 @@ public:
     return owner ? (*owner)->logStatus(this->node()) : std::unexpected(owner.error());
   }
 
+  /** @param source Owning cold descriptor. @param origin Original call site.
+   * @return Checked atomic binding
+   * admission, without reporting or source I/O.
+   */
+  std::expected<void, ManagedError> setModel(const DocumentSource &source,
+                                             std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return detail::setDocumentModel(target(), this->node(), source, origin);
+  }
+
+  /** @param source Owning cold descriptor. @param origin Original call site.
+   * @return Admission success; failure
+   * enters the scene collector once.
+   */
+  bool model(const DocumentSource &source, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    const auto result = detail::setDocumentModel(observation, this->node(), source, origin);
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result.has_value();
+  }
+
+  /** @param offset Original byte anchor. @param origin Original call site.
+   * @return Checked deferred seek
+   * admission; no worker operation occurs here.
+   */
+  std::expected<void, ManagedError> seekByte(std::uint64_t offset,
+                                             std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return detail::seekDocument(target(), this->node(), offset, false, origin);
+  }
+
+  /** @param offset Original byte anchor. @param origin Original call site.
+   * @return Seek admission; failures are
+   * collected once.
+   */
+  bool byte(std::uint64_t offset, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    const auto result = detail::seekDocument(observation, this->node(), offset, false, origin);
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result.has_value();
+  }
+
+  /** @param origin Original call site. @return Checked explicit refresh preserving the byte anchor. */
+  std::expected<void, ManagedError> refresh(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return detail::seekDocument(target(), this->node(), 0, true, origin);
+  }
+
+  /** @param origin Original call site. @return Refresh admission; failures are collected once. */
+  bool reload(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    const auto result = detail::seekDocument(observation, this->node(), 0, true, origin);
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result.has_value();
+  }
+
+  /** @return Checked owning scalar observation without I/O, callbacks or automatic reporting. */
+  std::expected<DocumentViewStatus, ManagedError> status() const
+    requires std::same_as<T, DocumentView>
+  {
+    return detail::documentStatus(target(), this->node());
+  }
+
+  /** @param origin Original observation site. @return Status, or empty after collecting the exact failure once. */
+  std::optional<DocumentViewStatus> currentStatus(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    const auto result = detail::documentStatus(observation, this->node());
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+      return {};
+    }
+    return *result;
+  }
   /** @param metrics Exact standalone extent and viewport.
    * @param origin Command site retained by the scene collector.
    * @return Checked metrics command; an area projection is not a metrics writer.

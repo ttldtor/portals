@@ -442,7 +442,7 @@ private:
                             "CheckBox",      "Switch",        "RadioGroup",
                             "Slider",        "SpinBox",       "VBox",
                             "Button",        "Border",        "Gauge",
-                            "Spinner",       "ScrollArea",    "ScrollBar",
+                            "Spinner",       "ScrollArea",    "ScrollBar", "DocumentView",
                             "LogView",       "Overlay",       "HelpView",
                             "KeyHints",      "VirtualList",   "VirtualTable",
                             "StatusBar",     "Chart",         "DataStateView",
@@ -611,7 +611,11 @@ private:
       if (!parsed) {
         return std::unexpected(withProperty(parsed.error(), type, path));
       }
-      if (path == "frames") {
+      if (path == "file") {
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        document->file = std::move(value);
+        settings.document = std::move(document);
+      } else if (path == "frames") {
         settings.spinnerFrames = std::move(value);
       } else if (path == "themeCatalog.initialId.value") {
         settings.themeCatalog.initialId.value = std::move(value);
@@ -708,7 +712,15 @@ private:
 
       const bool enabled = value == "true";
 
-      if (path == "fitWidth") {
+      if (path == "lineNumbers" || path == "wrap") {
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        if (path == "lineNumbers") {
+          document->lineNumbers = enabled;
+        } else {
+          document->wrap = enabled;
+        }
+        settings.document = std::move(document);
+      } else if (path == "fitWidth") {
         settings.fitWidth = enabled;
       } else if (path == "fitHeight") {
         settings.fitHeight = enabled;
@@ -801,7 +813,11 @@ private:
 
       const auto index = found - schema->enumNames.begin();
 
-      if (path == "securePolicy.storage") {
+      if (path == "encoding") {
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        document->encoding = static_cast<DocumentEncoding>(index);
+        settings.document = std::move(document);
+      } else if (path == "securePolicy.storage") {
         settings.securePolicy.storage = static_cast<SecureStringStorage>(index);
       } else if (path == "pastePolicy") {
         settings.pastePolicy = static_cast<PasswordPastePolicy>(index);
