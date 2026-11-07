@@ -6,6 +6,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 #include <portals/style_pss.hpp>
+#include <portals/style_source.hpp>
 
 #include <functional>
 #include <limits>
@@ -2722,4 +2723,110 @@ TEST_CASE("pure sizing layer replacements retain ownership and atomic validation
   CHECK_FALSE(updated.sizing->maxWidth);
   CHECK_FALSE(updated.sizing->minHeight);
   CHECK_FALSE(updated.sizing->maxHeight);
+}
+
+TEST_CASE("semantic registration reports its first allocation failure without publication") {
+  Fixture fixture;
+  const std::array names{std::string_view("body")};
+  const auto revision = fixture.engine.revision();
+  allocation_test::remaining = 0;
+  auto registered = fixture.engine.registerRoles(fixture.subject, names);
+  allocation_test::remaining = -1;
+
+  REQUIRE_FALSE(registered);
+  CHECK(registered.error().cause == TreeError::NO_MEMORY);
+  CHECK(fixture.engine.revision() == revision);
+  CHECK(fixture.engine.registerRoles(fixture.subject, names));
+}
+
+TEST_CASE("semantic document validation allocates only for roles and returns typed failure") {
+  const auto plain = take(parsePssDocument("Widget{bold:true;}"));
+  const auto semantic = take(parsePssDocument("Widget{role-body-bold:true;}"));
+  allocation_test::remaining = 0;
+  auto ordinary = detail::validateStyleDocument(plain);
+  allocation_test::remaining = -1;
+
+  REQUIRE(ordinary);
+  allocation_test::remaining = 0;
+  auto failed = detail::validateStyleDocument(semantic);
+  allocation_test::remaining = -1;
+
+  REQUIRE_FALSE(failed);
+  CHECK(failed.error().code == PssErrorCode::ALLOCATION);
+  CHECK(failed.error().cause == TreeError::NO_MEMORY);
+  CHECK(detail::validateStyleDocument(semantic));
+}
+
+TEST_CASE("semantic unregistration failure retains the live palette") {
+  Fixture fixture;
+  const std::array names{std::string_view("body")};
+  const auto registration = take(fixture.engine.registerRoles(fixture.subject, names));
+  const auto palette = registration.snapshot();
+  const auto revision = fixture.engine.revision();
+  allocation_test::remaining = 0;
+  auto removed = fixture.engine.unregisterRoles(registration);
+  allocation_test::remaining = -1;
+
+  REQUIRE_FALSE(removed);
+  CHECK(removed.error().cause == TreeError::NO_MEMORY);
+  CHECK(registration.snapshot() == palette);
+  CHECK(fixture.engine.revision() == revision);
+  REQUIRE(fixture.engine.unregisterRoles(registration));
+  CHECK_FALSE(registration.snapshot());
+}
+
+TEST_CASE("semantic parser allocation failures stay inside the checked parse boundary") {
+  constexpr std::ptrdiff_t MAX_ROLE_PARSE_ALLOCATION_PROBES = 128;
+  bool succeeded{};
+  unsigned failures{};
+
+  for (std::ptrdiff_t budget = 0; budget < MAX_ROLE_PARSE_ALLOCATION_PROBES && !succeeded; ++budget) {
+    allocation_test::remaining = budget;
+    auto parsed = parsePss("Widget{role-body-foreground:#010203;}");
+    allocation_test::remaining = -1;
+
+    if (!parsed) {
+      ++failures;
+      CHECK(parsed.error().cause == TreeError::NO_MEMORY);
+    } else {
+      succeeded = true;
+      REQUIRE(parsed->rules.front().roles);
+      CHECK(parsed->rules.front().roles->front().name == "body");
+    }
+  }
+  CHECK(failures > 0);
+  CHECK(succeeded);
+}
+
+TEST_CASE("semantic palette staging failures preserve its previous published revision") {
+  constexpr std::ptrdiff_t MAX_ROLE_STAGING_ALLOCATION_PROBES = 160;
+  bool succeeded{};
+  unsigned failures{};
+
+  for (std::ptrdiff_t budget = 0; budget < MAX_ROLE_STAGING_ALLOCATION_PROBES && !succeeded; ++budget) {
+    Fixture fixture;
+    take(fixture.engine.enableLayers());
+    const std::array names{std::string_view("body")};
+    const auto registration = take(fixture.engine.registerRoles(fixture.subject, names));
+    const auto handle = take(fixture.engine.addLayer(StyleTier::USER, "role", foreground(RED)));
+    const auto palette = registration.snapshot();
+    const auto revision = fixture.engine.revision();
+    const auto candidate = take(parsePss("Widget{role-body-foreground:#010203;}"));
+    allocation_test::remaining = budget;
+    auto changed = fixture.engine.replaceLayer(handle, candidate);
+    allocation_test::remaining = -1;
+
+    if (!changed) {
+      ++failures;
+      CHECK(changed.error().cause == TreeError::NO_MEMORY);
+      CHECK(registration.snapshot() == palette);
+      CHECK(fixture.engine.revision() == revision);
+      REQUIRE(fixture.engine.replaceLayer(handle, candidate));
+    } else {
+      succeeded = true;
+      CHECK(registration.snapshot() != palette);
+    }
+  }
+  CHECK(failures > 0);
+  CHECK(succeeded);
 }

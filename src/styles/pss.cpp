@@ -32,6 +32,7 @@ public:
     origin_ = PssRuleOrigin{};
     glyphs_.reset();
     sizing_.reset();
+    roles_.reset();
     origin_.selector = location;
     origin_.declarationBegin = document.declarations.size();
 
@@ -92,6 +93,40 @@ public:
       current_.scrollbarGlyphs = glyphs_;
     }
 
+    std::shared_ptr<const std::string> roleName;
+    if (detail::pssRoleProperty(property)) {
+      if (!detail::validStyleRoleName(value.roleName)) {
+        return std::unexpected(detail::pssError(PssErrorCode::INVALID_VALUE, location, "Invalid semantic role name"));
+      }
+      auto admitted = charge(sizeof(std::string) + value.roleName.size(), location);
+      if (!admitted) {
+        return admitted;
+      }
+      if (!roles_) {
+        admitted = charge(sizeof(std::vector<StyleRolePatch>), location);
+        if (!admitted) {
+          return admitted;
+        }
+        roles_ = std::make_shared<std::vector<StyleRolePatch>>(0);
+      }
+      if (std::ranges::find(*roles_, value.roleName, &StyleRolePatch::name) == roles_->end()) {
+        if (rolePatches_ == MAX_STYLE_ROLE_PATCHES) {
+          return std::unexpected(
+            detail::pssError(PssErrorCode::DECLARATION_LIMIT, location, "Too many semantic role patches"));
+        }
+        ++rolePatches_;
+        admitted = charge(sizeof(StyleRolePatch) + value.roleName.size(), location);
+        if (!admitted) {
+          return admitted;
+        }
+      }
+      detail::assignPssRole(property, value, value.roleName, *roles_);
+      current_.roles = roles_;
+      if (metadata_) {
+        roleName = std::make_shared<const std::string>(value.roleName);
+      }
+    }
+
     if (metadata_) {
       auto admitted = charge(sizeof(PssDeclarationOrigin), location);
 
@@ -101,9 +136,12 @@ public:
 
       origin_.effectiveDeclaration[static_cast<std::size_t>(property)] = document.declarations.size();
       ++origin_.declarationCount;
-      document.declarations.push_back({document.sheet.rules.size(), property, location, value, glyph});
+      document.declarations.push_back({document.sheet.rules.size(), property, location, value, glyph, roleName});
     }
 
+    if (detail::pssRoleProperty(property)) {
+      return {};
+    }
     if (property >= PssProperty::WIDTH) {
       if (!sizing_) {
         auto admitted = charge(sizeof(StyleSizing), location);
@@ -170,10 +208,12 @@ private:
   std::string_view source_;
   bool metadata_;
   std::size_t ownedBytes_{};
+  std::size_t rolePatches_{};
   StyleRule current_;
   PssRuleOrigin origin_;
   std::shared_ptr<detail::ScrollbarGlyphRefs> glyphs_;
   std::optional<StyleSizing> sizing_;
+  std::shared_ptr<std::vector<StyleRolePatch>> roles_;
   std::shared_ptr<const std::string> sourceName_;
 };
 

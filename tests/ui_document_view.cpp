@@ -4,7 +4,9 @@
 #include "../src/widgets/document_view_state.hpp"
 #include <atomic>
 #include <doctest.h>
+#include <portals/style_pss.hpp>
 #include <portals/ui.hpp>
+#include <portals/ui_style.hpp>
 #include <source_location>
 #include <thread>
 
@@ -206,6 +208,51 @@ struct Fixture {
     return take(scene->input(*app, KeyEvent{.key = key}));
   }
 };
+
+class PartSink final : public PaintContext {
+public:
+  struct Text {
+    std::string bytes;
+    CellPoint origin;
+    CellRect clip;
+    CellStyle style;
+  };
+
+  std::vector<Text> texts;
+
+  std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+    for (const auto &command : commands) {
+      if (const auto *text = std::get_if<TextCommand>(&command)) {
+        texts.push_back({std::string(text->text.bytes()), text->origin, text->clip, text->style});
+      }
+    }
+    return {};
+  }
+
+  CellStyle part(std::string_view bytes) const {
+    const auto found = std::find_if(texts.begin(), texts.end(), [&](const Text &text) {
+      return text.bytes == bytes;
+    });
+    REQUIRE(found != texts.end());
+    return found->style;
+  }
+};
+
+PartSink paint(Fixture &fixture) {
+  PartSink sink;
+  take(fixture.app->tree().frame([&] {
+    take(fixture.app->tree().paint(fixture.node, sink));
+  }));
+  return sink;
+}
+
+std::uint64_t navigationSerial(Fixture &fixture) {
+  std::uint64_t serial{};
+  take(fixture.app->tree().read(fixture.node, [&](const DocumentView &widget) {
+    serial = detail::DocumentViewAccess::state(widget).serial;
+  }));
+  return serial;
+}
 } // namespace
 
 TEST_CASE("cold factory mounts fluent native framing without UI metadata reads") {
@@ -640,7 +687,9 @@ TEST_CASE("cold distant seek displays its actual marker with distance-independen
     REQUIRE_FALSE(frame->rows.empty());
     CHECK(frame->status.byteOffset == anchor);
     CHECK(frame->status.visibleByteOffset == anchor);
-    CHECK(frame->rows.front().bytes().starts_with("      ?  TARGET-"));
+    CHECK(frame->rows.front().bytes().starts_with("TARGET-"));
+    REQUIRE(frame->gutters);
+    CHECK(frame->gutters->front().bytes() == "      ?  ");
     CHECK_FALSE(frame->status.logicalLine);
     CHECK_FALSE(frame->status.totalLines);
     CHECK_FALSE(frame->status.preparing);
@@ -874,4 +923,178 @@ TEST_CASE("known empty source keeps an empty final line without a fabricated dec
     CHECK(f.frame()->status.logicalLine == 1);
     CHECK(f.frame()->status.totalLines == 1);
   }
+}
+
+TEST_CASE("document body gutter and position paint actual role states without source work") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = "body\nsecond";
+  Fixture f(ui::document(provider), {.lineNumbers = true});
+  take(f.scene->theme(take(parsePss("DocumentView{foreground:#101112;role-body-foreground:#212223;"
+                                    "role-gutter-foreground:#313233;role-position-foreground:#414243;}"
+                                    "DocumentView:focused{role-gutter-foreground:#515253;}"
+                                    "DocumentView:disabled{role-body-foreground:#616263;}"))));
+  f.settle(3);
+  const auto frame = f.frame();
+  REQUIRE(frame);
+  REQUIRE(frame->footer);
+  const auto reads = provider->reads.load();
+  const auto submissions = f.executor.submissions;
+  const auto serial = navigationSerial(f);
+  auto sink = paint(f);
+  CHECK(sink.part("body").foreground == RgbColor{0x21, 0x22, 0x23});
+  CHECK(sink.part("      1  ").foreground == RgbColor{0x51, 0x52, 0x53});
+  CHECK(sink.part(frame->footer->bytes()).foreground == RgbColor{0x41, 0x42, 0x43});
+
+  const auto next = take(parsePss("DocumentView{foreground:#101112;role-body-foreground:#717273;"
+                                  "role-gutter-foreground:#818283;role-position-foreground:#919293;}"));
+  take(f.app->tree().consumeFrameRequest());
+  take(f.scene->theme(next));
+  CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::PAINT);
+  sink = paint(f);
+  CHECK(sink.part("body").foreground == RgbColor{0x71, 0x72, 0x73});
+  CHECK(sink.part("      1  ").foreground == RgbColor{0x81, 0x82, 0x83});
+  CHECK(sink.part(frame->footer->bytes()).foreground == RgbColor{0x91, 0x92, 0x93});
+  take(f.scene->theme(next));
+  CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  CHECK(f.frame() == frame);
+  CHECK(navigationSerial(f) == serial);
+  CHECK(provider->reads.load() == reads);
+  CHECK(f.executor.submissions == submissions);
+  CHECK_FALSE(provider->uiOperation.load());
+
+  take(f.scene->theme(take(parsePss("DocumentView{role-body-foreground:#212223;}"
+                                    "DocumentView:disabled{role-body-foreground:#616263;}"))));
+  take(f.app->tree().setEnabled(f.node, false));
+  f.pump();
+  CHECK(paint(f).part("body").foreground == RgbColor{0x61, 0x62, 0x63});
+  CHECK(f.frame() == frame);
+  CHECK(navigationSerial(f) == serial);
+  CHECK(provider->reads.load() == reads);
+  CHECK(f.executor.submissions == submissions);
+}
+
+TEST_CASE("typed live theme inheritance and masked body roles repaint without navigation") {
+  namespace sc = portals::style::ct;
+  constexpr auto LIVE = sc::sheet(sc::parameters(sc::parameter<"color">(sc::rgb(12, 23, 34))),
+                                  sc::rule(sc::selector(), sc::foreground(sc::token<"color">())));
+  Fixture f(source("body"), {.lineNumbers = true});
+  take(f.scene->enableStyleLayers());
+  auto live = take(sc::live(*f.scene, LIVE));
+  const auto override =
+    take(f.scene->addLayer(StyleTier::USER, "parts", take(parsePss("DocumentView{role-gutter-foreground:#AABBCC;}"))));
+  f.settle(3);
+  const auto frame = f.frame();
+  REQUIRE(frame);
+  REQUIRE(frame->footer);
+  const auto submissions = f.executor.submissions;
+  const auto serial = navigationSerial(f);
+  CHECK(paint(f).part("body").foreground == RgbColor{12, 23, 34});
+  CHECK(take(live.set<"color">(RgbColor{45, 56, 67})));
+  auto sink = paint(f);
+  CHECK(sink.part("body").foreground == RgbColor{45, 56, 67});
+  CHECK(sink.part("      1  ").foreground == RgbColor{0xAA, 0xBB, 0xCC});
+  CHECK(sink.part(frame->footer->bytes()).foreground == RgbColor{45, 56, 67});
+  take(f.scene->replaceLayer(override,
+                             take(parsePss("DocumentView{foreground:#DEADBE;role-body-foreground:#010203;"
+                                           "role-gutter-foreground:#AABBCC;role-position-foreground:#040506;}"))));
+  CHECK(take(live.set<"color">(RgbColor{78, 89, 90})));
+  CHECK(paint(f).part("body").foreground == RgbColor{1, 2, 3});
+  take(f.app->tree().consumeFrameRequest());
+  take(f.scene->replaceLayer(override,
+                             take(parsePss("DocumentView{foreground:#DEADBE;role-body-foreground:#070809;"
+                                           "role-gutter-foreground:#AABBCC;role-position-foreground:#040506;}"))));
+  CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::PAINT);
+  CHECK(paint(f).part("body").foreground == RgbColor{7, 8, 9});
+  CHECK(f.frame() == frame);
+  CHECK(navigationSerial(f) == serial);
+  CHECK(f.executor.submissions == submissions);
+}
+
+TEST_CASE("narrow document gutters clip prepared parts and preserve byte anchors") {
+  Fixture f(source("body\nsecond"), {.lineNumbers = true});
+  f.size = {3, 4};
+  f.settle(3);
+  const auto frame = f.frame();
+  REQUIRE(frame);
+  REQUIRE(frame->gutters);
+  REQUIRE_FALSE(frame->anchors.empty());
+  CHECK(frame->anchors.front() == 0);
+  CHECK(take(f.reference.status()).byteOffset == 0);
+  const auto sink = paint(f);
+  const auto gutter = std::find_if(sink.texts.begin(), sink.texts.end(), [](const PartSink::Text &text) {
+    return text.bytes == "      1  ";
+  });
+  REQUIRE(gutter != sink.texts.end());
+  CHECK(gutter->clip.size().width == 1);
+  CHECK(std::none_of(sink.texts.begin(), sink.texts.end(), [](const PartSink::Text &text) {
+    return text.bytes == "b" || text.bytes == "body";
+  }));
+}
+
+TEST_CASE("unflushed role admission reports once and permits target retirement in the collector") {
+  Fixture f(source("unread"));
+  unsigned callbacks{};
+  take(f.scene->onError([&](const ManagedDiagnostic &diagnostic) {
+    ++callbacks;
+    CHECK(diagnostic.error.phase == ManagedPhase::STYLE);
+    CHECK(std::get<TreeError>(diagnostic.error.cause) == TreeError::WOULD_BLOCK);
+    take(f.app->tree().remove(f.node));
+  }));
+  const auto bounds = take(CellRect::from({}, f.size));
+  std::optional<LayoutSnapshot> layout;
+  take(f.app->tree().frame([&] {
+    take(layoutTree(f.app->tree(), f.app->root(), bounds, bounds));
+    layout.emplace(take(LayoutSnapshot::capture(f.app->tree(), f.app->root(), LayoutSnapshotProfile::GEOMETRY)));
+  }));
+  take(f.scene->prepareViews(*f.app, *layout));
+  CHECK(callbacks == 1);
+  CHECK(f.executor.submissions == 0);
+  CHECK_FALSE(f.app->tree().read(f.node, [](const DocumentView &) {
+  }));
+}
+
+TEST_CASE("document paint rejects sink removal and preserves every prepared role part") {
+  Fixture f(source("body\nsecond"), {.lineNumbers = true});
+  take(f.scene->theme(take(parsePss("DocumentView{role-body-foreground:#010203;role-gutter-foreground:#040506;"
+                                    "role-position-foreground:#070809;}"))));
+  f.settle(3);
+  const auto footer = [&] {
+    const auto frame = f.frame();
+    REQUIRE(frame);
+    REQUIRE(frame->footer);
+    return std::string(frame->footer->bytes());
+  }();
+
+  class MutationSink final : public PaintContext {
+  public:
+    Fixture &fixture;
+    PartSink captured;
+    std::optional<TreeError> removalError;
+
+    explicit MutationSink(Fixture &owner) : fixture(owner) {
+    }
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      take(captured.submit(commands));
+      for (const auto &command : commands) {
+        if (const auto *text = std::get_if<TextCommand>(&command);
+            text && text->text.bytes() == "body" && !removalError) {
+          const auto removed = fixture.app->tree().remove(fixture.node);
+          REQUIRE_FALSE(removed);
+          removalError = removed.error();
+        }
+      }
+      return {};
+    }
+  } sink(f);
+
+  take(f.app->tree().frame([&] {
+    take(f.app->tree().paint(f.node, sink));
+  }));
+  CHECK(sink.removalError == TreeError::WOULD_BLOCK);
+  CHECK(sink.captured.part("body").foreground == RgbColor{1, 2, 3});
+  CHECK(sink.captured.part("      1  ").foreground == RgbColor{4, 5, 6});
+  CHECK(sink.captured.part(footer).foreground == RgbColor{7, 8, 9});
+  CHECK(f.app->tree().read(f.node, [](const DocumentView &) {
+  }));
 }

@@ -3,13 +3,49 @@
 #pragma once
 #include "scroll_controls_state.hpp"
 #include <array>
+#include <limits>
 #include <portals/document_view.hpp>
+#include <portals/style.hpp>
 
 namespace portals::ui::detail {
 struct SceneActivity;
 }
 
 namespace portals::detail {
+inline constexpr std::int32_t DOCUMENT_GUTTER_CELLS = 9;
+inline constexpr std::size_t DOCUMENT_PREPARATION_ENVELOPE = 64 * 1024;
+inline constexpr std::size_t DOCUMENT_PREPARED_CELL_BYTES = 128;
+
+// One checked allowance is shared by job/frame admission and peak overlap.
+// Separate gutter text has its own vector/object/cluster capacity even when
+// only a narrow clipped prefix is visible in the actual viewport.
+inline std::expected<std::size_t, SourceError> documentPreparationBytes(CellSize viewport,
+                                                                        const DocumentViewConfig &config) noexcept {
+  constexpr auto MAX = std::numeric_limits<std::size_t>::max();
+  if (viewport.width <= 0 || viewport.height <= 0) {
+    return std::unexpected(SourceError::PAGE_TOO_LARGE);
+  }
+  const auto width = static_cast<std::size_t>(viewport.width);
+  const auto height = static_cast<std::size_t>(viewport.height);
+  if (width > MAX / height || width * height > config.maxFrameCells) {
+    return std::unexpected(SourceError::PAGE_TOO_LARGE);
+  }
+  auto bytes = DOCUMENT_PREPARATION_ENVELOPE;
+  const auto include = [&](std::size_t count, std::size_t unit) {
+    if (count > (MAX - bytes) / unit) {
+      return false;
+    }
+    bytes += count * unit;
+    return true;
+  };
+  constexpr auto GUTTER_ROW_BYTES = sizeof(GraphemeText) + DOCUMENT_GUTTER_CELLS * DOCUMENT_PREPARED_CELL_BYTES;
+  if (!include(config.maxFrameBytes, 4) || !include(width * height, DOCUMENT_PREPARED_CELL_BYTES) ||
+      (config.lineNumbers && !include(height, GUTTER_ROW_BYTES))) {
+    return std::unexpected(SourceError::PAGE_TOO_LARGE);
+  }
+  return bytes;
+}
+
 inline constexpr std::size_t DOCUMENT_CHECKPOINTS = 256;
 inline constexpr std::size_t DOCUMENT_CLUSTER_BYTES = 4096;
 inline constexpr std::size_t DOCUMENT_CLUSTER_SCALARS = 512;
@@ -88,6 +124,8 @@ struct DocumentPreparedFrame {
   SourceCredit credit; // Declared first: payload is destroyed before returning credit.
   DocumentViewStatus status;
   std::vector<GraphemeText> rows = std::vector<GraphemeText>(std::initializer_list<GraphemeText>{});
+  std::optional<std::vector<GraphemeText>> gutters;
+  std::int32_t gutterCells{};
   std::vector<std::uint64_t> anchors = std::vector<std::uint64_t>(0);
   std::unique_ptr<GraphemeText> footer;
   CellSize viewport;
@@ -99,6 +137,7 @@ struct DocumentViewState {
   std::shared_ptr<const DocumentPreparedFrame> frame;
   std::shared_ptr<ui::detail::SceneActivity> activity;
   std::shared_ptr<ByteDocumentSource> source;
+  StyleRoleRegistration roles;
   DocumentViewStatus status;
   std::uint64_t anchor{};
   std::uint64_t horizontal{};

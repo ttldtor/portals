@@ -12,8 +12,6 @@ namespace {
 constexpr std::uint64_t LOCAL_PRECONTEXT_BYTES = DOCUMENT_CLUSTER_BYTES;
 constexpr std::uint64_t LOCAL_LOOKBEHIND_BYTES = 3;
 constexpr std::size_t CHECKPOINT_DISTANCE = 64 * 1024;
-constexpr std::int32_t LINE_GUTTER = 9;
-constexpr std::size_t PREPARATION_ENVELOPE = 64 * 1024;
 
 struct PreparationFailure {
   DocumentError error;
@@ -30,7 +28,7 @@ void appendScalar(std::string &text, char32_t scalar) {
 }
 
 std::int32_t contentWidth(const DocumentPrepareIntent &intent) {
-  return std::max(1, intent.viewport.width - (intent.config.lineNumbers ? LINE_GUTTER : 0));
+  return std::max(1, intent.viewport.width - (intent.config.lineNumbers ? DOCUMENT_GUTTER_CELLS : 0));
 }
 
 void saveCheckpoint(DocumentScan &scan, const DocumentLayoutCheckpoint &point) {
@@ -432,8 +430,11 @@ bool prepareLocalStart(DocumentScan &scan, ByteDocumentSource &source, const Doc
 
 std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocumentSource> source,
                                                        const DocumentPrepareIntent &intent, const DocumentScan &scan) {
-  const auto cells = static_cast<std::size_t>(intent.viewport.width) * static_cast<std::size_t>(intent.viewport.height);
-  const auto reserved = PREPARATION_ENVELOPE + intent.config.maxFrameBytes * 4 + cells * 128;
+  const auto amount = documentPreparationBytes(intent.viewport, intent.config);
+  if (!amount) {
+    fail(amount.error());
+  }
+  const auto reserved = *amount;
   auto credit = source->budget()->reserve({reserved, 0, 0, 0});
   if (!credit) {
     DocumentError error{credit.error(), {}, {}};
@@ -462,6 +463,11 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
   frame->status.finalEnd = scan.done;
   frame->status.fragmentedCluster = scan.fragmented;
   frame->rows.reserve(scan.rows.size() + 1);
+  if (intent.config.lineNumbers) {
+    frame->gutters.emplace(std::initializer_list<GraphemeText>{});
+    frame->gutters->reserve(scan.rows.size() + 1);
+    frame->gutterCells = DOCUMENT_GUTTER_CELLS;
+  }
   frame->anchors.reserve(scan.rows.size() + 1);
 
   auto rows = scan.rows;
@@ -484,13 +490,21 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
       }
       rendered.assign(number.data());
     }
-    rendered.append(row.bytes);
-    renderedBytes += rendered.size();
+    renderedBytes += rendered.size() + row.bytes.size();
     if (renderedBytes > intent.config.maxFrameBytes) {
       fail(SourceError::PAGE_TOO_LARGE);
     }
+    if (frame->gutters) {
+      auto gutter = GraphemeText::from(
+        rendered, intent.width,
+        {DOCUMENT_GUTTER_CELLS, DOCUMENT_GUTTER_CELLS, DOCUMENT_GUTTER_CELLS, DOCUMENT_GUTTER_CELLS});
+      if (!gutter) {
+        fail(SourceError::PAGE_TOO_LARGE);
+      }
+      frame->gutters->push_back(std::move(*gutter));
+    }
     auto text =
-      GraphemeText::from(rendered, intent.width,
+      GraphemeText::from(row.bytes, intent.width,
                          {intent.config.maxFrameBytes + 32, DOCUMENT_CLUSTER_BYTES, intent.config.maxFrameBytes + 32,
                           static_cast<std::size_t>(intent.viewport.width) + 32});
     if (!text) {

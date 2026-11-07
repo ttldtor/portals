@@ -147,6 +147,7 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
     StyleDeclarations effective;
     std::optional<StyleSizing> sizing;
     detail::ScrollbarGlyphRefs glyphs;
+    std::optional<std::vector<StyleRolePatch>> roles;
 
     last.fill(NO_PSS_DECLARATION);
 
@@ -172,32 +173,41 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
       } else if (declaration.glyph) {
         return invalid(declaration.location, "Unexpected PSS glyph occurrence payload");
       }
-      const bool color = declaration.property == PssProperty::FOREGROUND ||
-                         declaration.property == PssProperty::BACKGROUND ||
-                         declaration.property == PssProperty::FRAME_LINE_FOREGROUND ||
-                         declaration.property == PssProperty::FRAME_LINE_BACKGROUND ||
-                         declaration.property == PssProperty::FRAME_TITLE_FOREGROUND ||
-                         declaration.property == PssProperty::FRAME_TITLE_BACKGROUND ||
-                         declaration.property == PssProperty::FRAME_ENDS_FOREGROUND ||
-                         declaration.property == PssProperty::FRAME_ENDS_BACKGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_TRACK_FOREGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_TRACK_BACKGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_START_FOREGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_START_BACKGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_BODY_FOREGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_BODY_BACKGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_END_FOREGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_END_BACKGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_SINGLE_FOREGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_SINGLE_BACKGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_FOREGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_THUMB_BACKGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_ENDS_FOREGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_ENDS_BACKGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_ARROWS_FOREGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_ARROWS_BACKGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_CORNER_FOREGROUND ||
-                         declaration.property == PssProperty::SCROLLBAR_CORNER_BACKGROUND;
+      const bool role = detail::pssRoleProperty(declaration.property);
+      if (role != bool(declaration.roleName) || (role && !detail::validStyleRoleName(*declaration.roleName))) {
+        return invalid(declaration.location, "Invalid owning semantic role destination");
+      }
+      if (role && !charge(sizeof(std::string) + declaration.roleName->size())) {
+        return std::unexpected(
+          detail::pssError(PssErrorCode::DOCUMENT_LIMIT, declaration.location, "Semantic provenance exceeds budget"));
+      }
+      const bool color =
+        declaration.property == PssProperty::ROLE_FOREGROUND || declaration.property == PssProperty::ROLE_BACKGROUND ||
+        declaration.property == PssProperty::FOREGROUND || declaration.property == PssProperty::BACKGROUND ||
+        declaration.property == PssProperty::FRAME_LINE_FOREGROUND ||
+        declaration.property == PssProperty::FRAME_LINE_BACKGROUND ||
+        declaration.property == PssProperty::FRAME_TITLE_FOREGROUND ||
+        declaration.property == PssProperty::FRAME_TITLE_BACKGROUND ||
+        declaration.property == PssProperty::FRAME_ENDS_FOREGROUND ||
+        declaration.property == PssProperty::FRAME_ENDS_BACKGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_TRACK_FOREGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_TRACK_BACKGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_START_FOREGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_START_BACKGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_BODY_FOREGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_BODY_BACKGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_END_FOREGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_END_BACKGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_SINGLE_FOREGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_SINGLE_BACKGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_FOREGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_THUMB_BACKGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_ENDS_FOREGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_ENDS_BACKGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_ARROWS_FOREGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_ARROWS_BACKGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_CORNER_FOREGROUND ||
+        declaration.property == PssProperty::SCROLLBAR_CORNER_BACKGROUND;
       const bool axis = declaration.property == PssProperty::WIDTH || declaration.property == PssProperty::HEIGHT;
       const bool width =
         declaration.property == PssProperty::MIN_WIDTH || declaration.property == PssProperty::MAX_WIDTH ||
@@ -249,7 +259,19 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
       }
 
       last[property] = index;
-      if (declaration.property >= PssProperty::WIDTH) {
+      if (role) {
+        try {
+          if (!roles) {
+            roles.emplace(0);
+          }
+          detail::assignPssRole(declaration.property, value, *declaration.roleName, *roles);
+        } catch (const std::bad_alloc &) {
+          auto failure =
+            detail::pssError(PssErrorCode::ALLOCATION, declaration.location, "Semantic validation allocation failed");
+          failure.cause = TreeError::NO_MEMORY;
+          return std::unexpected(failure);
+        }
+      } else if (declaration.property >= PssProperty::WIDTH) {
         if (!sizing) {
           sizing.emplace();
         }
@@ -260,6 +282,21 @@ std::expected<void, PssError> validateStyleDocument(const PssDocument &document)
       }
     }
 
+    if ((bool(roles) != bool(rule.roles)) || (roles && *rule.roles != *roles)) {
+      return invalid(origin.selector, "Semantic provenance disagrees with final declarations");
+    }
+    if (rule.roles) {
+      if (!charge(sizeof(std::vector<StyleRolePatch>)) || !chargeRecords(roles->size(), sizeof(StyleRolePatch))) {
+        return std::unexpected(
+          detail::pssError(PssErrorCode::DOCUMENT_LIMIT, origin.selector, "Semantic declarations exceed budget"));
+      }
+      for (const auto &patch : *roles) {
+        if (!charge(patch.name.size())) {
+          return std::unexpected(
+            detail::pssError(PssErrorCode::DOCUMENT_LIMIT, origin.selector, "Semantic names exceed budget"));
+        }
+      }
+    }
     if (last != origin.effectiveDeclaration || effective != rule.declarations) {
       return invalid(origin.selector, "PSS last-wins provenance disagrees with final declarations");
     }

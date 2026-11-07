@@ -5,6 +5,7 @@
 #include <portals/style_types.hpp>
 #include <portals/widget.hpp>
 
+#include <initializer_list>
 #include <memory>
 #include <span>
 #include <string>
@@ -17,7 +18,9 @@ struct PssDocument;
 
 namespace detail {
 struct StyleThemeReceiver;
-}
+struct StyleRoleState;
+struct StyleRoleTestAccess;
+} // namespace detail
 
 /** @brief Presentation states; ANY matches every state without changing behavior. */
 enum class StyleState {
@@ -86,6 +89,82 @@ struct StylePaintDeclarations {
   bool operator==(const StylePaintDeclarations &other) const = default;
 };
 
+/** @brief Maximum ASCII bytes in a registered lower-kebab semantic role name. */
+inline constexpr std::size_t MAX_STYLE_ROLE_NAME_BYTES = 63;
+/// Maximum aggregate typed semantic patches in one admitted stylesheet.
+inline constexpr std::size_t MAX_STYLE_ROLE_PATCHES = 4096;
+
+namespace detail {
+constexpr bool validStyleRoleName(std::string_view name) noexcept {
+  if (name.empty() || name.size() > MAX_STYLE_ROLE_NAME_BYTES || name.front() < 'a' || name.front() > 'z' ||
+      name.back() == '-') {
+    return false;
+  }
+  for (const char value : name) {
+    if (!((value >= 'a' && value <= 'z') || (value >= '0' && value <= '9') || value == '-')) {
+      return false;
+    }
+  }
+  return true;
+}
+} // namespace detail
+
+/** @brief Cold sparse paint patch; names never encode focus or selection state. */
+struct StyleRolePatch {
+  ~StyleRolePatch() = default;  ///< Checked container copies may allocate; suppress implicit noexcept moves.
+  std::string name{""};         ///< Lower-kebab name, copied by owning declarations.
+  StylePaintDeclarations paint; ///< Absent leaves inherit the resolved ordinary surface.
+  bool operator==(const StyleRolePatch &) const = default; ///< @return Equal name and paint leaves.
+};
+
+/** @brief Limits paid only by opt-in semantic registrations. */
+struct StyleRoleLimits {
+  std::size_t maxRegistrations{256};       ///< Positive maximum live registrations, also bounded by maxBindings.
+  std::size_t maxRolesPerRegistration{32}; ///< Positive maximum names in one registration.
+  std::size_t maxTotalRoles{4096};         ///< Positive aggregate count of live registered names.
+};
+
+/** @brief One immutable-at-publication role in normal/focused/disabled/selected/header/caret order. */
+struct StyleRoleValue {
+  ~StyleRoleValue() = default;                             ///< Keep checked string transfers throwable.
+  std::string name{""};                                    ///< Registered owned name.
+  std::array<CellStyle, 6> states{};                       ///< Actual paint values after the existing cascade.
+  bool operator==(const StyleRoleValue &) const = default; ///< @return Equal name and resolved states.
+};
+
+/** @brief Owning role projection; retain a const shared snapshot across node/engine retirement. */
+struct StyleRolePalette {
+  ~StyleRolePalette() = default;                                       ///< Keep checked vector transfers throwable.
+  std::vector<StyleRoleValue> values = std::vector<StyleRoleValue>(0); ///< Bounded registered names only.
+  /** @param name Exact registered role. @param state Actual presentation state; ANY uses NORMAL.
+   * @return Paint value, or empty for an absent name/invalid state. Never allocates.
+   */
+  std::optional<CellStyle> find(std::string_view name, StyleState state = StyleState::NORMAL) const noexcept;
+  bool operator==(const StyleRolePalette &) const = default; ///< @return Equal effective role values.
+};
+
+/** @brief UI-thread scoped registration; the engine retains only a weak observer.
+ * Copies share participation. Dropping the last copy retires it without callbacks;
+ * use unregisterRoles for explicit paint invalidation while the node remains live.
+ * Retained palette snapshots own their data and never assert that a node is live.
+ */
+class StyleRoleRegistration {
+public:
+  StyleRoleRegistration() = default; ///< Empty allocation-free handle.
+  /** @return Last immutable projection, or null after explicit unregister/engine destruction.
+   * Foreign-thread observation returns null; a copied palette remains valid after retirement.
+   */
+  std::shared_ptr<const StyleRolePalette> snapshot() const noexcept;
+  /** @return Last publication revision; zero for empty/retired handles or foreign-thread observation. */
+  std::uint64_t revision() const noexcept;
+
+private:
+  friend class StyleEngine;
+  friend struct detail::StyleRoleTestAccess;
+  std::shared_ptr<detail::StyleRoleState> state_;
+  std::shared_ptr<const void> participation_;
+};
+
 /** @brief Typed declarations; absent values preserve less-specific rules or widget defaults. */
 struct StyleDeclarations {
   std::optional<RgbColor> foreground;       ///< RGB text color.
@@ -132,6 +211,7 @@ struct StyleRule {
   std::shared_ptr<const detail::ScrollbarGlyphRefs> scrollbarGlyphs;
   /// @endcond
   std::shared_ptr<const StyleSizing> sizing; ///< Optional immutable runtime sizing; shared ownership, never a view.
+  std::shared_ptr<const std::vector<StyleRolePatch>> roles; ///< Optional cold immutable semantic declarations.
 
   /** @param other Owning value to compare.
    * @return Whether all typed fields are equal.
@@ -141,7 +221,8 @@ struct StyleRule {
            ((!scrollbarGlyphs && !other.scrollbarGlyphs) ||
             (scrollbarGlyphs && other.scrollbarGlyphs &&
              detail::equalScrollbarGlyphs(*scrollbarGlyphs, *other.scrollbarGlyphs))) &&
-           (sizing == other.sizing || (sizing && other.sizing && *sizing == *other.sizing));
+           (sizing == other.sizing || (sizing && other.sizing && *sizing == *other.sizing)) &&
+           (roles == other.roles || (roles && other.roles && *roles == *other.roles));
   }
 };
 
@@ -300,8 +381,9 @@ class StyleEngine {
 public:
   /** @param tree Borrowed UI owner, required to outlive the engine.
    * @param maxBindings Positive registry budget; default matches the tree's default capacity.
+   * @param roleLimits Explicit opt-in counts; coherence is checked before role registration.
    */
-  explicit StyleEngine(WidgetTree &tree, std::size_t maxBindings = 4096);
+  explicit StyleEngine(WidgetTree &tree, std::size_t maxBindings = 4096, StyleRoleLimits roleLimits = {});
   StyleEngine(const StyleEngine &) = delete;
   StyleEngine &operator=(const StyleEngine &) = delete;
 
@@ -324,6 +406,25 @@ public:
   /// @param registrations Borrowed live targets and metadata, copied during staging.
   /// @return Coalesced invalidation, or an error preserving all values, bindings and revisions.
   std::expected<Invalidation, StyleError> bindBatch(std::span<const StyleRegistration> registrations);
+  /** @brief Register an existing bound node for a bounded semantic projection.
+   * @param node Checked live binding. @param names Unique lower-kebab names copied before publication.
+   * @return Scoped owning registration, or atomic argument/budget/lifetime/allocation failure.
+   */
+  std::expected<StyleRoleRegistration, StyleError> registerRoles(Node<Widget> node,
+                                                                 std::span<const std::string_view> names);
+
+  /** @param node Checked live binding. @param names Borrowed names copied during this call.
+   * @return Scoped registration or the exact checked registration failure.
+   */
+  std::expected<StyleRoleRegistration, StyleError> registerRoles(Node<Widget> node,
+                                                                 std::initializer_list<std::string_view> names) {
+    return registerRoles(node, std::span<const std::string_view>(names.begin(), names.size()));
+  }
+
+  /** @param registration Live registration of this engine, retained by the caller.
+   * @return One paint invalidation on success, or typed failure preserving the projection.
+   */
+  std::expected<Invalidation, StyleError> unregisterRoles(const StyleRoleRegistration &registration);
   /** @brief Install a complete typed stylesheet atomically between frames.
    * @param sheet Owned replacement rules; validation and staging precede commit.
    * @return Actual paint/layout invalidation, or error retaining sheet/revision/widget values.
@@ -436,16 +537,17 @@ private:
     std::weak_ptr<const void> lifetime;
   };
 
+  using RoleRegistry = std::vector<std::weak_ptr<detail::StyleRoleState>>;
+
   struct Binding {
     Node<Widget> node;
     StyleTarget target;
   };
 
-  std::expected<Invalidation, StyleError> install(StyleSheet sheet, std::vector<Binding> &&bindings,
-                                                  LayerState *candidate = nullptr, bool wholeReplace = false,
-                                                  const detail::StyleThemeLease *lease = nullptr,
-                                                  const PreviewCapture *previewCapture = nullptr,
-                                                  bool notifyTheme = false);
+  std::expected<Invalidation, StyleError>
+  install(StyleSheet sheet, std::vector<Binding> &&bindings, LayerState *candidate = nullptr, bool wholeReplace = false,
+          const detail::StyleThemeLease *lease = nullptr, const PreviewCapture *previewCapture = nullptr,
+          bool notifyTheme = false, std::shared_ptr<const RoleRegistry> *roleCandidate = nullptr);
   std::expected<Invalidation, StyleError> replaceOwnedTheme(const StyleSheet &sheet, detail::StyleThemeLease lease);
   std::expected<void, StyleError> mergeBindings(std::span<const StyleRegistration> registrations,
                                                 std::optional<std::vector<Binding>> &destination);
@@ -470,6 +572,8 @@ private:
   std::size_t maxBindings_;
   StyleSheet sheet_;
   std::vector<Binding> bindings_ = std::vector<Binding>(0);
+  StyleRoleLimits roleLimits_;
+  std::shared_ptr<const RoleRegistry> roleRegistrations_;
   std::uint64_t revision_{};
   std::shared_ptr<const void> lifetime_ = std::make_shared<const char>(char{});
   const std::thread::id owner_ = std::this_thread::get_id();
