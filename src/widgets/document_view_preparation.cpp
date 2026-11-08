@@ -326,7 +326,8 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
                                           const std::shared_ptr<const DocumentScan> &previous) {
   // The caller qualifies the complete navigation intent before requesting resume.
   // Matching only anchor/horizontal would retain a different rowDelta's skip state.
-  const bool resume = previous && intent.resume;
+  const bool resume =
+    previous && intent.resume && (!intent.tail || !previous->tail || previous->tail->height == intent.viewport.height);
   auto scan = resume ? std::make_shared<DocumentScan>(*previous) : std::make_shared<DocumentScan>();
   if (resume) {
     scan->waiting = false;
@@ -343,6 +344,12 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
   scan->scalarCheckpoint.revision = metadata.revision;
   scan->clusterCheckpoint.revision = metadata.revision;
   scan->skipRows = intent.rowDelta > 0 ? static_cast<std::uint64_t>(intent.rowDelta) : 0;
+
+  if (intent.tail && metadata.capabilities.seekable && metadata.byteExtent && *metadata.byteExtent) {
+    scan->tail.emplace();
+    scan->tail->height = intent.viewport.height;
+  }
+
   if (!intent.tail && !previous && intent.seed && intent.seed->revision == metadata.revision && intent.seed->decoder &&
       intent.seed->offset <= intent.anchor) {
     scan->decoder = DocumentDecoder::restore(*intent.seed->decoder);
@@ -381,7 +388,7 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
         selected = &candidate;
       }
     }
-    if (selected) {
+    if (selected && !scan->tail) {
       scan->decoder = DocumentDecoder::restore(*selected->decoder);
       scan->offset = selected->offset;
       scan->rowOffset = selected->offset;
@@ -400,6 +407,236 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
   return scan;
 }
 
+bool readLocalProbe(DocumentScan &scan, ByteDocumentSource &source, const DocumentPrepareIntent &intent,
+                    std::uint64_t base, std::uint64_t generation, std::size_t &work, std::stop_token stop) {
+  if (scan.localProbeOffset != base) {
+    scan.localProbeOffset = base;
+    scan.localProbeSize = 0;
+    scan.localProbeFinal = false;
+  }
+
+  while (scan.localProbeSize < scan.localProbe.size() && !scan.localProbeFinal) {
+    if (stop.stop_requested()) {
+      fail(SourceError::CANCELLED);
+    }
+
+    const auto count =
+      std::min({source.maxPageBytes(), scan.localProbe.size() - scan.localProbeSize, intent.config.workBytes - work});
+
+    if (!count) {
+      return false;
+    }
+
+    auto page = source.read({scan.metadata.revision, base + scan.localProbeSize, count, generation}, stop);
+
+    if (!page) {
+      if (page.error().code == SourceError::NO_PROGRESS) {
+        scan.waiting = true;
+
+        return false;
+      }
+
+      throw PreparationFailure{page.error()};
+    }
+
+    std::ranges::copy(page->bytes(), scan.localProbe.begin() + static_cast<std::ptrdiff_t>(scan.localProbeSize));
+    scan.localProbeSize += page->bytes().size();
+    work += page->bytes().size();
+    scan.localProbeFinal = page->finalEnd();
+  }
+
+  return true;
+}
+
+void captureOrigin(DocumentScan &scan, const DocumentPrepareIntent &intent) {
+  DocumentDecoder decoder(intent.config.decoder);
+  const auto bytes = std::span(scan.localProbe).first(scan.localProbeSize);
+  std::size_t consumed{};
+
+  do {
+    std::array<DecodedScalar, 1> output{};
+    // Capture a real resolved boundary before EOF; BOM-only input may have none.
+    const auto decoded = decoder.feed(bytes.subspan(consumed), consumed, false, output);
+    consumed += decoded.inputConsumed;
+    scan.origin = decoder.checkpoint();
+
+    if (decoded.status == DocumentDecodeStatus::MALFORMED ||
+        decoded.status == DocumentDecodeStatus::ENCODING_UNRESOLVED ||
+        decoded.status == DocumentDecodeStatus::UNSUPPORTED_POLICY) {
+      fail(SourceError::INVALID_REPLY);
+    }
+
+    if (!decoded.inputConsumed && !decoded.outputProduced) {
+      break;
+    }
+  } while (!scan.origin && consumed < bytes.size());
+}
+
+std::uint8_t tailUnitWidth(DocumentEncoding encoding) noexcept {
+  switch (encoding) {
+  case DocumentEncoding::UTF16LE:
+  case DocumentEncoding::UTF16BE:
+    return 2;
+  case DocumentEncoding::UTF32LE:
+  case DocumentEncoding::UTF32BE:
+    return 4;
+  default:
+    return 1;
+  }
+}
+
+char32_t tailUnitValue(const DocumentTailSearch &tail, DocumentEncoding encoding, std::uint8_t width) noexcept {
+  const bool bigEndian = encoding == DocumentEncoding::UTF16BE || encoding == DocumentEncoding::UTF32BE;
+  char32_t value{};
+
+  for (std::uint8_t index = 0; index < width; ++index) {
+    const auto byte = bigEndian ? index : width - 1 - index;
+    value = (value << 8) | std::to_integer<std::uint8_t>(tail.unit[byte]);
+  }
+
+  return value;
+}
+
+bool findTailBoundary(DocumentScan &scan, ByteDocumentSource &source, const DocumentPrepareIntent &intent,
+                      std::uint64_t generation, std::size_t &work, std::stop_token stop) {
+  auto &tail = *scan.tail;
+  const auto encoding = DocumentDecoder::restore(*scan.origin).encoding();
+  const auto width = tailUnitWidth(encoding);
+
+  while (tail.cursor && work < intent.config.workBytes) {
+    if (stop.stop_requested()) {
+      fail(SourceError::CANCELLED);
+    }
+
+    const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(
+      std::min({source.maxPageBytes(), tail.readLimit, intent.config.workBytes - work}), tail.cursor));
+    auto page = source.read({scan.metadata.revision, tail.cursor - count, count, generation}, stop);
+
+    if (!page) {
+      if (page.error().code == SourceError::NO_PROGRESS) {
+        scan.waiting = true;
+
+        return false;
+      }
+
+      throw PreparationFailure{page.error()};
+    }
+
+    const auto bytes = page->bytes();
+    work += bytes.size();
+
+    if (bytes.size() < count) {
+      // A short reply contains the left prefix, not the right edge needed here.
+      // Retry the same cursor with a geometrically smaller bound; charge discarded I/O.
+      tail.readLimit = std::min(bytes.size(), std::max<std::size_t>(1, count / 2));
+
+      continue;
+    }
+
+    for (auto index = bytes.size(); index > 0; --index) {
+      tail.unit[width - 1 - tail.unitSize] = bytes[index - 1];
+      ++tail.unitSize;
+      --tail.cursor;
+
+      if (tail.unitSize != width) {
+        continue;
+      }
+
+      tail.unitSize = 0;
+      const auto value = tailUnitValue(tail, encoding, width);
+      const bool separator = value == U'\n' || value == U'\r';
+      const bool joinedCr = value == U'\r' && tail.followingLf;
+
+      if (separator && !joinedCr) {
+        if (tail.terminal) {
+          // The final separator terminates a row; it does not add a phantom row.
+          tail.terminal = false;
+        } else if (++tail.separators >= static_cast<std::size_t>(tail.height)) {
+          tail.start = tail.cursor + width;
+          tail.phase = DocumentTailPhase::RESTART;
+
+          return true;
+        }
+      } else if (!separator) {
+        tail.terminal = false;
+      }
+
+      tail.followingLf = value == U'\n';
+    }
+  }
+
+  return tail.cursor == 0;
+}
+
+bool prepareTailStart(DocumentScan &scan, ByteDocumentSource &source, const DocumentPrepareIntent &intent,
+                      std::uint64_t generation, std::size_t &work, std::stop_token stop) {
+  if (!scan.tail || scan.tail->phase == DocumentTailPhase::DECODE) {
+    return true;
+  }
+
+  if (scan.tail->phase == DocumentTailPhase::ORIGIN) {
+    if (!scan.origin) {
+      if (!readLocalProbe(scan, source, intent, 0, generation, work, stop)) {
+        return false;
+      }
+
+      captureOrigin(scan, intent);
+    }
+
+    if (!scan.origin) {
+      scan.tail->phase = DocumentTailPhase::DECODE;
+
+      return true;
+    }
+
+    auto &tail = *scan.tail;
+    const auto width = tailUnitWidth(DocumentDecoder::restore(*scan.origin).encoding());
+    const auto extent = *scan.metadata.byteExtent;
+    tail.cursor = extent - extent % width;
+    tail.terminal = extent % width == 0;
+    tail.readLimit = source.maxPageBytes();
+    tail.phase = DocumentTailPhase::SEARCH;
+  }
+
+  if (scan.tail->phase == DocumentTailPhase::SEARCH) {
+    if (!findTailBoundary(scan, source, intent, generation, work, stop)) {
+      return false;
+    }
+
+    if (scan.tail->phase != DocumentTailPhase::RESTART) {
+      // Too few complete rows: retain the original decoder and exact origin line count.
+      scan.tail->phase = DocumentTailPhase::DECODE;
+
+      return true;
+    }
+  }
+
+  const auto start = scan.tail->start;
+  const auto base = start > LOCAL_LOOKBEHIND_BYTES ? start - LOCAL_LOOKBEHIND_BYTES : 0;
+
+  if (!readLocalProbe(scan, source, intent, base, generation, work, stop)) {
+    return false;
+  }
+
+  const auto bytes = std::span(scan.localProbe).first(scan.localProbeSize);
+  const auto proof = DocumentDecoder::localCheckpoint(*scan.origin, bytes, base, start, scan.localProbeFinal);
+
+  if (proof.status != DocumentDecoderLocalStatus::READY || !proof.checkpoint || proof.restartByteOffset != start) {
+    fail(SourceError::INVALID_REPLY);
+  }
+
+  scan.decoder = DocumentDecoder::restore(*proof.checkpoint);
+  scan.offset = start;
+  scan.rowOffset = start;
+  scan.rowEnd = start;
+  scan.lineKnown = false;
+  scan.scalarCheckpoint = {scan.metadata.revision, proof.checkpoint, start, 1, false, false, false};
+  // Keep the height proof while decoding: a waiting suffix may outlive a resize.
+  scan.tail->phase = DocumentTailPhase::DECODE;
+
+  return true;
+}
+
 bool prepareLocalStart(DocumentScan &scan, ByteDocumentSource &source, const DocumentPrepareIntent &intent,
                        std::uint64_t generation, std::size_t &work, std::stop_token stop) {
   if (!scan.localPending) {
@@ -408,71 +645,19 @@ bool prepareLocalStart(DocumentScan &scan, ByteDocumentSource &source, const Doc
 
   const auto target = std::min(intent.anchor, scan.metadata.byteExtent.value_or(intent.anchor));
   const auto restartTarget = target - LOCAL_PRECONTEXT_BYTES;
-  while (scan.localPending) {
-    if (stop.stop_requested()) {
-      fail(SourceError::CANCELLED);
-    }
 
+  while (scan.localPending) {
     const auto base =
       scan.origin && restartTarget > LOCAL_LOOKBEHIND_BYTES ? restartTarget - LOCAL_LOOKBEHIND_BYTES : 0;
-    if (scan.localProbeOffset != base) {
-      scan.localProbeOffset = base;
-      scan.localProbeSize = 0;
-      scan.localProbeFinal = false;
+
+    if (!readLocalProbe(scan, source, intent, base, generation, work, stop)) {
+      return false;
     }
 
-    if (scan.localProbeSize < scan.localProbe.size() && !scan.localProbeFinal) {
-      const auto count =
-        std::min({source.maxPageBytes(), scan.localProbe.size() - scan.localProbeSize, intent.config.workBytes - work});
-      if (!count) {
-        return false;
-      }
-
-      auto page = source.read({scan.metadata.revision, base + scan.localProbeSize, count, generation}, stop);
-      if (!page) {
-        if (page.error().code == SourceError::NO_PROGRESS) {
-          scan.waiting = true;
-
-          return false;
-        }
-
-        throw PreparationFailure{page.error()};
-      }
-
-      std::ranges::copy(page->bytes(), scan.localProbe.begin() + static_cast<std::ptrdiff_t>(scan.localProbeSize));
-      scan.localProbeSize += page->bytes().size();
-      work += page->bytes().size();
-      scan.localProbeFinal = page->finalEnd();
-
-      if (scan.localProbeSize < scan.localProbe.size() && !scan.localProbeFinal) {
-        continue;
-      }
-    }
-
-    const auto bytes = std::span(scan.localProbe).first(scan.localProbeSize);
     if (!scan.origin) {
-      DocumentDecoder decoder(intent.config.decoder);
-      std::size_t consumed{};
-      do {
-        std::array<DecodedScalar, 1> output{};
-        // No EOF: capture a real resolved boundary before the decoder is finished.
-        const auto decoded = decoder.feed(bytes.subspan(consumed), consumed, false, output);
-        consumed += decoded.inputConsumed;
-        scan.origin = decoder.checkpoint();
-        if (decoded.status == DocumentDecodeStatus::MALFORMED ||
-            decoded.status == DocumentDecodeStatus::ENCODING_UNRESOLVED ||
-            decoded.status == DocumentDecodeStatus::UNSUPPORTED_POLICY) {
-          fail(SourceError::INVALID_REPLY);
-        }
-
-        if (!decoded.inputConsumed && !decoded.outputProduced) {
-          break;
-        }
-      } while (!scan.origin && consumed < bytes.size());
+      captureOrigin(scan, intent);
 
       if (!scan.origin) {
-        // A short BOM-only source has no capturable origin. The ordinary EOF
-        // path handles it without inventing a continuation checkpoint.
         scan.localPending = false;
 
         return true;
@@ -481,7 +666,9 @@ bool prepareLocalStart(DocumentScan &scan, ByteDocumentSource &source, const Doc
       continue;
     }
 
+    const auto bytes = std::span(scan.localProbe).first(scan.localProbeSize);
     const auto proof = DocumentDecoder::localCheckpoint(*scan.origin, bytes, base, restartTarget, scan.localProbeFinal);
+
     if (proof.status != DocumentDecoderLocalStatus::READY || !proof.checkpoint) {
       fail(SourceError::INVALID_REPLY);
     }
@@ -496,8 +683,7 @@ bool prepareLocalStart(DocumentScan &scan, ByteDocumentSource &source, const Doc
     scan.localStart = true;
     scan.regionalContextUnknown = true;
     scan.localPending = false;
-    // If the bounded precontext itself lies inside one pathological cluster,
-    // retain the existing explicit continuation policy instead of hiding a split.
+    // A pathological cluster may need the existing explicit continuation policy.
     scan.resumeContinuation = true;
   }
 
@@ -658,7 +844,8 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
     previous.reset();
     std::size_t work{};
     bool drain{};
-    const bool localReady = prepareLocalStart(*scan, *source, intent, generation, work, stop);
+    const bool tailReady = prepareTailStart(*scan, *source, intent, generation, work, stop);
+    const bool localReady = tailReady && prepareLocalStart(*scan, *source, intent, generation, work, stop);
 
     while (localReady && !scan->done && !scan->waiting &&
            (!enoughRows(*scan, intent) || needsCrLfLookahead(*scan, intent)) && work < intent.config.workBytes) {

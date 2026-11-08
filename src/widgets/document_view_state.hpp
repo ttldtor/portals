@@ -69,6 +69,26 @@ struct DocumentPreparedRow {
   std::uint64_t end{};
 };
 
+enum class DocumentTailPhase {
+  ORIGIN,
+  SEARCH,
+  RESTART,
+  DECODE
+};
+
+struct DocumentTailSearch {
+  DocumentTailPhase phase{DocumentTailPhase::ORIGIN};
+  std::int32_t height{};
+  std::uint64_t cursor{};
+  std::uint64_t start{};
+  std::size_t separators{};
+  std::size_t readLimit{};
+  std::array<std::byte, 4> unit{};
+  std::uint8_t unitSize{};
+  bool terminal{true};
+  bool followingLf{};
+};
+
 // Only a worker mutates a new copy. Published snapshots are never modified again.
 struct DocumentScan {
   std::shared_ptr<const SourceCredit> reservation; // Outlives every copied/published scanner allocation.
@@ -87,6 +107,7 @@ struct DocumentScan {
   std::uint64_t localProbeOffset{};
   bool localProbeFinal{};
   bool localPending{};
+  std::optional<DocumentTailSearch> tail;
   bool localStart{};
   bool regionalContextUnknown{};
   bool lineKnown{true};
