@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- DocumentView End and dragging to EOF find a bounded final page from the tail
+  of seekable sources with a known exact extent, avoiding a mandatory full-file
+  scan. Distant logical line numbers remain unknown; very long lines can still
+  require substantial background scanning. Existing raw-byte seeks are unchanged.
+
 - DocumentView footer percentage estimates coverage of original source bytes
   through the lower edge of visible content. It reaches 100% only when the final
   source byte is visible; decoder read-ahead and decoded UTF-8 size do not count.
