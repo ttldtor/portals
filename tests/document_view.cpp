@@ -20,7 +20,11 @@ class Provider final : public ByteDocumentProvider {
 public:
   std::string text = std::string(0, '\0');
   std::uint64_t revision{1};
+  std::optional<std::uint64_t> syntheticExtent;
+  std::optional<std::size_t> maxReply;
+  bool seekable{true};
   bool unknown{};
+  bool finalUnknown{};
   bool temporaryEmpty{};
   std::atomic<std::size_t> reads{};
   std::atomic<std::size_t> admittedBytes{};
@@ -29,12 +33,13 @@ public:
   const std::thread::id ui = std::this_thread::get_id();
 
   ByteDocumentCapabilities capabilities() const noexcept override {
-    return {true, false};
+    return {seekable, false};
   }
 
   std::expected<ByteDocumentMetadata, DocumentError> metadata(std::stop_token) override {
     uiOperation = uiOperation || std::this_thread::get_id() == ui;
-    return ByteDocumentMetadata{revision, unknown ? std::nullopt : std::optional<std::uint64_t>(text.size())};
+    return ByteDocumentMetadata{revision,
+                                unknown ? std::nullopt : std::optional(syntheticExtent.value_or(text.size()))};
   }
 
   std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
@@ -49,11 +54,22 @@ public:
     if (temporaryEmpty) {
       return ByteReadResult{};
     }
-    const auto offset = std::min<std::uint64_t>(command.offset, text.size());
-    const auto count = std::min(destination.size(), text.size() - static_cast<std::size_t>(offset));
-    std::memcpy(destination.data(), text.data() + offset, count);
+    const auto extent = syntheticExtent.value_or(text.size());
+    const auto offset = std::min(command.offset, extent);
+    const auto count = static_cast<std::size_t>(
+      std::min<std::uint64_t>(std::min(destination.size(), maxReply.value_or(destination.size())), extent - offset));
+
+    if (syntheticExtent) {
+      REQUIRE_FALSE(text.empty());
+      for (std::size_t byte = 0; byte < count; ++byte) {
+        destination[byte] = static_cast<std::byte>(text[(offset + byte) % text.size()]);
+      }
+    } else {
+      std::memcpy(destination.data(), text.data() + offset, count);
+    }
+
     admittedBytes += count;
-    return ByteReadResult{count, !unknown && offset + count == text.size()};
+    return ByteReadResult{count, (!unknown || finalUnknown) && offset + count == extent};
   }
 };
 
@@ -63,8 +79,9 @@ struct Fixture {
   std::shared_ptr<ByteDocumentSource> source;
   detail::DocumentPrepareIntent intent;
 
-  explicit Fixture(std::string text, std::size_t page = 64 * 1024) {
+  explicit Fixture(std::string text, std::size_t page = 64 * 1024, bool seekable = true) {
     provider->text = std::move(text);
+    provider->seekable = seekable;
     source = take(ByteDocumentSource::create(provider, budget, {.maxPageBytes = page}));
     intent.viewport = {20, 4};
     intent.config.workBytes = 1024;
@@ -84,16 +101,17 @@ struct Fixture {
     return result;
   }
 
-  std::shared_ptr<const detail::DocumentPreparation> finish(std::size_t turns = 1000) {
+  std::shared_ptr<const detail::DocumentPreparation> finish(std::size_t turns = 1000,
+                                                            std::shared_ptr<const detail::DocumentScan> previous = {}) {
     std::shared_ptr<const detail::DocumentPreparation> result;
     for (std::size_t turn = 0; turn < turns; ++turn) {
-      auto previous = result ? result->scan : nullptr;
-      intent.resume = result && result->continueWork;
+      intent.resume = previous != nullptr;
       result.reset();
       result = run(std::move(previous));
       if (result->error || !result->continueWork) {
         return result;
       }
+      previous = result->scan;
     }
     FAIL("bounded test turn limit reached");
     return result;
@@ -531,4 +549,426 @@ TEST_CASE("tail preparation ignores a bookmark seed without a full-screen row pr
   REQUIRE(result->frame->rows.size() == 4);
   CHECK(result->frame->rows.front().bytes() == "row-6");
   CHECK(result->frame->rows.back().bytes() == "row-9");
+}
+
+TEST_CASE("cold tail reads a bounded suffix of a large seekable document") {
+  constexpr std::uint64_t SOURCE_BYTES = 64 * 1024 * 1024;
+  constexpr std::size_t VIEWPORT_ROWS = 48;
+  Fixture f("row\n");
+  f.provider->syntheticExtent = SOURCE_BYTES;
+  f.intent.viewport = {40, VIEWPORT_ROWS};
+  f.intent.config.workBytes = 256 * 1024;
+  f.intent.config.wrap = false;
+  f.intent.anchor = SOURCE_BYTES;
+  f.intent.tail = true;
+
+  const auto result = f.finish();
+
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->rows.size() == VIEWPORT_ROWS);
+  CHECK(result->frame->rows.front().bytes() == "row");
+  CHECK(result->frame->rows.back().bytes() == "row");
+  CHECK(result->frame->status.visibleByteOffset == SOURCE_BYTES - VIEWPORT_ROWS * f.provider->text.size());
+  CHECK(result->frame->finalEndVisible);
+  CHECK(f.provider->admittedBytes.load() <=
+        2 * f.source->maxPageBytes() + VIEWPORT_ROWS * f.provider->text.size() + DocumentDecoder::LOCAL_WINDOW_BYTES);
+}
+
+namespace {
+std::string tailEncodedRows(DocumentEncoding encoding, std::string_view separator, bool bom, unsigned count = 6) {
+  std::string bytes;
+  const bool bigEndian = encoding == DocumentEncoding::UTF16BE || encoding == DocumentEncoding::UTF32BE;
+  const unsigned width = encoding == DocumentEncoding::UTF16LE || encoding == DocumentEncoding::UTF16BE   ? 2
+                         : encoding == DocumentEncoding::UTF32LE || encoding == DocumentEncoding::UTF32BE ? 4
+                                                                                                          : 1;
+  const auto appendUnit = [&](std::uint32_t value) {
+    for (unsigned byte = 0; byte < width; ++byte) {
+      const auto shift = (bigEndian ? width - byte - 1 : byte) * 8;
+      bytes += static_cast<char>((value >> shift) & 0xff);
+    }
+  };
+
+  if (bom) {
+    if (encoding == DocumentEncoding::UTF8) {
+      bytes += "\xEF\xBB\xBF";
+    } else if (width > 1) {
+      appendUnit(0xfeff);
+    }
+  }
+
+  for (unsigned row = 0; row < count; ++row) {
+    for (const auto value : "row-" + std::to_string(row) + ":") {
+      appendUnit(static_cast<unsigned char>(value));
+    }
+    if (encoding == DocumentEncoding::UTF8) {
+      bytes += "\xF0\x9F\x99\x82";
+    } else if (width == 2) {
+      appendUnit(0xd83d);
+      appendUnit(0xde42);
+    } else if (width == 4) {
+      appendUnit(0x1f642);
+    } else {
+      appendUnit(encoding == DocumentEncoding::WINDOWS1251 ? 0xc6 : 0xe9);
+    }
+    for (const auto value : separator) {
+      appendUnit(static_cast<unsigned char>(value));
+    }
+  }
+
+  return bytes;
+}
+} // namespace
+
+TEST_CASE("tail restart preserves encodings and CRLF across one-byte work and page seams") {
+  const std::array encodings{DocumentEncoding::UTF8,       DocumentEncoding::UTF16LE, DocumentEncoding::UTF16BE,
+                             DocumentEncoding::UTF32LE,    DocumentEncoding::UTF32BE, DocumentEncoding::WINDOWS1251,
+                             DocumentEncoding::WINDOWS1252};
+
+  for (const auto encoding : encodings) {
+    for (std::size_t page = 1; page <= 4; ++page) {
+      CAPTURE(encoding);
+      CAPTURE(page);
+      const bool unicode = encoding != DocumentEncoding::WINDOWS1251 && encoding != DocumentEncoding::WINDOWS1252;
+      Fixture f(tailEncodedRows(encoding, "\r\n", unicode), page);
+      f.intent.viewport = {40, 3};
+      f.intent.config.workBytes = page;
+      f.intent.config.decoder.workLimit = 1;
+      if (!unicode) {
+        f.intent.config.decoder.explicitEncoding = encoding;
+      }
+      f.intent.anchor = f.provider->text.size();
+      f.intent.tail = true;
+
+      const auto result = f.finish();
+
+      REQUIRE_FALSE(result->error);
+      REQUIRE(result->frame);
+      REQUIRE(result->frame->rows.size() == 3);
+      const auto glyph = encoding == DocumentEncoding::WINDOWS1251   ? "\xD0\x96"
+                         : encoding == DocumentEncoding::WINDOWS1252 ? "\xC3\xA9"
+                                                                     : "\xF0\x9F\x99\x82";
+      CHECK(result->frame->rows.front().bytes() == std::string("row-3:") + glyph);
+      CHECK(result->frame->rows.back().bytes() == std::string("row-5:") + glyph);
+      CHECK(result->frame->finalEndVisible);
+      CHECK_FALSE(result->frame->status.logicalLine);
+      CHECK_FALSE(result->frame->status.totalLines);
+    }
+  }
+}
+
+TEST_CASE("tail preserves blank rows and terminal separators without a phantom row") {
+  struct Case {
+    std::string text;
+    std::vector<std::string> rows;
+    std::optional<std::uint64_t> firstLine;
+  };
+
+  const std::array cases{Case{"", {""}, 1},
+                         Case{"\n", {""}, 1},
+                         Case{"\r\n", {""}, 1},
+                         Case{"\n\n\n\n", {"", "", ""}, {}},
+                         Case{"a\r\n\r\nb\r\n\r\n", {"", "b", ""}, {}},
+                         Case{"a\rb\rc\rd", {"b", "c", "d"}, {}},
+                         Case{"a\nb\nc\n", {"a", "b", "c"}, 1}};
+
+  for (const auto &entry : cases) {
+    CAPTURE(entry.text);
+    Fixture f(entry.text, 1);
+    f.intent.viewport = {20, 3};
+    f.intent.config.workBytes = 1;
+    f.intent.anchor = entry.text.size();
+    f.intent.tail = true;
+
+    const auto result = f.finish();
+
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == entry.rows.size());
+    for (std::size_t row = 0; row < entry.rows.size(); ++row) {
+      CHECK(result->frame->rows[row].bytes() == entry.rows[row]);
+    }
+    CHECK(result->frame->status.finalEnd);
+    CHECK(result->frame->status.logicalLine == entry.firstLine);
+  }
+}
+
+TEST_CASE("tail retries short backward prefixes without changing their order") {
+  Fixture f("row\r\n");
+  f.provider->syntheticExtent = 5 * 1024 * 1024;
+  f.provider->maxReply = 3;
+  f.intent.viewport = {40, 5};
+  f.intent.config.workBytes = 512;
+  f.intent.anchor = *f.provider->syntheticExtent;
+  f.intent.tail = true;
+
+  const auto result = f.finish();
+
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->rows.size() == 5);
+  CHECK(result->frame->rows.front().bytes() == "row");
+  CHECK(result->frame->rows.back().bytes() == "row");
+  CHECK(result->frame->status.visibleByteOffset == *f.provider->syntheticExtent - 25);
+  CHECK(f.provider->admittedBytes.load() < 1024);
+}
+
+TEST_CASE("tail strict mode validates selected suffix without certifying omitted prefix") {
+  std::string rows = "ok\n\xFF\n";
+  for (unsigned row = 0; row < 20; ++row) {
+    rows += "row-" + std::to_string(row) + "\n";
+  }
+
+  SUBCASE("the malformed omitted prefix does not prevent a valid suffix") {
+    Fixture f(rows, 7);
+    f.intent.viewport = {20, 3};
+    f.intent.config.decoder.policy = DocumentDecodePolicy::STRICT_MODE;
+    f.intent.anchor = rows.size();
+    f.intent.tail = true;
+
+    const auto result = f.finish();
+
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 3);
+    CHECK(result->frame->rows.front().bytes() == "row-17");
+    CHECK(result->frame->rows.back().bytes() == "row-19");
+    CHECK_FALSE(result->frame->status.logicalLine);
+  }
+
+  SUBCASE("a malformed selected suffix remains a typed failure") {
+    rows += "bad-\xFF\n";
+    Fixture f(rows, 7);
+    f.intent.viewport = {20, 3};
+    f.intent.config.decoder.policy = DocumentDecodePolicy::STRICT_MODE;
+    f.intent.anchor = rows.size();
+    f.intent.tail = true;
+
+    const auto result = f.finish();
+
+    REQUIRE(result->error);
+    CHECK(result->error->code == SourceError::INVALID_REPLY);
+  }
+}
+
+TEST_CASE("tail encoding selection supports hints explicit choice and BOM-only sources") {
+  SUBCASE("a hint resolves an unmarked UTF32 source") {
+    Fixture f(tailEncodedRows(DocumentEncoding::UTF32BE, "\n", false), 3);
+    f.intent.viewport = {40, 3};
+    f.intent.config.decoder.hint = DocumentEncoding::UTF32BE;
+    f.intent.config.workBytes = 2;
+    f.intent.tail = true;
+    f.intent.anchor = f.provider->text.size();
+    const auto result = f.finish();
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 3);
+    CHECK(result->frame->rows.front().bytes().starts_with("row-3:"));
+    CHECK(result->frame->rows.back().bytes().starts_with("row-5:"));
+  }
+
+  SUBCASE("an explicit selection resolves an unmarked UTF16 source") {
+    Fixture f(tailEncodedRows(DocumentEncoding::UTF16LE, "\r\n", false), 3);
+    f.intent.viewport = {40, 3};
+    f.intent.config.decoder.explicitEncoding = DocumentEncoding::UTF16LE;
+    f.intent.config.workBytes = 2;
+    f.intent.tail = true;
+    f.intent.anchor = f.provider->text.size();
+    const auto result = f.finish();
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 3);
+    CHECK(result->frame->rows.front().bytes().starts_with("row-3:"));
+    CHECK(result->frame->rows.back().bytes().starts_with("row-5:"));
+  }
+
+  SUBCASE("BOM-only sources keep the real empty row") {
+    const std::array encodings{DocumentEncoding::UTF8, DocumentEncoding::UTF16LE, DocumentEncoding::UTF16BE,
+                               DocumentEncoding::UTF32LE, DocumentEncoding::UTF32BE};
+    for (const auto encoding : encodings) {
+      CAPTURE(encoding);
+      Fixture f(tailEncodedRows(encoding, "", true, 0), 1);
+      f.intent.config.workBytes = 1;
+      f.intent.tail = true;
+      f.intent.anchor = f.provider->text.size();
+      const auto result = f.finish();
+      REQUIRE_FALSE(result->error);
+      REQUIRE(result->frame);
+      REQUIRE(result->frame->rows.size() == 1);
+      CHECK(result->frame->rows.front().bytes().empty());
+      CHECK(result->frame->status.finalEnd);
+    }
+  }
+}
+
+TEST_CASE("tail validates partial UTF code units at the original EOF alignment") {
+  const std::array encodings{DocumentEncoding::UTF16LE, DocumentEncoding::UTF16BE, DocumentEncoding::UTF32LE,
+                             DocumentEncoding::UTF32BE};
+  const std::array policies{DocumentDecodePolicy::REPLACE, DocumentDecodePolicy::STRICT_MODE};
+
+  for (const auto encoding : encodings) {
+    for (const auto policy : policies) {
+      CAPTURE(encoding);
+      CAPTURE(policy);
+      auto text = tailEncodedRows(encoding, "\n", true);
+      text += 'x';
+      Fixture f(text, 1);
+      f.intent.viewport = {40, 3};
+      f.intent.config.workBytes = 1;
+      f.intent.config.decoder.policy = policy;
+      f.intent.tail = true;
+      f.intent.anchor = text.size();
+
+      const auto result = f.finish();
+
+      if (policy == DocumentDecodePolicy::STRICT_MODE) {
+        REQUIRE(result->error);
+        CHECK(result->error->code == SourceError::INVALID_REPLY);
+      } else {
+        REQUIRE_FALSE(result->error);
+        REQUIRE(result->frame);
+        REQUIRE(result->frame->rows.size() == 3);
+        CHECK(result->frame->rows.front().bytes().starts_with("row-4:"));
+        CHECK(result->frame->rows.back().bytes() == "\xEF\xBF\xBD");
+      }
+    }
+  }
+}
+
+TEST_CASE("tail resumes waiting search and invalidates incompatible partial searches") {
+  Fixture f("zero\none\ntwo\nthree\nfour\nfive\n", 1);
+  f.intent.viewport = {20, 3};
+  f.intent.config.workBytes = 1;
+  f.intent.tail = true;
+  f.intent.anchor = f.provider->text.size();
+  std::shared_ptr<const detail::DocumentPreparation> searching;
+
+  for (unsigned turn = 0; turn < DocumentDecoder::LOCAL_WINDOW_BYTES; ++turn) {
+    f.intent.resume = searching != nullptr;
+    searching = f.run(searching ? searching->scan : nullptr);
+    REQUIRE_FALSE(searching->error);
+    REQUIRE(searching->continueWork);
+  }
+
+  REQUIRE(searching->scan->tail);
+  REQUIRE(searching->scan->tail->phase == detail::DocumentTailPhase::SEARCH);
+
+  SUBCASE("waiting is not a final EOF and resumes the same search") {
+    f.provider->temporaryEmpty = true;
+    f.intent.resume = true;
+    const auto waiting = f.run(searching->scan);
+    REQUIRE_FALSE(waiting->error);
+    REQUIRE(waiting->scan);
+    CHECK(waiting->scan->waiting);
+    REQUIRE(waiting->frame);
+    CHECK_FALSE(waiting->frame->status.finalEnd);
+    f.provider->temporaryEmpty = false;
+    const auto result = f.finish(1000, waiting->scan);
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 3);
+    CHECK(result->frame->rows.front().bytes() == "three");
+    CHECK(result->frame->rows.back().bytes() == "five");
+  }
+
+  SUBCASE("a taller viewport invalidates a waiting suffix boundary") {
+    for (unsigned turn = 0; turn < 100 && searching->scan->tail->phase != detail::DocumentTailPhase::RESTART; ++turn) {
+      f.intent.resume = true;
+      searching = f.run(searching->scan);
+      REQUIRE_FALSE(searching->error);
+      REQUIRE(searching->scan->tail);
+    }
+
+    REQUIRE(searching->scan->tail->phase == detail::DocumentTailPhase::RESTART);
+    f.provider->temporaryEmpty = true;
+    f.intent.resume = true;
+    const auto waiting = f.run(searching->scan);
+    REQUIRE(waiting->scan);
+    REQUIRE(waiting->scan->waiting);
+    f.provider->temporaryEmpty = false;
+    f.intent.viewport.height = 5;
+
+    const auto result = f.finish(1000, waiting->scan);
+
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 5);
+    CHECK(result->frame->rows.front().bytes() == "one");
+    CHECK(result->frame->rows.back().bytes() == "five");
+  }
+
+  SUBCASE("cancellation stops the partial worker without publishing EOF") {
+    std::stop_source stop;
+    stop.request_stop();
+    f.intent.resume = true;
+    const auto cancelled = f.run(searching->scan, stop.get_token());
+    REQUIRE(cancelled->error);
+    CHECK(cancelled->error->code == SourceError::CANCELLED);
+    CHECK_FALSE(cancelled->frame);
+  }
+
+  SUBCASE("a revision change restarts origin proof before reading the new suffix") {
+    ++f.provider->revision;
+    f.provider->text = "new-a\nnew-b\nnew-c\nnew-d\n";
+    f.provider->reads = 0;
+    const auto result = f.finish(1000, searching->scan);
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 3);
+    CHECK(f.provider->firstReadOffset.load() == 0);
+    CHECK(result->frame->rows.front().bytes() == "new-b");
+    CHECK(result->frame->rows.back().bytes() == "new-d");
+  }
+}
+
+TEST_CASE("tail keeps the bounded fallback for unknown extents and forward-only sources") {
+  SUBCASE("an unknown extent with a definitive final reply") {
+    Fixture f("zero\none\ntwo\nthree\nfour\n", 3);
+    f.provider->unknown = true;
+    f.provider->finalUnknown = true;
+    f.intent.viewport = {20, 3};
+    f.intent.tail = true;
+    const auto result = f.finish();
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 3);
+    CHECK(result->frame->rows.front().bytes() == "two");
+    CHECK(result->frame->rows.back().bytes() == "four");
+    CHECK(result->frame->status.finalEnd);
+  }
+
+  SUBCASE("a known forward-only source") {
+    Fixture f("zero\none\ntwo\nthree\nfour\n", 3, false);
+    f.intent.viewport = {20, 3};
+    f.intent.tail = true;
+    f.intent.anchor = f.provider->text.size();
+    const auto result = f.finish();
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    REQUIRE(result->frame->rows.size() == 3);
+    CHECK(result->frame->rows.front().bytes() == "two");
+    CHECK(result->frame->rows.back().bytes() == "four");
+    CHECK(result->frame->status.finalEnd);
+  }
+}
+
+TEST_CASE("tail keeps the last visual rows when one logical suffix line wraps many times") {
+  std::string text;
+  for (unsigned row = 0; row < 10; ++row) {
+    text += "prefix\n";
+  }
+  text += std::string(120, 'x') + "last";
+  Fixture f(text, 3);
+  f.intent.viewport = {10, 3};
+  f.intent.config.workBytes = 7;
+  f.intent.tail = true;
+  f.intent.anchor = text.size();
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->rows.size() == 3);
+  CHECK(result->frame->rows[0].bytes() == std::string(10, 'x'));
+  CHECK(result->frame->rows[1].bytes() == std::string(10, 'x'));
+  CHECK(result->frame->rows.back().bytes() == "last");
+  CHECK(result->frame->finalEndVisible);
 }

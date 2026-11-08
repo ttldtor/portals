@@ -2012,3 +2012,42 @@ TEST_CASE("repeated scrollbar End retains a full tall page after long unwrapped 
   CHECK_FALSE(provider->uiOperation.load());
   dragDocument(f, track, MouseAction::RELEASE, end);
 }
+
+TEST_CASE("End and scrollbar maximum prepare only a bounded suffix on the managed worker") {
+  constexpr std::uint64_t SOURCE_BYTES = 64 * 1024 * 1024;
+  auto provider = std::make_shared<Provider>();
+  provider->syntheticExtent = SOURCE_BYTES;
+  Fixture f(ui::document(provider));
+  f.size = {40, 50};
+  f.settle(4);
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->viewport.height == 48);
+  provider->bytesRead = 0;
+  std::size_t pageBytes{};
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    pageBytes = detail::DocumentViewAccess::state(widget).source->maxPageBytes();
+  }));
+
+  SUBCASE("End key") {
+    REQUIRE(f.input(InputKey::END));
+  }
+
+  SUBCASE("scrollbar maximum") {
+    const auto track = documentTrack(f);
+    const auto end = track.origin.y + track.length + 10;
+    dragDocument(f, track, MouseAction::PRESS, track.origin.y);
+    REQUIRE(take(f.app->router().pointerCapture()) == f.node);
+    dragDocument(f, track, MouseAction::MOVE, end);
+    dragDocument(f, track, MouseAction::RELEASE, end);
+  }
+
+  f.settle(6);
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->rows.size() == 48);
+  CHECK(f.frame()->rows.front().bytes() == "x");
+  CHECK(f.frame()->rows.back().bytes() == "x");
+  CHECK(f.frame()->status.visibleByteOffset == SOURCE_BYTES - 96);
+  CHECK(f.frame()->finalEndVisible);
+  CHECK(provider->bytesRead.load() <= 2 * pageBytes + 96 + DocumentDecoder::LOCAL_WINDOW_BYTES);
+  CHECK_FALSE(provider->uiOperation.load());
+}
