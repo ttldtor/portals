@@ -38,12 +38,33 @@ A seekable source can prepare a distant cold seek from a bounded local window wi
 
 @image html document-view-end.gif "Dragging to EOF keeps the final full screen. The marker indicates injected mouse input."
 
+## Fast scrolling and paging {#document-view-fast-navigation}
+
+Opt in to an eight-row fast step with `.fastScroll()`. Hold Ctrl with Up/Down, or Alt while scrolling the wheel. Ordinary arrows and wheel retain their one-row default. The fast step is an absolute number of visual rows: `.scrollStep(3).fastScroll(8)` selects steps of three and eight, rather than multiplying them. Pass other `key::Modifier` values as the second and third arguments to `fastScroll` to change its keyboard and wheel modifiers. Additional modifiers do not match.
+
+PageUp/PageDown move by the useful viewport height minus `.pageOverlap(rows)`, with at least one row per page. The default overlap is one row. The useful height excludes the frame and footer. A page command uses the arranged geometry when accepted; resizing does not reinterpret movement already accepted. The fast step does not change page size.
+
+@image html document-view-navigation.gif "Ordinary wheel, eight-row fast steps, paging with two-row overlap and the final full page. The caption describes approximate injected input."
+
+[Complete navigation application](../examples/document_view/navigation.cpp), target `portals_document_navigation_example`:
+
+\include document_view/navigation.cpp
+
+Click inside the document to give it keyboard focus after using a button. The buttons and built-in input use the same navigation admission path. Command admission performs no source I/O. Pending row movements accumulate while preparation runs; opposite movements can cancel, and Home/End replace the relative target. Source replacement and cancellation keep their existing behavior.
+
+A nonzero page command before usable geometry is arranged returns `WOULD_BLOCK` through the checked/collected error mechanism. Built-in PageUp/PageDown input is consumed without movement when the arranged body has zero width or height. Zero row/page commands still validate their reference and thread, then succeed without movement or redraw. Overflow is rejected before changing pending movement. Input respects disabled and read-only navigation settings; programmatic commands retain the same convention as `seekByte` and can move the view independently of those input restrictions.
+
+The terminal may intercept shortcuts: [Windows Terminal uses Ctrl+wheel for font zoom](https://learn.microsoft.com/en-us/windows/terminal/tips-and-tricks). The separate default Alt wheel modifier avoids choosing that shortcut for fast scrolling; Portals cannot override a host shortcut that is not forwarded. Buttons and custom `ui::onKey` handlers can call the same Ref commands.
+
 ## Sources and commands {#document-view-sources}
 
 Files are one source family. `ui::document(provider, budget)` accepts a worker-safe `ByteDocumentProvider`; `ui::document(sharedText)` projects existing immutable storage without copying the entire input. A custom provider declares seeking and immutability capabilities and can leave its extent unknown. It must return an exact revision with each accepted read. Replacing a source discards incompatible prepared data; results from cancelled or superseded work cannot replace the active binding.
 
 | Operation | Collected form | Checked form |
 |---|---|---|
+| Move visual rows | `reader.scroll(rows)` | `reader.scrollRows(rows)` |
+| Move pages | `reader.page(pages)` | `reader.scrollPages(pages)` |
+| Beginning / final full page | `reader.home()` / `reader.end()` | `reader.goHome()` / `reader.goEnd()` |
 | Replace source | `reader.model(source)` | `reader.setModel(source)` |
 | Request original byte position | `reader.byte(offset)` | `reader.seekByte(offset)` |
 | Refresh at the current anchor | `reader.reload()` | `reader.refresh()` |
@@ -61,7 +82,7 @@ The default UTF-8 hint applies after an explicit encoding or a recognized BOM. S
 
 Replacement decoding is the default. Low-level `DocumentViewConfig::decoder` also supports strict decoding; a strict failure reports a typed preparation error. A local seek or fast EOF checks the selected decoded region, including the origin needed to determine its encoding; it does not certify an omitted prefix. Terminal control characters are rendered as visible escapes. Ordinary multi-scalar grapheme clusters, including those crossing page boundaries, are preserved. Local restart uses up to 4 KiB of grapheme precontext, in addition to independent decoder lookbehind. An oversized cluster or unprovable bounded grapheme context (for example, a regional-indicator run longer than 4 KiB) is shown as a visible dotted-circle continuation and sets `fragmentedCluster`. For a leading regional-indicator run, parity remains unproven until a non-regional-indicator resets it, including after a cached near seek. This bounded local projection does not limit logical line length.
 
-The native resource type is `DocumentView`. In the CONFIGURATION grammar its viewer-specific properties are `file` (a literal UTF-8 path), `lineNumbers`, `wrap` and `encoding`. The ordinary size, frame and scrollbar properties use the same semantics as their C++ modifiers. They are not accepted as viewer properties on unrelated controls.
+The native resource type is `DocumentView`. In the CONFIGURATION grammar its viewer-specific properties are `file` (a literal UTF-8 path), `lineNumbers`, `wrap` and `encoding`, plus `fastScroll`, `fastKeyModifier` and `fastWheelModifier`. A positive `fastScroll` enables the absolute fast step; modifier names `CTRL`, `ALT` and `SHIFT` are case-insensitive. Existing `keyStep` and `wheelStep` together express the `scrollStep` shorthand, and `pageOverlap` sets page overlap. The ordinary size, frame and scrollbar properties use the same semantics as their C++ modifiers. They are not accepted as viewer properties on unrelated controls.
 
 
 [Complete resource program](examples/guide_document_view_resource.cpp)
