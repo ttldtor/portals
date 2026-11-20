@@ -7,6 +7,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- DocumentView can inspect raw bytes in hexadecimal form with grouped byte cells,
+  a safe character column and independently styled byte classes. Text/hex mode
+  changes preserve the requested byte position; successful changes supersede
+  unresolved navigation in the previous representation. Row width, grouping,
+  auto-fit and mode can also be configured in loaded scenes.
+
 - DocumentView supports compact row/page/Home/End commands from references and
   opt-in fast scrolling, shared with keyboard and mouse navigation. Paging uses
   the current arranged content height, including immediately after resizing;
