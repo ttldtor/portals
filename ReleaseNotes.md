@@ -7,6 +7,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- DocumentView supports compact row/page/Home/End commands from references and
+  opt-in fast scrolling, shared with keyboard and mouse navigation. Paging uses
+  the current arranged content height, including immediately after resizing;
+  queued page movements retain their accepted row distance. Fast-step and overlap
+  settings also work in loaded scenes, with collected or checked command errors.
+
 - DocumentView End and dragging to EOF find a bounded final page from the tail
   of seekable sources with a known exact extent, avoiding a mandatory full-file
   scan. Distant logical line numbers remain unknown; very long lines can still

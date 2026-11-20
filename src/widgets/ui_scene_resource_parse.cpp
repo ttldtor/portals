@@ -437,17 +437,23 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
-    for (const auto type : {"FindBar",       "FormField",     "Password",
-                            "LineEdit",      "ComboBox",      "DropDown",
-                            "CheckBox",      "Switch",        "RadioGroup",
-                            "Slider",        "SpinBox",       "VBox",
-                            "Button",        "Border",        "Gauge",
-                            "Spinner",       "ScrollArea",    "ScrollBar", "DocumentView",
-                            "LogView",       "Overlay",       "HelpView",
-                            "KeyHints",      "VirtualList",   "VirtualTable",
-                            "StatusBar",     "Chart",         "DataStateView",
-                            "OverlayHost",   "Dialog",        "MessageBox",
-                            "Notifications", "ThemeSelector", "ThemeSelectorCatalog"}) {
+    for (const auto type : {"FindBar",       "FormField",
+                            "Password",      "LineEdit",
+                            "ComboBox",      "DropDown",
+                            "CheckBox",      "Switch",
+                            "RadioGroup",    "Slider",
+                            "SpinBox",       "VBox",
+                            "Button",        "Border",
+                            "Gauge",         "Spinner",
+                            "ScrollArea",    "ScrollBar",
+                            "DocumentView",  "LogView",
+                            "Overlay",       "HelpView",
+                            "KeyHints",      "VirtualList",
+                            "VirtualTable",  "StatusBar",
+                            "Chart",         "DataStateView",
+                            "OverlayHost",   "Dialog",
+                            "MessageBox",    "Notifications",
+                            "ThemeSelector", "ThemeSelectorCatalog"}) {
       const auto schema = controlPropertySchema(type);
       const auto found = std::ranges::find(schema, path, &ControlPropertyDescriptor::path);
 
@@ -805,7 +811,19 @@ private:
 
     if (schema->kind == ControlPropertyKind::ENUMERATION) {
       const auto value = name();
-      const auto found = std::ranges::find(schema->enumNames, value);
+      const bool documentModifier = path == "fastKeyModifier" || path == "fastWheelModifier";
+      const auto found = std::ranges::find_if(schema->enumNames, [&](std::string_view candidate) {
+        return documentModifier ? std::ranges::equal(candidate, value,
+                                                     [](char first, char second) {
+                                                       const auto upper = [](char character) {
+                                                         return character >= 'a' && character <= 'z'
+                                                                  ? character - 'a' + 'A'
+                                                                  : character;
+                                                       };
+                                                       return upper(first) == upper(second);
+                                                     })
+                                : candidate == value;
+      });
 
       if (found == schema->enumNames.end()) {
         return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
@@ -813,7 +831,15 @@ private:
 
       const auto index = found - schema->enumNames.begin();
 
-      if (path == "encoding") {
+      if (documentModifier) {
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        if (path == "fastKeyModifier") {
+          document->fastKeyModifier = static_cast<key::Modifier>(index);
+        } else {
+          document->fastWheelModifier = static_cast<key::Modifier>(index);
+        }
+        settings.document = std::move(document);
+      } else if (path == "encoding") {
         auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
         document->encoding = static_cast<DocumentEncoding>(index);
         settings.document = std::move(document);
@@ -951,15 +977,19 @@ private:
       return {};
     }
 
-    if (path == "keyStep" || path == "pageOverlap" || path == "pageSteps" || path == "spinnerInterval" ||
-        path == "interval" || path == "radioInitial.index") {
+    if (path == "fastScroll" || path == "keyStep" || path == "pageOverlap" || path == "pageSteps" ||
+        path == "spinnerInterval" || path == "interval" || path == "radioInitial.index") {
       const auto value = capacity<std::uint64_t>();
 
       if (!value) {
         return std::unexpected(withProperty(value.error(), type, path));
       }
 
-      if (path == "radioInitial.index") {
+      if (path == "fastScroll") {
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        document->fastScroll = *value;
+        settings.document = std::move(document);
+      } else if (path == "radioInitial.index") {
         settings.radioInitial.index = *value;
       } else if (path == "interval") {
         settings.spinnerTick = *value;

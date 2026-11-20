@@ -8,7 +8,7 @@ int main() {
   auto scene = ui::scene(R"scene(
     scene {
       DocumentView#reader {
-        file="README.md" lineNumbers=true wrap=true
+        file="README.md" lineNumbers=true wrap=true fastScroll=8
         frame { enabled=true pattern=ROUNDED title="Document" }
       }
     }

@@ -6,8 +6,8 @@
 #include <portals/ui_style.hpp>
 
 #include "../examples/scene_resource/form.hpp"
-#include "../src/widgets/toast_state.hpp"
 #include "../src/widgets/document_view_state.hpp"
+#include "../src/widgets/toast_state.hpp"
 #include "support/examples/replay/terminal.hpp"
 
 #include <array>
@@ -6926,12 +6926,10 @@ TEST_CASE("configuration loads a cold native DocumentView and validates its docu
   CHECK(reader.node() != Node<DocumentView>{});
   REQUIRE(owner.close());
 
-  for (const auto &invalid : {
-         "scene { DocumentView {} }",
-         "scene { DocumentView { file=\"x\" encoding=UNKNOWN } }",
-         "scene { DocumentView { file=\"x\" unknown=true } }",
-         "scene { DocumentView { file=\"x\" Label {} } }",
-         "scene { ScrollArea { file=\"x\" Label {} } }"}) {
+  for (const auto &invalid :
+       {"scene { DocumentView {} }", "scene { DocumentView { file=\"x\" encoding=UNKNOWN } }",
+        "scene { DocumentView { file=\"x\" unknown=true } }", "scene { DocumentView { file=\"x\" Label {} } }",
+        "scene { ScrollArea { file=\"x\" Label {} } }"}) {
     CAPTURE(invalid);
     const auto failure = rejected(invalid, options);
     CHECK(failure.sceneResource);
@@ -6969,4 +6967,43 @@ TEST_CASE("inherited invalid document frame reports the original leaf") {
   REQUIRE(failure.sceneResource->propertyPath);
   CHECK(*failure.sceneResource->propertyPath == "DocumentView.frame.glyphs");
   CHECK(failure.sceneResource->offset == source.find("glyphs"));
+}
+
+TEST_CASE("loaded Viewer navigation uses existing schema with case-insensitive modifier tags") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto owner = ui::scene(R"(
+    defaults { DocumentView { fastScroll=8 fastKeyModifier=cTrL fastWheelModifier=aLt } }
+    definitions { Reader = DocumentView { fastScroll=5 fastKeyModifier=ShIfT } }
+    scene { Reader#reader { file="missing-cold-file.txt" fastWheelModifier=CtRl keyStep=2 wheelStep=2 pageOverlap=0 } }
+  )",
+                         options);
+  auto reader = owner.get<DocumentView>("reader");
+  bool observed{};
+  owner.configure([&](ManagedScene &, Application &application) {
+    REQUIRE(application.tree().read(reader.node(), [&](const DocumentView &widget) {
+      const auto &config = detail::DocumentViewAccess::state(widget).config;
+      REQUIRE(config.fastScroll);
+      CHECK(config.fastScroll->step == 5);
+      CHECK(config.fastScroll->keyboard == key::SHIFT);
+      CHECK(config.fastScroll->wheel == key::CTRL);
+      const auto &area = detail::ScrollWidgetAccess::state(widget).area;
+      CHECK(area.keyStep == 2);
+      CHECK(area.wheelStep == 2);
+      CHECK(area.pageOverlap == 0);
+      observed = true;
+    }));
+  });
+  REQUIRE(owner.prepareChecked());
+  CHECK(observed);
+  REQUIRE(owner.close());
+  for (const auto &source : {"scene { DocumentView { file=\"x\" fastScroll=0 } }",
+                             "scene { DocumentView { file=\"x\" fastScroll=9223372036854775808 } }",
+                             "scene { DocumentView { file=\"x\" fastKeyModifier=SUPER } }",
+                             "scene { DocumentView { file=\"x\" fastWheelModifier=INVALID } }"}) {
+    CAPTURE(source);
+    const auto failure = rejected(source, options);
+    REQUIRE(failure.sceneResource);
+    CHECK(failure.sceneResource->code == Code::INVALID_VALUE);
+  }
 }

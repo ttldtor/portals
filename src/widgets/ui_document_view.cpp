@@ -123,7 +123,12 @@ bool validConfig(const DocumentViewConfig &config) noexcept {
           config.decoder.policy == DocumentDecodePolicy::STRICT_MODE) &&
          config.maxFrameCells && config.maxFrameCells <= SAFE_LIMIT && config.maxFrameBytes &&
          config.maxFrameBytes <= SAFE_LIMIT && config.workBytes && config.workBytes <= SAFE_LIMIT &&
-         config.decoder.workLimit && config.decoder.policy != DocumentDecodePolicy::ESCAPE;
+         config.decoder.workLimit && config.decoder.policy != DocumentDecodePolicy::ESCAPE &&
+         (!config.fastScroll ||
+          (config.fastScroll->step &&
+           config.fastScroll->step <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max()) &&
+           config.fastScroll->keyboard >= key::Modifier::SHIFT && config.fastScroll->keyboard <= key::Modifier::CTRL &&
+           config.fastScroll->wheel >= key::Modifier::SHIFT && config.fastScroll->wheel <= key::Modifier::CTRL));
 }
 
 class DocumentJob final : public BackgroundJob {
@@ -274,6 +279,71 @@ public:
     }
   }
 
+  std::expected<void, TreeError> navigate(DocumentNavigation command, std::int64_t amount) {
+    auto state = state_.lock();
+
+    if (!active() || !state) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+
+    if ((command == DocumentNavigation::ROWS || command == DocumentNavigation::PAGES) && !amount) {
+      return app_.tree().read(node_, [](const DocumentView &) {
+      });
+    }
+
+    std::expected<void, TreeError> result;
+    const auto edited = app_.tree().edit(node_, [&](DocumentView &widget) {
+      const auto &scroll = ScrollWidgetAccess::state(widget);
+      auto delta = amount;
+
+      if (command == DocumentNavigation::PAGES) {
+        const auto height = scroll.geometry.viewport.height;
+        // Relative input invalidates layout without erasing the arranged body size.
+        if (!scroll.arranged || scroll.geometry.viewport.width <= 0 || height <= 0) {
+          result = std::unexpected(TreeError::WOULD_BLOCK);
+          return;
+        }
+        const auto page = static_cast<std::int64_t>(
+          static_cast<std::uint64_t>(height) > scroll.area.pageOverlap ? height - scroll.area.pageOverlap : 1);
+        if (amount > std::numeric_limits<std::int64_t>::max() / page ||
+            amount < std::numeric_limits<std::int64_t>::min() / page) {
+          result = std::unexpected(TreeError::INVALID_ARGUMENT);
+          return;
+        }
+        delta *= page;
+      }
+
+      if (command == DocumentNavigation::ROWS || command == DocumentNavigation::PAGES) {
+        result = queueRows(*state, scroll.arranged, scroll.geometry.viewport, delta);
+        return;
+      }
+      if (command != DocumentNavigation::HOME && command != DocumentNavigation::END) {
+        result = std::unexpected(TreeError::INVALID_ARGUMENT);
+        return;
+      }
+
+      clearRelative(state->serial);
+      if (command == DocumentNavigation::HOME) {
+        state->anchor = 0;
+      }
+      state->tail = command == DocumentNavigation::END;
+      state->rowDelta = 0;
+      state->refresh = true;
+      state->status.preparing = true;
+      ++state->serial;
+      navigationSerial_ = state->serial;
+    });
+
+    if (!edited) {
+      return std::unexpected(edited.error());
+    }
+    if (!result) {
+      return result;
+    }
+    (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
+    return {};
+  }
+
   std::expected<bool, TreeError> input(const InputEvent &event) override {
     auto state = state_.lock();
     if (!active() || !state || !visible_) {
@@ -281,15 +351,13 @@ public:
     }
     bool focused{};
     bool enabled{};
-    bool arranged{};
-    CellSize inputViewport;
+    bool pageUsable{};
     ScrollAreaOptions navigation;
     auto read = app_.tree().read(node_, [&](const DocumentView &widget) {
       const auto &scroll = ScrollWidgetAccess::state(widget);
       focused = scroll.focused;
       enabled = scroll.enabled;
-      arranged = scroll.arranged;
-      inputViewport = scroll.geometry.viewport;
+      pageUsable = scroll.arranged && scroll.geometry.viewport.width > 0 && scroll.geometry.viewport.height > 0;
       navigation = scroll.area;
     });
     if (!read) {
@@ -306,42 +374,46 @@ public:
       dragByteRange_.reset();
     }
 
+    const auto fast = state->config.fastScroll;
+    const auto exactModifier = [](InputModifiers modifiers, key::Modifier modifier) {
+      return modifiers.has(modifier) && !modifiers.super &&
+             static_cast<unsigned>(modifiers.shift) + static_cast<unsigned>(modifiers.alt) +
+                 static_cast<unsigned>(modifiers.control) ==
+               1;
+    };
+    if (key && focused && key->action != KeyAction::RELEASE) {
+      const bool plain = key->modifiers == InputModifiers{};
+      const bool accelerated = fast && exactModifier(key->modifiers, fast->keyboard);
+      const auto step = static_cast<std::int64_t>(std::min<std::uint64_t>(accelerated ? fast->step : navigation.keyStep,
+                                                                          std::numeric_limits<std::int64_t>::max()));
+      std::optional<DocumentNavigation> command;
+      std::int64_t amount{};
+
+      if ((key->key == InputKey::UP || key->key == InputKey::DOWN) && (plain || accelerated)) {
+        command = DocumentNavigation::ROWS;
+        amount = key->key == InputKey::UP ? -step : step;
+      } else if ((key->key == InputKey::PAGE_UP || key->key == InputKey::PAGE_DOWN) && plain) {
+        command = DocumentNavigation::PAGES;
+        amount = key->key == InputKey::PAGE_UP ? -1 : 1;
+      } else if ((key->key == InputKey::HOME || key->key == InputKey::END) &&
+                 (plain || exactModifier(key->modifiers, key::CTRL))) {
+        command = key->key == InputKey::HOME ? DocumentNavigation::HOME : DocumentNavigation::END;
+      }
+      if (command) {
+        if (*command == DocumentNavigation::PAGES && !pageUsable) {
+          return true;
+        }
+
+        const auto moved = navigate(*command, amount);
+        return moved ? std::expected<bool, TreeError>(true) : std::unexpected(moved.error());
+      }
+    }
+
     std::int64_t delta{};
     bool recognized{};
-    bool absolute{};
     if (key && focused && key->action != KeyAction::RELEASE && !key->modifiers.alt && !key->modifiers.super &&
         !key->modifiers.shift && (!key->modifiers.control || key->key == InputKey::HOME || key->key == InputKey::END)) {
-      const auto height = static_cast<std::uint64_t>(viewport_.height);
-      const auto page =
-        static_cast<std::int64_t>(height > navigation.pageOverlap ? height - navigation.pageOverlap : 1);
-      const auto step = static_cast<std::int64_t>(
-        std::min<std::uint64_t>(navigation.keyStep, std::numeric_limits<std::int64_t>::max()));
       switch (key->key) {
-      case InputKey::UP:
-        delta = -step;
-        break;
-      case InputKey::DOWN:
-        delta = step;
-        break;
-      case InputKey::PAGE_UP:
-        delta = -page;
-        break;
-      case InputKey::PAGE_DOWN:
-        delta = page;
-        break;
-      case InputKey::HOME:
-        absolute = true;
-        state->anchor = 0;
-        state->rowDelta = 0;
-        state->tail = false;
-        recognized = true;
-        break;
-      case InputKey::END:
-        absolute = true;
-        state->rowDelta = 0;
-        state->tail = true;
-        recognized = true;
-        break;
       case InputKey::LEFT:
         if (state->config.wrap) {
           return false;
@@ -366,79 +438,51 @@ public:
         break;
       }
     }
-    if (mouse && mouse->action == MouseAction::SCROLL && !mouse->modifiers.alt && !mouse->modifiers.control &&
-        !mouse->modifiers.shift && !mouse->modifiers.super) {
+    if (mouse && mouse->action == MouseAction::SCROLL &&
+        (mouse->modifiers == InputModifiers{} || (fast && exactModifier(mouse->modifiers, fast->wheel)))) {
       auto node = app_.tree().inspect(node_);
       if (!node) {
         return std::unexpected(node.error());
       }
       if (node->geometry.clip.contains({mouse->column, mouse->row}) && std::isfinite(mouse->wheelDelta) &&
-          mouse->wheelDelta > 0 &&
-          mouse->wheelDelta <= std::numeric_limits<std::int32_t>::max() / navigation.wheelStep) {
-        const auto step = static_cast<std::int64_t>(std::ceil(mouse->wheelDelta * navigation.wheelStep));
-        delta = mouse->button == MouseButton::WHEEL_UP ? -step : mouse->button == MouseButton::WHEEL_DOWN ? step : 0;
+          mouse->wheelDelta > 0) {
+        const bool accelerated = fast && exactModifier(mouse->modifiers, fast->wheel);
+        const auto exactStep = accelerated                                                       ? fast->step
+                               : navigation.wheelStep == static_cast<double>(navigation.keyStep) ? navigation.keyStep
+                                                                                                 : 0;
+        std::optional<std::int64_t> movement;
+        constexpr auto MAX = std::numeric_limits<std::int64_t>::max();
+        if (exactStep && std::floor(mouse->wheelDelta) == mouse->wheelDelta && mouse->wheelDelta < 0x1p63) {
+          const auto units = static_cast<std::uint64_t>(mouse->wheelDelta);
+          if (exactStep <= static_cast<std::uint64_t>(MAX) / units) {
+            movement = static_cast<std::int64_t>(exactStep * units);
+          }
+        } else {
+          const auto rows =
+            std::ceil(mouse->wheelDelta * (accelerated ? static_cast<double>(fast->step) : navigation.wheelStep));
+          if (std::isfinite(rows) && rows < 0x1p63) {
+            movement = static_cast<std::int64_t>(rows);
+          }
+        }
+        if (!movement) {
+          return std::unexpected(TreeError::INVALID_ARGUMENT);
+        }
+        delta = mouse->button == MouseButton::WHEEL_UP     ? -*movement
+                : mouse->button == MouseButton::WHEEL_DOWN ? *movement
+                                                           : 0;
       }
     }
 
     if (delta) {
-      const bool sameTarget = navigationSerial_ == state->serial;
-      const auto pending = checkedRowSum(sameTarget ? pendingRows_ : 0, delta);
-      const auto outstanding = pending ? checkedRowSum(*pending, sameTarget ? inFlightRows_ : 0) : std::nullopt;
-
-      if (!outstanding) {
-        return std::unexpected(TreeError::INVALID_ARGUMENT);
-      }
-
-      auto bounded = *outstanding;
-      const auto &frame = state->frame;
-      const bool committedFrame = sameTarget && arranged && frame && !state->refresh && state->serial == serial_ &&
-                                  (!commandPending_ || inFlightRows_) && frame->viewport == inputViewport &&
-                                  frame->status.byteOffset == state->anchor && !frame->anchors.empty() &&
-                                  frame->anchors.front() == state->anchor &&
-                                  frame->status.revision.source == state->source->stamp() &&
-                                  (!scan_ || scan_->metadata.revision == frame->status.revision);
-
-      if (committedFrame) {
-        // Clamp the outstanding target, including the active batch, only against
-        // this exact committed frame. Absolute/geometry changes cannot borrow it.
-        if (state->anchor == 0) {
-          bounded = std::max<std::int64_t>(bounded, 0);
-        }
-        if (frame->finalEndVisible) {
-          bounded = std::min<std::int64_t>(bounded, 0);
-        }
-      }
-
-      const auto queued = checkedRowSum(bounded, sameTarget ? -inFlightRows_ : 0);
-      if (!queued) {
-        return std::unexpected(TreeError::INVALID_ARGUMENT);
-      }
-
-      if (!sameTarget) {
-        clearRelative(state->serial);
-        state->rowDelta = 0;
-      }
-
-      pendingRows_ = *queued;
-      if (state->status.waiting || state->status.error) {
-        // Explicit input may retry a stopped provider; idle preparation may not.
-        pendingRows_ = bounded;
-        inFlightRows_ = 0;
-        state->rowDelta = 0;
-        state->refresh = true;
-        state->status.preparing = true;
-      } else if (!commandPending_ && !state->refresh && state->serial == serial_) {
-        state->status.preparing = pendingRows_ != 0;
-      }
-      (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
-      return true;
+      const auto moved = navigate(DocumentNavigation::ROWS, delta);
+      return moved ? std::expected<bool, TreeError>(true) : std::unexpected(moved.error());
     }
 
     if (!recognized) {
       return false;
     }
 
-    if (absolute || navigationSerial_ != state->serial) {
+    if (navigationSerial_ != state->serial) {
       clearRelative(state->serial);
     } else {
       restoreRelative();
@@ -544,6 +588,60 @@ public:
   }
 
 private:
+  std::expected<void, TreeError> queueRows(DocumentViewState &state, bool arranged, CellSize inputViewport,
+                                           std::int64_t delta) {
+    const bool sameTarget = navigationSerial_ == state.serial;
+    const auto pending = checkedRowSum(sameTarget ? pendingRows_ : 0, delta);
+    const auto outstanding = pending ? checkedRowSum(*pending, sameTarget ? inFlightRows_ : 0) : std::nullopt;
+
+    if (!outstanding) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    auto bounded = *outstanding;
+    const auto &frame = state.frame;
+    const bool committedFrame = sameTarget && arranged && frame && !state.refresh && state.serial == serial_ &&
+                                (!commandPending_ || inFlightRows_) && frame->viewport == inputViewport &&
+                                frame->status.byteOffset == state.anchor && !frame->anchors.empty() &&
+                                frame->anchors.front() == state.anchor &&
+                                frame->status.revision.source == state.source->stamp() &&
+                                (!scan_ || scan_->metadata.revision == frame->status.revision);
+
+    if (committedFrame) {
+      // Clamp the outstanding target, including the active batch, only against
+      // this exact committed frame. Absolute/geometry changes cannot borrow it.
+      if (state.anchor == 0) {
+        bounded = std::max<std::int64_t>(bounded, 0);
+      }
+      if (frame->finalEndVisible) {
+        bounded = std::min<std::int64_t>(bounded, 0);
+      }
+    }
+
+    const auto queued = checkedRowSum(bounded, sameTarget ? -inFlightRows_ : 0);
+    if (!queued) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    if (!sameTarget) {
+      clearRelative(state.serial);
+      state.rowDelta = 0;
+    }
+
+    pendingRows_ = *queued;
+    if (state.status.waiting || state.status.error) {
+      // Explicit input may retry a stopped provider; idle preparation may not.
+      pendingRows_ = bounded;
+      inFlightRows_ = 0;
+      state.rowDelta = 0;
+      state.refresh = true;
+      state.status.preparing = true;
+    } else if (!commandPending_ && !state.refresh && state.serial == serial_) {
+      state.status.preparing = pendingRows_ != 0;
+    }
+    return {};
+  }
+
   void clearRelative(std::uint64_t serial) noexcept {
     pendingRows_ = 0;
     inFlightRows_ = 0;
@@ -1026,6 +1124,24 @@ std::expected<void, ManagedError> attachDocument(ManagedScene &scene, Node<Docum
   return {};
 }
 } // namespace
+
+std::expected<void, ManagedError> navigateDocument(ManagedScene &scene, Node<DocumentView> node,
+                                                   DocumentNavigation command, std::int64_t amount) {
+  auto &tree = ui::detail::SceneAccess::application(scene).tree();
+  std::shared_ptr<DocumentActivity> activity;
+  const auto read = tree.read(node, [&](const DocumentView &widget) {
+    activity = std::static_pointer_cast<DocumentActivity>(DocumentViewAccess::state(widget).activity);
+  });
+  if (!read) {
+    return std::unexpected(ui::detail::error(node, read.error()));
+  }
+  if (!activity) {
+    return std::unexpected(ui::detail::error(node, TreeError::CLOSED));
+  }
+  const auto moved = activity->navigate(command, amount);
+  return moved ? std::expected<void, ManagedError>{} : std::unexpected(ui::detail::error(node, moved.error()));
+}
+
 } // namespace portals::detail
 
 namespace portals::ui {
@@ -1079,6 +1195,13 @@ Description<DocumentView> viewer(DocumentSource source, DocumentViewConfig confi
       effectiveConfig.lineNumbers = document.lineNumbers.value_or(config.lineNumbers);
       effectiveConfig.wrap = document.wrap.value_or(config.wrap);
       effectiveConfig.decoder.explicitEncoding = document.encoding.value_or(config.decoder.explicitEncoding);
+      if (document.fastScroll || effectiveConfig.fastScroll) {
+        auto fast = effectiveConfig.fastScroll.value_or(DocumentFastScroll{});
+        fast.step = document.fastScroll.value_or(fast.step);
+        fast.keyboard = document.fastKeyModifier.value_or(fast.keyboard);
+        fast.wheel = document.fastWheelModifier.value_or(fast.wheel);
+        effectiveConfig.fastScroll = fast;
+      }
       if (!portals::detail::validConfig(effectiveConfig)) {
         return std::unexpected(detail::error(parent, TreeError::INVALID_ARGUMENT));
       }
@@ -1250,6 +1373,24 @@ std::expected<void, ManagedError> documentLineNumbers(const std::shared_ptr<RefT
     config.lineNumbers = next;
     return true;
   });
+  if (!result) {
+    result.error().registrationOrigin = origin;
+  }
+  return result;
+}
+
+std::expected<void, ManagedError> navigateDocument(const std::shared_ptr<RefTarget> &target,
+                                                   std::shared_ptr<const Node<DocumentView>> node,
+                                                   portals::detail::DocumentNavigation command, std::int64_t amount,
+                                                   std::source_location origin) {
+  const auto scene = eventScene(target);
+  if (!scene) {
+    return std::unexpected(scene.error());
+  }
+  if (!node) {
+    return std::unexpected(error({}, TreeError::INVALID_ARGUMENT));
+  }
+  auto result = portals::detail::navigateDocument(**scene, *node, command, amount);
   if (!result) {
     result.error().registrationOrigin = origin;
   }

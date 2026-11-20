@@ -7,6 +7,7 @@
 #include <portals/dialog.hpp>
 #include <portals/document_encoding.hpp>
 #include <portals/grid.hpp>
+#include <portals/input.hpp>
 #include <portals/line_edit.hpp>
 #include <portals/message_box.hpp>
 #include <portals/password.hpp>
@@ -366,10 +367,14 @@ struct ControlRadioInitialSettings {
 
 /** @brief Sparse file-backed document presentation; shared snapshots are immutable. */
 struct ControlDocumentSettings {
-  std::optional<std::string> file{}; ///< Literal UTF-8 file path.
-  std::optional<bool> lineNumbers{}; ///< Show logical line numbers.
-  std::optional<bool> wrap{}; ///< Wrap text at the viewport edge.
+  std::optional<std::string> file{};          ///< Literal UTF-8 file path.
+  std::optional<bool> lineNumbers{};          ///< Show logical line numbers.
+  std::optional<bool> wrap{};                 ///< Wrap text at the viewport edge.
   std::optional<DocumentEncoding> encoding{}; ///< Explicit decoder selection.
+  std::optional<std::uint64_t>
+    fastScroll{}; ///< Positive absolute modified step; absence preserves disabled/default policy.
+  std::optional<key::Modifier> fastKeyModifier{};   ///< Exact modified-arrow tag.
+  std::optional<key::Modifier> fastWheelModifier{}; ///< Exact modified-wheel tag.
 };
 
 /** @brief Owning sparse literals only; never contains IDs, models, handlers or live history. */
@@ -486,7 +491,7 @@ struct ControlSettings {
   ControlRadioInitialSettings radioInitial{}; ///< Internal-model initial selection; external models reject overrides.
   std::optional<double> step{};             ///< Slider increment; appended to preserve the positional aggregate prefix.
   std::optional<std::uint64_t> pageSteps{}; ///< Positive Slider increment count per PageUp/PageDown action.
-  std::optional<RadioSelectionMode> radioSelectionMode{}; ///< Keyboard selection policy; appended for compatibility.
+  std::optional<RadioSelectionMode> radioSelectionMode{};    ///< Keyboard selection policy; appended for compatibility.
   std::shared_ptr<const ControlDocumentSettings> document{}; ///< Cold immutable document settings.
 
   /** @return Immutable document settings, or a shared empty value when absent. */

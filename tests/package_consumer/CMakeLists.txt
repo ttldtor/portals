@@ -1301,6 +1301,12 @@ if(MSVC)
   target_compile_options(portals_document_view_styles_consumer PRIVATE /utf-8)
 endif()
 
+add_executable(portals_document_navigation_consumer examples/document_view/navigation.cpp)
+target_link_libraries(portals_document_navigation_consumer PRIVATE portals::core)
+if(MSVC)
+  target_compile_options(portals_document_navigation_consumer PRIVATE /utf-8)
+endif()
+
 # Keep this block last: package_fixture.cmake extracts its tail into an isolated project.
 # Snapshot all declarations at the end of directory processing.
 function(portalsDefinePackageGroups)

@@ -2051,3 +2051,266 @@ TEST_CASE("End and scrollbar maximum prepare only a bounded suffix on the manage
   CHECK(provider->bytesRead.load() <= 2 * pageBytes + 96 + DocumentDecoder::LOCAL_WINDOW_BYTES);
   CHECK_FALSE(provider->uiOperation.load());
 }
+
+TEST_CASE("page input uses the current arranged body after resize before preparation") {
+  Fixture f(source(scrollRows(60)));
+  f.settle(4);
+  REQUIRE(f.frame()->viewport.height == 6);
+  f.size = {24, 12};
+  const auto bounds = take(CellRect::from({}, f.size));
+
+  take(f.app->tree().frame([&] {
+    take(layoutTree(f.app->tree(), f.app->root(), bounds, bounds));
+  }));
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    REQUIRE(detail::ScrollWidgetAccess::state(widget).geometry.viewport.height == 10);
+  }));
+  REQUIRE(f.input(InputKey::PAGE_DOWN));
+  f.settle(6);
+  checkTop(f, "row-9");
+}
+
+TEST_CASE("zero-body page input is consumed without changing Ref page rejection") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = scrollRows(60);
+  Fixture f(ui::document(provider));
+  f.settle(4);
+  REQUIRE(f.frame()->viewport.height == 6);
+  const auto frame = f.frame();
+  const auto serial = navigationSerial(f);
+  const auto reads = provider->reads.load();
+  const auto jobs = f.executor.submissions;
+  f.size = {24, 2};
+  const auto bounds = take(CellRect::from({}, f.size));
+
+  take(f.app->tree().frame([&] {
+    take(layoutTree(f.app->tree(), f.app->root(), bounds, bounds));
+  }));
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    REQUIRE(detail::ScrollWidgetAccess::state(widget).geometry.viewport.height == 0);
+  }));
+  take(f.app->tree().consumeFrameRequest());
+
+  const auto input = f.scene->input(*f.app, KeyEvent{.key = InputKey::PAGE_DOWN});
+
+  REQUIRE(input);
+  CHECK(*input);
+  CHECK(navigationSerial(f) == serial);
+  CHECK(f.frame() == frame);
+  CHECK(f.executor.submissions == jobs);
+  CHECK(provider->reads.load() == reads);
+  CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+
+  const auto checked = f.reference.scrollPages(1);
+  REQUIRE_FALSE(checked);
+  CHECK(std::get<TreeError>(checked.error().cause) == TreeError::WOULD_BLOCK);
+  unsigned callbacks{};
+  take(f.scene->onError([&](const ManagedDiagnostic &diagnostic) {
+    ++callbacks;
+    CHECK(std::get<TreeError>(diagnostic.error.cause) == TreeError::WOULD_BLOCK);
+  }));
+  CHECK_FALSE(f.reference.page(1));
+  CHECK(callbacks == 1);
+  CHECK(navigationSerial(f) == serial);
+  CHECK(f.frame() == frame);
+  CHECK(f.executor.submissions == jobs);
+  CHECK(provider->reads.load() == reads);
+}
+
+TEST_CASE("input and Ref navigation share lossless pending rows while a worker is busy") {
+  Fixture f(source(scrollRows(100)), {.fastScroll = DocumentFastScroll{}});
+  f.settle(3);
+  REQUIRE(take(f.scene->input(*f.app, KeyEvent{.key = InputKey::DOWN, .modifiers = {.control = true}})));
+  f.pump();
+  REQUIRE(f.executor.job);
+  REQUIRE(f.reference.scroll(2));
+  REQUIRE(f.reference.page(1));
+  REQUIRE(take(f.scene->input(*f.app, MouseInputEvent{.column = 2,
+                                                      .row = 2,
+                                                      .button = MouseButton::WHEEL_DOWN,
+                                                      .action = MouseAction::SCROLL,
+                                                      .modifiers = {.alt = true},
+                                                      .wheelDelta = 1.0})));
+  take(f.reference.scrollRows(-3));
+  f.settle(14);
+  checkTop(f, "row-20");
+  REQUIRE(f.input(InputKey::PAGE_DOWN));
+  f.settle(5);
+  checkTop(f, "row-25");
+  take(f.reference.goHome());
+  f.settle(4);
+  checkTop(f, "row-0");
+  REQUIRE(f.reference.end());
+  f.settle(5);
+  checkTop(f, "row-94");
+  REQUIRE(f.reference.scroll(-1));
+  f.settle(4);
+  checkTop(f, "row-93");
+}
+
+TEST_CASE("page admission requires arranged geometry and zero and overflow preserve navigation state") {
+  Fixture f(source(scrollRows(50)));
+  const auto before = navigationSerial(f);
+  const auto blocked = f.reference.scrollPages(1);
+  REQUIRE_FALSE(blocked);
+  CHECK(std::get<TreeError>(blocked.error().cause) == TreeError::WOULD_BLOCK);
+  take(f.reference.scrollRows(0));
+  take(f.reference.scrollPages(0));
+  CHECK(navigationSerial(f) == before);
+  CHECK(f.executor.submissions == 0);
+  f.settle(3);
+  const auto serial = navigationSerial(f);
+  const auto jobs = f.executor.submissions;
+  take(f.app->tree().consumeFrameRequest());
+  take(f.reference.scrollRows(0));
+  take(f.reference.scrollPages(0));
+  CHECK(navigationSerial(f) == serial);
+  CHECK(f.executor.submissions == jobs);
+  CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  for (const auto count : {std::numeric_limits<std::int64_t>::min(), std::numeric_limits<std::int64_t>::max()}) {
+    const auto overflow = f.reference.scrollPages(count);
+    REQUIRE_FALSE(overflow);
+    CHECK(std::get<TreeError>(overflow.error().cause) == TreeError::INVALID_ARGUMENT);
+    CHECK(navigationSerial(f) == serial);
+  }
+  take(f.reference.scrollRows(std::numeric_limits<std::int64_t>::min()));
+  REQUIRE(f.reference.scroll(1));
+  f.settle(4);
+  checkTop(f, "row-1");
+}
+
+TEST_CASE("programmatic navigation preserves seek convention for disabled read-only input") {
+  Fixture f(source(scrollRows(30)));
+  f.settle(3);
+  take(f.app->tree().edit(f.node, [](DocumentView &widget) {
+    auto &scroll = detail::ScrollWidgetAccess::state(widget);
+    scroll.enabled = false;
+    scroll.area.readOnly = true;
+  }));
+  CHECK_FALSE(f.input(InputKey::DOWN));
+  REQUIRE(f.reference.scroll(3));
+  f.settle(4);
+  checkTop(f, "row-3");
+  REQUIRE(f.reference.home());
+  f.settle(3);
+  checkTop(f, "row-0");
+}
+
+TEST_CASE("navigation Ref checks immutable affinity and collected failure may retire its target") {
+  Fixture f(source(scrollRows(20)));
+  auto alias = f.reference;
+  std::optional<ManagedError> foreign;
+  std::thread worker([ref = alias, &foreign] {
+    const auto result = ref.scrollRows(0);
+    if (!result) {
+      foreign = result.error();
+    }
+  });
+  worker.join();
+  REQUIRE(foreign);
+  CHECK(std::get<TreeError>(foreign->cause) == TreeError::WRONG_THREAD);
+  unsigned callbacks{};
+  take(f.scene->onError([&](const ManagedDiagnostic &) {
+    if (++callbacks == 1) {
+      take(f.app->tree().remove(f.node));
+      f.reference = {};
+    }
+  }));
+  CHECK_FALSE(alias.page(1));
+  CHECK(callbacks == 1);
+  CHECK_FALSE(alias.goHome());
+  CHECK(callbacks == 1);
+  CHECK_FALSE(alias.scroll(0));
+  CHECK(callbacks == 2);
+}
+
+TEST_CASE("Viewer fluent navigation policy is sparse checked and uses absolute fast rows") {
+  Executor executor;
+  auto app = take(Application::create({.backgroundExecutor = &executor}));
+  auto scene = take(ManagedScene::create(*app));
+  const auto node = take(ui::mount(
+    *scene, ui::viewer(source(scrollRows(20))).fastScroll(5, key::SHIFT, key::CTRL).scrollStep(2).pageOverlap(0)));
+  take(app->tree().read(node, [](const DocumentView &widget) {
+    const auto &state = detail::DocumentViewAccess::state(widget);
+    REQUIRE(state.config.fastScroll);
+    CHECK(state.config.fastScroll->step == 5);
+    CHECK(state.config.fastScroll->keyboard == key::SHIFT);
+    CHECK(state.config.fastScroll->wheel == key::CTRL);
+    const auto &area = detail::ScrollWidgetAccess::state(widget).area;
+    CHECK(area.keyStep == 2);
+    CHECK(area.wheelStep == 2);
+    CHECK(area.pageOverlap == 0);
+  }));
+  CHECK_FALSE(ui::mount(*scene, ui::viewer(source("x")).fastScroll(0)));
+  CHECK_FALSE(ui::mount(*scene, ui::viewer(source("x")).fastScroll(std::uint64_t{1} << 63)));
+  CHECK_FALSE(ui::mount(*scene, ui::viewer(source("x")).fastScroll(8, static_cast<key::Modifier>(99))));
+  CHECK_FALSE(ui::mount(*scene, ui::viewer(source("x")).fastScroll(8, key::CTRL, static_cast<key::Modifier>(99))));
+  CHECK_FALSE(ui::mount(*scene, ui::viewer(source("x")).scrollStep(std::uint64_t{1} << 63)));
+}
+
+TEST_CASE("fast input is opt-in exact and absolute while paging keeps its own overlap") {
+  SUBCASE("unmodified defaults do not claim modified input") {
+    Fixture f(source(scrollRows(60)));
+    f.settle(3);
+    CHECK_FALSE(take(f.scene->input(*f.app, KeyEvent{.key = InputKey::DOWN, .modifiers = {.control = true}})));
+    CHECK_FALSE(take(f.scene->input(*f.app, MouseInputEvent{.column = 2,
+                                                            .row = 2,
+                                                            .button = MouseButton::WHEEL_DOWN,
+                                                            .action = MouseAction::SCROLL,
+                                                            .modifiers = {.alt = true},
+                                                            .wheelDelta = 1.0})));
+    REQUIRE(f.input(InputKey::DOWN));
+    f.settle(4);
+    checkTop(f, "row-1");
+  }
+  SUBCASE("configured modifier tags use five rows rather than multiplying the ordinary two") {
+    Fixture f(source(scrollRows(60)), {.fastScroll = DocumentFastScroll{5, key::SHIFT, key::CTRL}});
+    f.settle(3);
+    take(f.app->tree().edit(f.node, [](DocumentView &widget) {
+      auto &area = detail::ScrollWidgetAccess::state(widget).area;
+      area.keyStep = 2;
+      area.wheelStep = 2;
+      area.pageOverlap = 0;
+    }));
+    REQUIRE(f.input(InputKey::DOWN));
+    REQUIRE(take(f.scene->input(*f.app, KeyEvent{.key = InputKey::DOWN, .modifiers = {.shift = true}})));
+    REQUIRE(take(f.scene->input(*f.app, MouseInputEvent{.column = 2,
+                                                        .row = 2,
+                                                        .button = MouseButton::WHEEL_DOWN,
+                                                        .action = MouseAction::SCROLL,
+                                                        .modifiers = {.control = true},
+                                                        .wheelDelta = 1.0})));
+    CHECK_FALSE(
+      take(f.scene->input(*f.app, KeyEvent{.key = InputKey::DOWN, .modifiers = {.shift = true, .control = true}})));
+    CHECK_FALSE(take(f.scene->input(*f.app, KeyEvent{.key = InputKey::PAGE_DOWN, .modifiers = {.shift = true}})));
+    f.settle(10);
+    checkTop(f, "row-12");
+    REQUIRE(f.input(InputKey::PAGE_DOWN));
+    f.settle(5);
+    checkTop(f, "row-18");
+  }
+}
+
+TEST_CASE("accepted pages keep admission rows across resize and Ref row overflow is atomic") {
+  Fixture f(source(scrollRows(60)));
+  f.settle(3);
+  take(f.reference.scrollPages(1));
+  f.size = {24, 12};
+  f.settle(6);
+  checkTop(f, "row-5");
+  take(f.reference.scrollPages(2));
+  f.settle(7);
+  checkTop(f, "row-23");
+  take(f.reference.goHome());
+  f.settle(4);
+  const auto jobs = f.executor.submissions;
+  constexpr auto MAX = std::numeric_limits<std::int64_t>::max();
+  take(f.reference.scrollRows(MAX));
+  const auto rejected = f.reference.scrollRows(1);
+  REQUIRE_FALSE(rejected);
+  CHECK(std::get<TreeError>(rejected.error().cause) == TreeError::INVALID_ARGUMENT);
+  take(f.reference.scrollRows(-MAX));
+  f.settle(4);
+  checkTop(f, "row-0");
+  CHECK(f.executor.submissions == jobs);
+}

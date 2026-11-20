@@ -10,7 +10,7 @@ int main() {
 
   // clang-format off
   return ui::scene(
-           ui::viewer(file, "README.md")
+           ui::viewer(file, "README.md").fastScroll()
              .framed("rounded", "Document | F2 Numbers | F10 Quit"))
     | ui::theme(nordTheme())
     | ui::style(R"pss(
