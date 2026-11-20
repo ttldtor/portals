@@ -322,6 +322,95 @@ void addScalar(DocumentScan &scan, const DocumentPrepareIntent &intent, const De
   scan.havePrevious = true;
 }
 
+bool asciiTailEligible(const DocumentScan &scan, const DocumentPrepareIntent &intent) noexcept {
+  const auto encoding = scan.decoder.encoding();
+  const bool asciiEncoding = encoding == DocumentEncoding::UTF8 || encoding == DocumentEncoding::WINDOWS1251 ||
+                             encoding == DocumentEncoding::WINDOWS1252;
+  const bool validWidth =
+    (intent.width.ambiguous == AmbiguousWidth::NARROW || intent.width.ambiguous == AmbiguousWidth::WIDE) &&
+    (intent.width.emoji == EmojiWidth::ONE || intent.width.emoji == EmojiWidth::TWO);
+  const bool pendingAscii = scan.previousScalar >= 0x20 && scan.previousScalar <= 0x7e;
+
+  return intent.tail && intent.config.wrap && asciiEncoding && validWidth && scan.origin && !scan.resumeContinuation &&
+         !scan.regionalContextUnknown && !scan.localStart &&
+         (!scan.clusterBytes || (scan.havePrevious && pendingAscii)) && scan.decoder.checkpoint().has_value();
+}
+
+std::size_t consumeAsciiTail(DocumentScan &scan, const DocumentPrepareIntent &intent,
+                             std::span<const std::byte> input) {
+  if (input.size() < 2 || !asciiTailEligible(scan, intent)) {
+    return 0;
+  }
+
+  const auto end = std::ranges::find_if(input, [](std::byte byte) {
+    const auto value = std::to_integer<unsigned char>(byte);
+
+    return value < 0x20 || value > 0x7e;
+  });
+  const auto printable = static_cast<std::size_t>(end - input.begin());
+
+  if (printable < 2) {
+    return 0;
+  }
+
+  // Keep the last scalar on the ordinary path: a following extender can still
+  // join it, including across source-page seams. Every consumed scalar has a
+  // proven printable ASCII successor, so its grapheme boundary and width are exact.
+  const auto count = printable - 1;
+  const auto offset = scan.offset;
+  const auto checkpoint = [&](std::size_t index) {
+    const auto proof =
+      DocumentDecoder::localCheckpoint(*scan.origin, input.subspan(index, 1), offset + index, offset + index);
+
+    if (proof.status != DocumentDecoderLocalStatus::READY || !proof.checkpoint ||
+        proof.restartByteOffset != offset + index) {
+      fail(SourceError::INVALID_REPLY);
+    }
+
+    return DocumentLayoutCheckpoint{
+      scan.metadata.revision, proof.checkpoint, offset + index, scan.line, false, false, scan.lineKnown, false};
+  };
+
+  flushCluster(scan, intent);
+  scan.afterCR = false;
+  const auto width = static_cast<std::uint64_t>(contentWidth(intent));
+  std::uint64_t latestCheckpoint{};
+  for (std::size_t index = 0; index < scan.checkpointCount; ++index) {
+    latestCheckpoint = std::max(latestCheckpoint, scan.checkpoints[index].offset);
+  }
+  std::size_t consumed{};
+
+  while (consumed < count) {
+    if (scan.rowTouched && scan.column >= width) {
+      finishRow(scan, intent, offset + consumed);
+      const auto boundary = offset + consumed;
+
+      if (boundary > latestCheckpoint && boundary - latestCheckpoint >= CHECKPOINT_DISTANCE) {
+        saveCheckpoint(scan, checkpoint(consumed));
+        latestCheckpoint = boundary;
+      }
+    }
+
+    const auto chunk = static_cast<std::size_t>(std::min<std::uint64_t>(count - consumed, width - scan.column));
+
+    checkPayload(scan, intent, scan.row.size(), chunk);
+    scan.row.append(reinterpret_cast<const char *>(input.data() + consumed), chunk);
+    consumed += chunk;
+    scan.column += chunk;
+    scan.rowEnd = offset + consumed;
+    scan.rowTouched = true;
+  }
+
+  scan.scalarCheckpoint = checkpoint(count);
+  scan.decoder = DocumentDecoder::restore(*scan.scalarCheckpoint.decoder);
+  scan.offset += count;
+  scan.previousScalar = std::to_integer<unsigned char>(input[count - 1]);
+  scan.havePrevious = true;
+  scan.graphemeState = 0;
+
+  return count;
+}
+
 std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, DocumentMetadata metadata,
                                           const std::shared_ptr<const DocumentScan> &previous) {
   // The caller qualifies the complete navigation intent before requesting resume.
@@ -882,6 +971,12 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
       }
 
       do {
+        if (const auto consumed = consumeAsciiTail(*scan, intent, input)) {
+          input = input.subspan(consumed);
+
+          continue;
+        }
+
         const auto before = scan->scalarCheckpoint;
         std::array<DecodedScalar, 1> output{};
         const auto decoded = scan->decoder.feed(input, scan->offset, page->finalEnd(), output);
