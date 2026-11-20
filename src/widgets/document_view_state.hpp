@@ -15,12 +15,46 @@ namespace portals::detail {
 inline constexpr std::int32_t DOCUMENT_GUTTER_CELLS = 9;
 inline constexpr std::size_t DOCUMENT_PREPARATION_ENVELOPE = 64 * 1024;
 inline constexpr std::size_t DOCUMENT_PREPARED_CELL_BYTES = 128;
+// One raw-row object, shared ownership bookkeeping and checked allocator metadata.
+inline constexpr std::size_t DOCUMENT_HEX_RAW_ROW_BYTES = 128;
+
+inline std::expected<HexRowOptions, HexError> documentHexRowOptions(const DocumentHexOptions &options,
+                                                                    std::size_t viewportWidth) noexcept {
+  HexRowOptions selected{options.bytesPerRow, options.groupSize, options.uppercase, options.showAscii};
+  const auto columns = hexRowWidth(selected);
+
+  if (!columns) {
+    return std::unexpected(columns.error());
+  }
+  if (!options.autoFit || *columns <= viewportWidth) {
+    return selected;
+  }
+
+  // Width is monotonic in the slot count. Keep at least one slot when even it is clipped.
+  std::size_t first = 1;
+  auto last = selected.bytesPerRow;
+
+  while (first < last) {
+    const auto middle = first + (last - first + 1) / 2;
+    auto candidate = selected;
+
+    candidate.bytesPerRow = middle;
+    if (*hexRowWidth(candidate) <= viewportWidth) {
+      first = middle;
+    } else {
+      last = middle - 1;
+    }
+  }
+  selected.bytesPerRow = first;
+  return selected;
+}
 
 // One checked allowance is shared by job/frame admission and peak overlap.
 // Separate gutter text has its own vector/object/cluster capacity even when
 // only a narrow clipped prefix is visible in the actual viewport.
 inline std::expected<std::size_t, SourceError> documentPreparationBytes(CellSize viewport,
-                                                                        const DocumentViewConfig &config) noexcept {
+                                                                        const DocumentViewConfig &config,
+                                                                        std::size_t retainedHexRows = 0) noexcept {
   constexpr auto MAX = std::numeric_limits<std::size_t>::max();
   if (viewport.width <= 0 || viewport.height <= 0) {
     return std::unexpected(SourceError::PAGE_TOO_LARGE);
@@ -38,10 +72,30 @@ inline std::expected<std::size_t, SourceError> documentPreparationBytes(CellSize
     bytes += count * unit;
     return true;
   };
+  auto preparedCells = width * height;
+  if (config.mode == DocumentViewMode::HEX) {
+    const auto options = documentHexRowOptions(config.hex, width);
+    if (!options) {
+      return std::unexpected(SourceError::PAGE_TOO_LARGE);
+    }
+    const auto columns = hexRowWidth(*options);
+
+    // HEX retains clipped row strings/maps/runs, not the blank remainder of the UI surface.
+    // Horizontal clipping can only reduce this bound; the full formatter scratch is separate.
+    preparedCells = std::min(width, *columns) * height;
+    if (!include(*columns, 2) || !include(options->bytesPerRow, sizeof(HexByteCell) + sizeof(std::byte)) ||
+        !include(height, options->bytesPerRow + DOCUMENT_HEX_RAW_ROW_BYTES) ||
+        !include(height, sizeof(std::shared_ptr<const void>)) ||
+        !include(retainedHexRows, sizeof(std::shared_ptr<const void>)) ||
+        !include(preparedCells, DOCUMENT_PREPARED_CELL_BYTES)) {
+      return std::unexpected(SourceError::PAGE_TOO_LARGE);
+    }
+  }
   constexpr auto GUTTER_ROW_BYTES = sizeof(GraphemeText) + DOCUMENT_GUTTER_CELLS * DOCUMENT_PREPARED_CELL_BYTES;
   // Original-byte endpoints live in the retained scan and its frame copy.
-  if (!include(config.maxFrameBytes, 4) || !include(width * height, DOCUMENT_PREPARED_CELL_BYTES) ||
-      !include(height, sizeof(std::uint64_t) * 2) || (config.lineNumbers && !include(height, GUTTER_ROW_BYTES))) {
+  if (!include(config.maxFrameBytes, 4) || !include(preparedCells, DOCUMENT_PREPARED_CELL_BYTES) ||
+      !include(height, sizeof(std::uint64_t) * 2) ||
+      (config.mode == DocumentViewMode::TEXT && config.lineNumbers && !include(height, GUTTER_ROW_BYTES))) {
     return std::unexpected(SourceError::PAGE_TOO_LARGE);
   }
   return bytes;
@@ -89,10 +143,55 @@ struct DocumentTailSearch {
   bool followingLf{};
 };
 
+enum class DocumentHexRole : std::uint8_t {
+  BODY,
+  GUTTER,
+  ZERO,
+  PRINTABLE,
+  CONTROL,
+  HIGH_BYTE
+};
+
+struct DocumentHexRawRow {
+  SourceCredit credit; // Raw storage is destroyed before returning its independent subcredit.
+  std::uint64_t offset{};
+  std::vector<std::byte> bytes = std::vector<std::byte>(0);
+};
+
+struct DocumentHexRoleRow {
+  ~DocumentHexRoleRow() = default; // Preserve fallible copies when MSVC debug vectors grow.
+  std::vector<DocumentHexRole> columns = std::vector<DocumentHexRole>(0);
+};
+
+// Allocated only for an actual HEX worker; TEXT does not allocate row scratch or maps.
+struct DocumentHexScan {
+  DocumentHexOptions options;
+  std::size_t bytesPerRow{};
+  std::int32_t height{};
+  std::uint64_t first{};
+  std::vector<std::byte> pending = std::vector<std::byte>(0);
+  std::vector<DocumentHexRoleRow> roles = std::vector<DocumentHexRoleRow>(0);
+  std::vector<std::shared_ptr<const DocumentHexRawRow>> rawRows =
+    std::vector<std::shared_ptr<const DocumentHexRawRow>>(0);
+  bool tailUnknown{};
+};
+
+struct DocumentHexRun {
+  std::int32_t column{};
+  DocumentHexRole role{};
+  GraphemeText text;
+};
+
+struct DocumentHexFrame {
+  std::vector<std::vector<DocumentHexRun>> rows = std::vector<std::vector<DocumentHexRun>>(0);
+  std::size_t columns{};
+};
+
 // Only a worker mutates a new copy. Published snapshots are never modified again.
 struct DocumentScan {
   std::shared_ptr<const SourceCredit> reservation; // Outlives every copied/published scanner allocation.
   DocumentMetadata metadata;
+  std::shared_ptr<DocumentHexScan> hex;
   DocumentDecoderOptions decoderOptions;
   std::int32_t layoutWidth{};
   std::uint64_t requestedAnchor{};
@@ -151,6 +250,7 @@ struct DocumentPreparedFrame {
   std::vector<GraphemeText> rows = std::vector<GraphemeText>(std::initializer_list<GraphemeText>{});
   std::optional<std::vector<GraphemeText>> gutters;
   std::int32_t gutterCells{};
+  std::unique_ptr<DocumentHexFrame> hex;
   std::vector<std::uint64_t> anchors = std::vector<std::uint64_t>(0);
   std::unique_ptr<GraphemeText> footer;
   CellSize viewport;
@@ -196,6 +296,7 @@ struct DocumentViewState {
   std::int64_t rowDelta{};
   bool tail{};
   bool refresh{true};
+  std::optional<ScrollBarPolicy> textHorizontalPolicy;
 };
 
 struct DocumentViewAccess {
@@ -207,7 +308,7 @@ struct DocumentViewAccess {
     return *widget.document_;
   }
 
-  static std::shared_ptr<DocumentViewState> shared(DocumentView &widget) noexcept {
+  static std::shared_ptr<DocumentViewState> shared(const DocumentView &widget) noexcept {
     return widget.document_;
   }
 };
@@ -222,6 +323,7 @@ struct DocumentPrepareIntent {
   bool tail{};
   bool resume{};
   std::optional<DocumentLayoutCheckpoint> seed;
+  std::size_t retainedHexRows{};
 };
 
 struct DocumentPreparation {
@@ -235,6 +337,11 @@ struct DocumentPreparation {
 };
 
 ScrollAreaOptions documentScrollOptions();
+std::shared_ptr<const DocumentPreparation> prepareHexDocument(std::shared_ptr<ByteDocumentSource> source,
+                                                              const DocumentPrepareIntent &intent,
+                                                              std::shared_ptr<const DocumentScan> previous,
+                                                              std::uint64_t generation, SourceCredit credit,
+                                                              std::stop_token stop);
 
 // Run only on a worker. All capacity is precharged by the job before calling.
 std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteDocumentSource> source,

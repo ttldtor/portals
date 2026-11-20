@@ -2,7 +2,7 @@
 
 [Русская версия](ru/document-view.md) · [LogView](log-view.md) · [Scroll controls](scroll-controls.md)
 
-Use `DocumentView` to read a text document without loading its entire contents or a complete logical line. It reads and decodes bounded windows on the application's background executor. The UI paints the last immutable prepared window and remains available for input while a new window is being prepared.
+Use `DocumentView` to read a text or hexadecimal document without loading its entire contents or a complete logical line. It reads and decodes bounded windows on the application's background executor. The UI paints the last immutable prepared window and remains available for input while a new window is being prepared.
 
 @image html document-view.gif "Scroll a document, switch sources and return to the remembered position."
 
@@ -55,6 +55,47 @@ Click inside the document to give it keyboard focus after using a button. The bu
 A nonzero page command before usable geometry is arranged returns `WOULD_BLOCK` through the checked/collected error mechanism. Built-in PageUp/PageDown input is consumed without movement when the arranged body has zero width or height. Zero row/page commands still validate their reference and thread, then succeed without movement or redraw. Overflow is rejected before changing pending movement. Input respects disabled and read-only navigation settings; programmatic commands retain the same convention as `seekByte` and can move the view independently of those input restrictions.
 
 The terminal may intercept shortcuts: [Windows Terminal uses Ctrl+wheel for font zoom](https://learn.microsoft.com/en-us/windows/terminal/tips-and-tricks). The separate default Alt wheel modifier avoids choosing that shortcut for fast scrolling; Portals cannot override a host shortcut that is not forwarded. Buttons and custom `ui::onKey` handlers can call the same Ref commands.
+
+## Hexadecimal view {#document-view-hex}
+
+Use `.hex()` to inspect the original bytes in the same viewer. Each row contains a hexadecimal byte offset, grouped hexadecimal bytes and a safe character column. The character column shows printable ASCII; other bytes become dots. It does not decode UTF text or execute control sequences. Text decoding options and optional line numbers remain stored for a return to text mode.
+
+@image html document-view-hex.gif "Switch a UTF-16LE document between bytes and text, then use wheel, fast scrolling and End."
+
+[Complete text/hex application](../examples/document_hex/main.cpp), target `portals_document_hex_example`:
+
+\include document_hex/main.cpp
+
+F2 selects text and F3 selects hexadecimal view. Both use the same source and requested byte position. The footer still measures the last visible byte against the source extent, so changing the representation can change its percentage without moving the requested anchor. A successful mode change cancels unresolved row movement from the previous representation, rather than interpreting text rows as hex rows. Assigning the existing mode again leaves pending movement intact. Rejected changes preserve the old mode, position, prepared frame, pending movement and palette.
+
+The default is 16 bytes per row, groups of eight, uppercase digits and a visible character column. Fixed-width rows retain their configured byte count in a narrow window; the horizontal scrollbar exposes the remaining columns. `.hex({.bytesPerRow = 32, .autoFit = true})` permits fewer byte slots to fit the available width. Resizing or changing row options does not rewrite the requested byte anchor. Empty files and incomplete final rows do not acquire invented bytes.
+
+| Option | Meaning | Default |
+|---|---|---|
+| `bytesPerRow` | Configured byte slots per row, 1–4096 | 16 |
+| `groupSize` | Byte slots per group, 1–4096; a larger group than the row adds no internal gap | 8 |
+| `uppercase` | Uppercase hexadecimal digits | `true` |
+| `showAscii` | Safe character column | `true` |
+| `autoFit` | Reduce the effective byte count to fit, up to `bytesPerRow` | `false` |
+
+These are row/preparation limits, not file-size limits. Existing frame, work and source-memory budgets still apply. File-backed sources support random byte positions; a forward-only source cannot promise a switch or backward movement that requires bytes it has already discarded. Such unsupported operations return a typed error. Unknown extent stays unknown; the viewer does not scan an entire source to manufacture a percentage or row count.
+
+In TEXT mode, changing HEX options only stores them for a later switch to HEX. It does not read the source, prepare another text frame or cancel pending text navigation.
+
+For a forward-only source, choose the initial mode, `bytesPerRow` and `autoFit` in the description before mounting. Once the source is attached, runtime mode changes, and changes to these row settings while HEX is active, currently return a typed unsupported-operation error even when the required bytes remain cached. This is an implementation limit. Grouping, letter case and character-column visibility can change using retained rows. Fixed-grid width/height resizing remains supported. File-backed and other seekable sources support mode changes and all row options.
+
+| Command | Collected form | Checked form |
+|---|---|---|
+| Select representation | `document.mode(DocumentViewMode::HEX)` | `document.setMode(DocumentViewMode::HEX)` |
+| Change row options | `document.hexOptions(options)` | `document.setHexOptions(options)` |
+
+Use `DocumentViewMode::TEXT` to return to text. `DocumentViewStatus::mode` reports the selected representation; hexadecimal rows are not reported as logical text lines.
+
+Loaded scenes use `mode="text"` or `mode="hex"` and an optional `hex` block with the same five option names. Omitted properties keep their defaults; explicit `false` remains meaningful.
+
+[Complete resource application](examples/guide_document_hex_resource.cpp)
+
+\include guide_document_hex_resource.cpp
 
 ## Sources and commands {#document-view-sources}
 
@@ -113,6 +154,13 @@ reloading the document source.
 | `body` | `role-body-foreground` | `role-body-background` | `role-body-bold` | `role-body-italic` | `role-body-underline` |
 | `gutter` | `role-gutter-foreground` | `role-gutter-background` | `role-gutter-bold` | `role-gutter-italic` | `role-gutter-underline` |
 | `position` | `role-position-foreground` | `role-position-background` | `role-position-bold` | `role-position-italic` | `role-position-underline` |
+| `hex-zero` | `role-hex-zero-foreground` | `role-hex-zero-background` | `role-hex-zero-bold` | `role-hex-zero-italic` | `role-hex-zero-underline` |
+| `hex-printable` | `role-hex-printable-foreground` | `role-hex-printable-background` | `role-hex-printable-bold` | `role-hex-printable-italic` | `role-hex-printable-underline` |
+| `hex-control` | `role-hex-control-foreground` | `role-hex-control-background` | `role-hex-control-bold` | `role-hex-control-italic` | `role-hex-control-underline` |
+| `hex-high-byte` | `role-hex-high-byte-foreground` | `role-hex-high-byte-background` | `role-hex-high-byte-bold` | `role-hex-high-byte-italic` | `role-hex-high-byte-underline` |
+
+HEX adds `hex-zero` for zero bytes, `hex-printable` for graphic ASCII and space, `hex-control` for other ASCII controls, and `hex-high-byte` for bytes at or above 0x80. Offsets use `gutter`; separators and padding use `body`. HEX roles are registered only for that representation and use the same PSS/theme cascade.
+
 
 Run this sample from the Portals source directory so `README.md` is available. Press F2 to show or hide the line-number gutter while reading. The source and reading anchor are preserved, including wheel input already accepted during loading. Setting the existing value again does not start another load or redraw.
 

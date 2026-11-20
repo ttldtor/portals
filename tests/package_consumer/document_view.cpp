@@ -31,5 +31,11 @@ int main() {
   if (!restored || restored->byteOffset != 3 || !reader.refresh()) {
     return 5;
   }
-  return (*scene)->close() ? 0 : 6;
+  if (!reader.setHexOptions({.bytesPerRow = 8}) || !reader.setMode(DocumentViewMode::HEX) ||
+      !reader.hexOptions({.bytesPerRow = 16}) || !reader.mode(DocumentViewMode::TEXT)) {
+    return 6;
+  }
+  auto hexRecipe = ui::viewer("missing-file.txt").hex({.bytesPerRow = 8, .autoFit = true});
+  (void)hexRecipe;
+  return (*scene)->close() ? 0 : 7;
 }

@@ -81,6 +81,10 @@ std::expected<void, ManagedError> navigateDocument(const std::shared_ptr<RefTarg
                                                    portals::detail::DocumentNavigation, std::int64_t,
                                                    std::source_location);
 std::expected<DocumentViewStatus, ManagedError> documentStatus(const std::shared_ptr<RefTarget> &, Node<DocumentView>);
+std::expected<void, ManagedError> documentMode(const std::shared_ptr<RefTarget> &, Node<DocumentView>, DocumentViewMode,
+                                               std::source_location);
+std::expected<void, ManagedError> documentHexOptions(const std::shared_ptr<RefTarget> &, Node<DocumentView>,
+                                                     DocumentHexOptions, std::source_location);
 std::expected<void, ManagedError> documentLineNumbers(const std::shared_ptr<RefTarget> &,
                                                       std::shared_ptr<const Node<DocumentView>>, std::optional<bool>,
                                                       std::source_location);
@@ -1340,6 +1344,58 @@ public:
       detail::reportEventError(observation, result.error(), origin);
     }
 
+    return result.has_value();
+  }
+
+  /** @param value Projection of the same raw source. @param origin Command site.
+   * @return Checked mode admission; rejection preserves mode, anchor, frame and pending rows and is not collected.
+   * A changed mode supersedes unresolved old-mode relative navigation at the requested raw byte anchor.
+   * Assigning the same mode is a no-op. Forward-only sources reject a changed mode as UNSUPPORTED.
+   */
+  std::expected<void, ManagedError> setMode(DocumentViewMode value,
+                                            std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return detail::documentMode(target(), this->node(), value, origin);
+  }
+
+  /** @param value Projection of the same raw source. @param origin Command site.
+   * @return Admission result; a rejection is collected exactly once.
+   */
+  bool mode(DocumentViewMode value, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    const auto result = detail::documentMode(observation, this->node(), value, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result.has_value();
+  }
+
+  /** @param options Fixed raw-byte layout. @param origin Command site.
+   * @return Checked reflow preserving the requested byte anchor; no I/O is performed.
+   */
+  std::expected<void, ManagedError> setHexOptions(DocumentHexOptions options,
+                                                  std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return detail::documentHexOptions(target(), this->node(), options, origin);
+  }
+
+  /** @param options Fixed raw-byte layout. @param origin Command site.
+   * @return Admission result; a rejection is collected exactly once.
+   */
+  bool hexOptions(DocumentHexOptions options, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    const auto result = detail::documentHexOptions(observation, this->node(), options, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
     return result.has_value();
   }
 

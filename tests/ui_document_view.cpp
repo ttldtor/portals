@@ -76,6 +76,8 @@ public:
   std::atomic<std::size_t> reads{};
   std::atomic<std::size_t> bytesRead{};
   bool seekable{true};
+  bool enforceSequential{};
+  std::uint64_t sequentialOffset{};
   bool utf16{};
   std::vector<std::pair<std::uint64_t, std::string>> patches;
   std::atomic<std::size_t> metadataCalls{};
@@ -103,6 +105,9 @@ public:
   std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
                                                     std::stop_token) override {
     ++reads;
+    if (enforceSequential && command.offset != sequentialOffset) {
+      return std::unexpected(DocumentError{SourceError::UNSUPPORTED, {}, {}});
+    }
     if (providerWouldBlock) {
       return std::unexpected(DocumentError{SourceError::WOULD_BLOCK, {}, {}});
     }
@@ -131,11 +136,14 @@ public:
         }
       }
       bytesRead += count;
+      sequentialOffset = command.offset + count;
       return ByteReadResult{count, offset + count == *syntheticExtent};
     }
     const auto offset = std::min<std::uint64_t>(command.offset, text.size());
     const auto count = std::min(destination.size(), text.size() - static_cast<std::size_t>(offset));
     std::memcpy(destination.data(), text.data() + offset, count);
+    bytesRead += count;
+    sequentialOffset = command.offset + count;
     return ByteReadResult{count, (!unknown || finalUnknown) && offset + count == text.size()};
   }
 };
@@ -157,9 +165,11 @@ struct Fixture {
   Node<DocumentView> node;
   CellSize size{24, 8};
 
-  explicit Fixture(ui::DocumentSource descriptor, DocumentViewConfig config = {}) {
+  explicit Fixture(ui::DocumentSource descriptor, DocumentViewConfig config = {}, bool requestFocus = true) {
     node = take(ui::mount(*scene, ui::viewer(reference, std::move(descriptor), config)));
-    take(scene->focus(node));
+    if (requestFocus) {
+      take(scene->focus(node));
+    }
     take(app->router().setPointerCaptureCapabilities({true, true, true}));
   }
 
@@ -2313,4 +2323,502 @@ TEST_CASE("accepted pages keep admission rows across resize and Ref row overflow
   f.settle(4);
   checkTop(f, "row-0");
   CHECK(f.executor.submissions == jobs);
+}
+
+TEST_CASE("HEX mode changes preserve raw UTF anchors and retained TEXT settings") {
+  const auto text = std::string("\xEF\xBB\xBF") + "a\xC3\xA9\nsecond\nthird";
+  Fixture f(source(text), {.wrap = false, .lineNumbers = true});
+  f.size = {100, 6};
+  f.settle();
+  take(f.reference.seekByte(5));
+  f.settle();
+  const auto before = take(f.reference.status());
+  REQUIRE(before.byteOffset == 5);
+  take(f.reference.setMode(DocumentViewMode::HEX));
+  CHECK(take(f.reference.status()).byteOffset == 5);
+  f.settle();
+  const auto hex = f.frame();
+  REQUIRE(hex);
+  CHECK(hex->status.byteOffset == 5);
+  CHECK(hex->status.visibleByteOffset == 0);
+  CHECK_FALSE(hex->status.logicalLine);
+  CHECK_FALSE(hex->status.totalLines);
+  CHECK(hex->rows.front().bytes().starts_with("0000000000000000  EF BB BF 61 C3 A9 0A"));
+  take(f.app->tree().read(f.node, [](const DocumentView &widget) {
+    const auto &state = detail::DocumentViewAccess::state(widget);
+    CHECK(state.config.lineNumbers);
+    CHECK_FALSE(state.config.wrap);
+    REQUIRE(state.roles.snapshot());
+    CHECK(state.roles.snapshot()->values.size() == 7);
+    CHECK(detail::ScrollWidgetAccess::state(widget).area.horizontal == ScrollBarPolicy::AUTO);
+  }));
+  take(f.reference.setMode(DocumentViewMode::TEXT));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 5);
+  CHECK(take(f.reference.status()).mode == DocumentViewMode::TEXT);
+  take(f.app->tree().read(f.node, [](const DocumentView &widget) {
+    const auto &state = detail::DocumentViewAccess::state(widget);
+    REQUIRE(state.roles.snapshot());
+    CHECK(state.roles.snapshot()->values.size() == 3);
+    CHECK(detail::ScrollWidgetAccess::state(widget).area.horizontal == ScrollBarPolicy::NEVER);
+  }));
+}
+
+TEST_CASE("mode change supersedes unresolved old row commands while no-op retains them") {
+  Fixture f(source(scrollRows(200)), {.workBytes = 32});
+  f.size = {100, 6};
+  f.settle(30);
+  take(f.reference.scrollRows(7));
+  f.pump();
+  REQUIRE(f.executor.job);
+  take(f.reference.scrollRows(5));
+  const auto anchor = take(f.reference.status()).byteOffset;
+  take(f.reference.setMode(DocumentViewMode::HEX));
+  take(f.reference.setMode(DocumentViewMode::TEXT));
+  f.settle(40);
+  CHECK(take(f.reference.status()).byteOffset == anchor);
+  CHECK(take(f.reference.status()).mode == DocumentViewMode::TEXT);
+  CHECK_FALSE(take(f.reference.status()).error);
+  take(f.reference.scrollRows(2));
+  take(f.reference.setMode(DocumentViewMode::TEXT));
+  f.settle(30);
+  REQUIRE(f.frame());
+  CHECK(take(f.reference.status()).byteOffset > anchor);
+}
+
+TEST_CASE("HEX row option and resize reflow preserve raw anchors and latest generation") {
+  Fixture f(source(std::string(1000, 'A')));
+  f.size = {100, 6};
+  f.settle();
+  take(f.reference.seekByte(73));
+  take(f.reference.setMode(DocumentViewMode::HEX));
+  f.pump();
+  REQUIRE(f.executor.job);
+  take(f.reference.setHexOptions({.bytesPerRow = 8, .groupSize = 4, .uppercase = false}));
+  f.size = {60, 5};
+  f.settle(30);
+  const auto frame = f.frame();
+  REQUIRE(frame);
+  CHECK(frame->status.byteOffset == 73);
+  CHECK(frame->status.visibleByteOffset == 72);
+  CHECK(frame->rows.front().bytes().starts_with("0000000000000048"));
+  take(f.reference.setHexOptions({.bytesPerRow = 32, .autoFit = true}));
+  f.size = {50, 5};
+  f.settle(30);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->status.byteOffset == 73);
+  CHECK(f.frame()->hex->columns <= static_cast<std::size_t>(f.frame()->viewport.width));
+}
+
+TEST_CASE("HEX navigation shares lossless queue maps rows and pages to bytes and ends at full page") {
+  Fixture f(source(std::string(4099, 'B')), {.mode = DocumentViewMode::HEX});
+  f.size = {100, 6};
+  f.settle();
+  const auto height = f.frame()->viewport.height;
+  take(f.reference.scrollRows(3));
+  f.pump();
+  take(f.reference.scrollRows(2));
+  take(f.reference.scrollPages(1));
+  f.settle(40);
+  CHECK(take(f.reference.status()).byteOffset == static_cast<std::uint64_t>(5 + height - 1) * 16);
+  take(f.reference.goEnd());
+  f.settle(30);
+  const auto frame = f.frame();
+  REQUIRE(frame);
+  REQUIRE(frame->anchors.size() == static_cast<std::size_t>(height));
+  CHECK(frame->visibleByteEnd == 4099);
+  CHECK(frame->finalEndVisible);
+  const auto atEnd = take(f.reference.status()).byteOffset;
+  take(f.reference.scrollRows(100));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == atEnd);
+  take(f.reference.goHome());
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 0);
+}
+
+TEST_CASE("HEX checked failures preserve mode frame and pending navigation with one collected diagnostic") {
+  Fixture f(source(scrollRows(100)));
+  f.settle();
+  const auto frame = f.frame();
+  const auto serial = navigationSerial(f);
+  CHECK_FALSE(f.reference.setMode(static_cast<DocumentViewMode>(99)));
+  CHECK_FALSE(f.reference.setHexOptions({.bytesPerRow = 0}));
+  CHECK(f.frame() == frame);
+  CHECK(navigationSerial(f) == serial);
+  unsigned diagnostics{};
+  take(f.scene->onError([&](const ManagedDiagnostic &) {
+    ++diagnostics;
+  }));
+  CHECK_FALSE(f.reference.mode(static_cast<DocumentViewMode>(99)));
+  CHECK(diagnostics == 1);
+  CHECK_FALSE(f.reference.hexOptions({.groupSize = MAX_HEX_ROW_BYTES + 1}));
+  CHECK(diagnostics == 2);
+  take(f.reference.scrollRows(2));
+  CHECK_FALSE(f.reference.setMode(static_cast<DocumentViewMode>(99)));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset > 0);
+  CHECK(take(f.reference.status()).mode == DocumentViewMode::TEXT);
+}
+
+TEST_CASE("forward-only mode and unsupported HEX navigation fail before changing state or reading") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  provider->text = std::string(500, 'F');
+  Fixture f(ui::document(provider), {.mode = DocumentViewMode::HEX});
+  f.size = {100, 6};
+  f.settle();
+  const auto frame = f.frame();
+  const auto reads = provider->reads.load();
+  const auto rejected = f.reference.setMode(DocumentViewMode::TEXT);
+  REQUIRE_FALSE(rejected);
+  CHECK(rejected.error().source == SourceError::UNSUPPORTED);
+  const auto end = f.reference.goEnd();
+  REQUIRE_FALSE(end);
+  CHECK(end.error().source == SourceError::UNSUPPORTED);
+  const auto backwards = f.reference.scrollRows(-1);
+  REQUIRE_FALSE(backwards);
+  CHECK(backwards.error().source == SourceError::UNSUPPORTED);
+  CHECK_FALSE(f.reference.setHexOptions({.bytesPerRow = 8}));
+  CHECK(f.frame() == frame);
+  CHECK(provider->reads.load() == reads);
+  CHECK(take(f.reference.status()).mode == DocumentViewMode::HEX);
+  take(f.reference.setHexOptions({.uppercase = false, .showAscii = false}));
+  f.settle();
+  CHECK_FALSE(take(f.reference.status()).error);
+  CHECK(provider->reads.load() == reads);
+}
+
+TEST_CASE("HEX provider waiting has no idle retries and refresh resumes raw reads") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = "raw bytes";
+  provider->providerWouldBlock = true;
+  Fixture f(ui::document(provider), {.mode = DocumentViewMode::HEX});
+  f.settle();
+  CHECK(take(f.reference.status()).waiting);
+  CHECK_FALSE(take(f.reference.status()).finalEnd);
+  const auto reads = provider->reads.load();
+  f.settle();
+  CHECK(provider->reads.load() == reads);
+  provider->providerWouldBlock = false;
+  take(f.reference.refresh());
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->status.mode == DocumentViewMode::HEX);
+  CHECK(f.frame()->visibleByteEnd == provider->text.size());
+}
+
+TEST_CASE("HEX semantic roles paint safe ASCII including space as printable") {
+  Fixture f(source(std::string("\0 A\x1B\xFF", 5)), {.mode = DocumentViewMode::HEX});
+  f.size = {100, 6};
+  take(f.scene->enableStyleLayers());
+  take(f.scene->addLayer(
+    StyleTier::USER, "hex",
+    take(parsePss("DocumentView{role-hex-zero-foreground:#010203;role-hex-printable-foreground:#040506;"
+                  "role-hex-control-foreground:#070809;role-hex-high-byte-foreground:#0A0B0C;}"))));
+  f.settle();
+  const auto sink = paint(f);
+  CHECK(sink.part("00").foreground == RgbColor{1, 2, 3});
+  CHECK(sink.part("20").foreground == RgbColor{4, 5, 6});
+  CHECK(sink.part("1B").foreground == RgbColor{7, 8, 9});
+  CHECK(sink.part("FF").foreground == RgbColor{10, 11, 12});
+}
+
+TEST_CASE("HEX fixed forward-only rows and resize replay only the retained byte window") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  provider->text = std::string(1000, 'F');
+  Fixture f(ui::document(provider), {.mode = DocumentViewMode::HEX});
+  f.size = {100, 6};
+  f.settle();
+  const auto initial = provider->bytesRead.load();
+  take(f.reference.scrollRows(1));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK_FALSE(take(f.reference.status()).error);
+  CHECK(take(f.reference.status()).byteOffset == 16);
+  CHECK(provider->bytesRead.load() == initial + 16);
+  const auto moved = provider->bytesRead.load();
+  f.size = {70, 6};
+  f.settle();
+  CHECK_FALSE(take(f.reference.status()).error);
+  CHECK(take(f.reference.status()).byteOffset == 16);
+  CHECK(provider->bytesRead.load() == moved);
+}
+
+TEST_CASE("HEX horizontal arrow moves a raw column without moving the byte anchor") {
+  Fixture f(source(std::string(400, 'H')), {.mode = DocumentViewMode::HEX});
+  f.settle();
+  REQUIRE(f.frame());
+  const std::string first(f.frame()->rows.front().bytes());
+  CHECK(f.input(InputKey::RIGHT));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 0);
+  CHECK(f.frame()->rows.front().bytes() != first);
+}
+
+TEST_CASE("forward-only HEX repeated shrink scroll and grow carry charged unread rows") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  provider->text = std::string(1000, 'C');
+  auto budget = take(SourceBudget::create());
+  Fixture f(ui::document(provider, budget), {.mode = DocumentViewMode::HEX});
+  f.size = {100, 8};
+  f.settle();
+  const auto readAhead = provider->bytesRead.load();
+  auto rawCharge = [&] {
+    take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+      const auto &state = detail::DocumentViewAccess::state(widget);
+      CHECK_FALSE(state.status.error);
+    }));
+    return budget->usage().bytes;
+  };
+  CHECK(rawCharge() > 0);
+  f.size = {100, 5};
+  f.settle();
+  CHECK(provider->bytesRead.load() == readAhead);
+  take(f.reference.scrollRows(1));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 16);
+  f.size = {100, 4};
+  f.settle();
+  take(f.reference.scrollRows(1));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 32);
+  CHECK(provider->bytesRead.load() == readAhead);
+  f.size = {100, 8};
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK_FALSE(take(f.reference.status()).error);
+  CHECK(f.frame()->status.visibleByteOffset == 32);
+  CHECK(provider->bytesRead.load() == readAhead + 32);
+  const auto held = budget->usage().bytes;
+  take(f.scene->remove(f.node));
+  f.executor.runOne();
+  CHECK(budget->usage().bytes < held);
+}
+
+TEST_CASE("HEX switch preserves an anchor inside a UTF16 surrogate and recovers strict text failure") {
+  DocumentViewConfig config;
+  config.decoder.explicitEncoding = DocumentEncoding::UTF16LE;
+  Fixture f(source(std::string("\xFF\xFE\x41\0\x3D\xD8\0\xDE\x42\0", 10)), config);
+  f.size = {100, 6};
+  f.settle();
+  take(f.reference.seekByte(5));
+  f.settle();
+  take(f.reference.setMode(DocumentViewMode::HEX));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->status.byteOffset == 5);
+  CHECK(f.frame()->rows.front().bytes().starts_with("0000000000000000  FF FE 41 00 3D D8 00 DE"));
+  take(f.reference.setMode(DocumentViewMode::TEXT));
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == 5);
+  DocumentViewConfig strict;
+  strict.decoder.policy = DocumentDecodePolicy::STRICT_MODE;
+  Fixture malformed(source(std::string("\xFF\x1B", 2)), strict);
+  malformed.size = {100, 6};
+  malformed.settle();
+  REQUIRE(take(malformed.reference.status()).error);
+  take(malformed.reference.setMode(DocumentViewMode::HEX));
+  malformed.settle();
+  REQUIRE(malformed.frame());
+  CHECK_FALSE(take(malformed.reference.status()).error);
+  CHECK(malformed.frame()->rows.front().bytes().starts_with("0000000000000000  FF 1B"));
+}
+
+TEST_CASE("HEX preparation capacity release wakes the existing activity once") {
+  auto budget = take(SourceBudget::create({.maxWork = 2}));
+  auto provider = std::make_shared<Provider>();
+  provider->text = std::string(512, 'P');
+  Fixture f(ui::document(provider, budget), {.mode = DocumentViewMode::HEX});
+  f.settle();
+  const auto oldFrame = f.frame();
+  const auto reads = provider->reads.load();
+  auto pressure = take(budget->reserve({0, 0, 1, 0}));
+  take(f.reference.refresh());
+  f.pump();
+  CHECK(take(f.reference.status()).backpressured);
+  CHECK(f.frame() == oldFrame);
+  CHECK(provider->reads.load() == reads);
+  pressure = {};
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK_FALSE(take(f.reference.status()).backpressured);
+  CHECK_FALSE(take(f.reference.status()).error);
+  CHECK(f.frame()->status.mode == DocumentViewMode::HEX);
+  CHECK(provider->reads.load() > reads);
+}
+
+TEST_CASE("forward-only HEX queued generation retains replay on resize or case change") {
+  for (const bool resize : {false, true}) {
+    auto provider = std::make_shared<Provider>();
+    provider->seekable = false;
+    provider->enforceSequential = true;
+    provider->text = std::string(1000, 'F');
+    Fixture f(ui::document(provider), {.mode = DocumentViewMode::HEX});
+    f.size = {100, 6};
+    f.settle();
+    take(f.reference.scrollRows(1));
+    f.pump();
+    REQUIRE(f.executor.job);
+    if (resize) {
+      f.size = {70, 6};
+    } else {
+      take(f.reference.setHexOptions({.uppercase = false}));
+    }
+    f.settle(30);
+    CHECK_FALSE(take(f.reference.status()).error);
+    CHECK(take(f.reference.status()).byteOffset == 16);
+    REQUIRE(f.frame());
+    CHECK(f.frame()->status.visibleByteOffset == 16);
+  }
+}
+
+TEST_CASE("inactive HEX options preserve TEXT work navigation and apply on a later mode change") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = scrollRows(100);
+  Fixture f(ui::document(provider));
+  f.settle();
+  const auto frame = f.frame();
+  const auto serial = navigationSerial(f);
+  const auto reads = provider->reads.load();
+  const auto submissions = f.executor.submissions;
+  take(f.app->tree().consumeFrameRequest());
+  take(f.reference.setHexOptions({.bytesPerRow = 8, .uppercase = false}));
+  CHECK(navigationSerial(f) == serial);
+  CHECK(f.frame() == frame);
+  CHECK(provider->reads.load() == reads);
+  CHECK(f.executor.submissions == submissions);
+  CHECK(take(f.app->tree().consumeFrameRequest()) == Invalidation::NONE);
+  f.settle();
+  CHECK(provider->reads.load() == reads);
+  CHECK(f.executor.submissions == submissions);
+  take(f.reference.scrollRows(2));
+  f.pump();
+  REQUIRE(f.executor.job);
+  const auto pendingSerial = navigationSerial(f);
+  take(f.reference.setHexOptions({.bytesPerRow = 4, .groupSize = 2, .uppercase = false}));
+  CHECK(navigationSerial(f) == pendingSerial);
+  f.settle();
+  CHECK(take(f.reference.status()).byteOffset == std::string("row-0\nrow-1\n").size());
+  take(f.reference.setMode(DocumentViewMode::HEX));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->hex->columns == *hexRowWidth({4, 2, false, true}));
+  take(f.app->tree().read(f.node, [](const DocumentView &widget) {
+    const auto &hex = detail::DocumentViewAccess::state(widget).config.hex;
+    CHECK(hex.bytesPerRow == 4);
+    CHECK(hex.groupSize == 2);
+    CHECK_FALSE(hex.uppercase);
+  }));
+}
+
+TEST_CASE("forward-only HEX completed worker before UI pump preserves one row command on reflow") {
+  for (const bool resize : {false, true}) {
+    auto provider = std::make_shared<Provider>();
+    provider->seekable = false;
+    provider->enforceSequential = true;
+    provider->text = std::string(1000, 'F');
+    Fixture f(ui::document(provider), {.mode = DocumentViewMode::HEX});
+    f.size = {100, 6};
+    f.settle();
+    take(f.reference.scrollRows(1));
+    f.pump();
+    REQUIRE(f.executor.job);
+    f.executor.runOne();
+    if (resize) {
+      f.size = {70, 6};
+    } else {
+      take(f.reference.setHexOptions({.uppercase = false}));
+    }
+    f.settle(30);
+    CHECK_FALSE(take(f.reference.status()).error);
+    CHECK(take(f.reference.status()).byteOffset == 16);
+  }
+}
+
+TEST_CASE("forward HEX replay overlap survives temporary capacity pressure and stays bounded") {
+  auto budget = take(SourceBudget::create());
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  provider->text = std::string(10000, 'R');
+  Fixture f(ui::document(provider, budget), {.mode = DocumentViewMode::HEX});
+  f.size = {100, 6};
+  f.settle();
+  const auto baseline = budget->usage().bytes;
+  const auto height = static_cast<std::size_t>(f.frame()->viewport.height);
+  const auto reads = provider->reads.load();
+  auto pressure = take(budget->reserve({budget->options().maxBytes - budget->usage().bytes - 1, 0, 0, 0}));
+  take(f.reference.scrollRows(1));
+  f.pump();
+  CHECK(take(f.reference.status()).backpressured);
+  CHECK(provider->reads.load() == reads);
+  f.size = {70, 6};
+  take(f.reference.setHexOptions({.uppercase = false}));
+  f.pump();
+  CHECK(take(f.reference.status()).backpressured);
+  pressure = {};
+  f.settle(30);
+  CHECK_FALSE(take(f.reference.status()).error);
+  CHECK(take(f.reference.status()).byteOffset == 16);
+  for (std::uint64_t row = 2; row <= 24; ++row) {
+    take(f.reference.scrollRows(1));
+    f.pump();
+    if (row % 2) {
+      f.executor.runOne();
+    }
+    f.size = {static_cast<std::int32_t>(row % 2 ? 70 : 100), 6};
+    f.settle(30);
+    CHECK_FALSE(take(f.reference.status()).error);
+    CHECK(take(f.reference.status()).byteOffset == row * 16);
+  }
+  f.size = {100, 6};
+  f.settle();
+  const auto overlap =
+    (2 * height + 1) * (16 + detail::DOCUMENT_HEX_RAW_ROW_BYTES + 2 * sizeof(std::shared_ptr<const void>));
+  CHECK(budget->usage().bytes <= baseline + overlap);
+}
+
+TEST_CASE("native sized HEX actual wheel and End input remain within default source budget") {
+  constexpr std::uint64_t EXTENT = 8 * 1024 * 1024;
+  auto provider = std::make_shared<Provider>();
+  provider->syntheticExtent = EXTENT;
+  Fixture f(ui::document(provider), {.mode = DocumentViewMode::HEX}, false);
+  f.size = {192, 52};
+  f.settle();
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->viewport == CellSize{190, 50});
+  REQUIRE(take(f.reference.status()).byteOffset == 0);
+  const auto dispatch = [&](const InputEvent &event) {
+    const auto handled = take(f.scene->input(*f.app, event));
+    if (!handled) {
+      take(f.app->router().dispatch(event));
+    }
+    return handled;
+  };
+  dispatch(MouseInputEvent{40, 10, MouseButton::LEFT, MouseAction::PRESS});
+  dispatch(MouseInputEvent{40, 10, MouseButton::LEFT, MouseAction::RELEASE});
+  f.pump();
+  CHECK(take(f.app->router().focused()) == f.node);
+  CHECK(dispatch(MouseInputEvent{
+    .column = 40, .row = 10, .button = MouseButton::WHEEL_DOWN, .action = MouseAction::SCROLL, .wheelDelta = 1.0}));
+  f.settle();
+  const auto wheel = take(f.reference.status());
+  CAPTURE(wheel.error ? static_cast<int>(wheel.error->code) : -1);
+  CHECK_FALSE(wheel.error);
+  CHECK(wheel.byteOffset == 16);
+  CHECK(dispatch(KeyEvent{.key = InputKey::END}));
+  f.settle();
+  const auto end = take(f.reference.status());
+  CAPTURE(end.error ? static_cast<int>(end.error->code) : -1);
+  CHECK_FALSE(end.error);
+  REQUIRE(f.frame());
+  CHECK(end.byteOffset == EXTENT - 50 * 16);
+  CHECK(f.frame()->visibleByteEnd == EXTENT);
+  CHECK(f.frame()->finalEndVisible);
 }

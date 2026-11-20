@@ -118,7 +118,9 @@ bool validConfig(const DocumentViewConfig &config) noexcept {
   const auto validEncoding = [](DocumentEncoding encoding) {
     return encoding >= DocumentEncoding::UNRESOLVED && encoding <= DocumentEncoding::WINDOWS1252;
   };
-  return validEncoding(config.decoder.explicitEncoding) && validEncoding(config.decoder.hint) &&
+  return (config.mode == DocumentViewMode::TEXT || config.mode == DocumentViewMode::HEX) &&
+         hexRowWidth({config.hex.bytesPerRow, config.hex.groupSize, config.hex.uppercase, config.hex.showAscii}) &&
+         validEncoding(config.decoder.explicitEncoding) && validEncoding(config.decoder.hint) &&
          (config.decoder.policy == DocumentDecodePolicy::REPLACE ||
           config.decoder.policy == DocumentDecodePolicy::STRICT_MODE) &&
          config.maxFrameCells && config.maxFrameCells <= SAFE_LIMIT && config.maxFrameBytes &&
@@ -322,6 +324,10 @@ public:
         return;
       }
 
+      if (!state->source->capabilities().seekable && (command == DocumentNavigation::END || state->anchor != 0)) {
+        result = std::unexpected(TreeError::INVALID_ARGUMENT);
+        return;
+      }
       clearRelative(state->serial);
       if (command == DocumentNavigation::HOME) {
         state->anchor = 0;
@@ -415,14 +421,14 @@ public:
         !key->modifiers.shift && (!key->modifiers.control || key->key == InputKey::HOME || key->key == InputKey::END)) {
       switch (key->key) {
       case InputKey::LEFT:
-        if (state->config.wrap) {
+        if (state->config.mode == DocumentViewMode::TEXT && state->config.wrap) {
           return false;
         }
         state->horizontal = state->horizontal ? state->horizontal - 1 : 0;
         recognized = true;
         break;
       case InputKey::RIGHT:
-        if (state->config.wrap) {
+        if (state->config.mode == DocumentViewMode::TEXT && state->config.wrap) {
           return false;
         }
         if (state->horizontal <
@@ -570,12 +576,20 @@ public:
     state->tail = false;
     state->frame.reset();
     state->status = {};
+    state->status.mode = state->config.mode;
     state->refresh = true;
     ++state->serial;
     clearRelative(state->serial);
     credit_ = std::move(*reserved);
     (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
     return {};
+  }
+
+  void projectionChanged(std::uint64_t nextSerial) noexcept {
+    clearRelative(nextSerial);
+    supersede();
+    scan_.reset();
+    restored_.reset();
   }
 
   void presentationReflow(std::uint64_t previousSerial, std::uint64_t nextSerial) noexcept {
@@ -590,6 +604,9 @@ public:
 private:
   std::expected<void, TreeError> queueRows(DocumentViewState &state, bool arranged, CellSize inputViewport,
                                            std::int64_t delta) {
+    if (!state.source->capabilities().seekable && delta < 0) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
     const bool sameTarget = navigationSerial_ == state.serial;
     const auto pending = checkedRowSum(sameTarget ? pendingRows_ : 0, delta);
     const auto outstanding = pending ? checkedRowSum(*pending, sameTarget ? inFlightRows_ : 0) : std::nullopt;
@@ -744,6 +761,8 @@ private:
     std::uint64_t scrollSerial{};
     std::uint64_t scrollOffset{};
     std::uint64_t scrollMaximum{};
+    std::uint64_t horizontalOffset{};
+    std::uint64_t horizontalMaximum{};
     bool dragging{};
     const auto read = app_.tree().read(node_, [&](const DocumentView &widget) {
       const auto &scroll = ScrollWidgetAccess::state(widget);
@@ -755,6 +774,8 @@ private:
       if (const auto position = scroll.controller->snapshot()) {
         scrollOffset = position->vertical.offset.raster;
         scrollMaximum = scrollRange(position->vertical.metrics).maximum;
+        horizontalOffset = position->horizontal.offset.raster;
+        horizontalMaximum = scrollRange(position->horizontal.metrics).maximum;
       }
     });
     if (!read) {
@@ -762,7 +783,16 @@ private:
       return;
     }
     visible = visible && viewport.width > 0 && viewport.height > 0;
+    const bool sequentialHex = state->config.mode == DocumentViewMode::HEX && !state->source->capabilities().seekable;
     if (!visible) {
+      if (sequentialHex && busy_ && !completion_) {
+        // Finish one existing turn without synchronously waiting or advancing another turn.
+        visible_ = false;
+        return;
+      }
+      if (sequentialHex && completion_ && completion_->scan) {
+        scan_ = completion_->scan;
+      }
       if (visible_ || busy_) {
         restoreRelative();
         state->rowDelta = 0;
@@ -775,7 +805,11 @@ private:
     visible_ = true;
 
     if (!state->roles.snapshot() && (!roleFailureSerial_ || *roleFailureSerial_ != state->serial)) {
-      auto roles = ui::detail::SceneAccess::registerPreparedRoles(scene_, node_, {"body", "gutter", "position"});
+      auto roles = state->config.mode == DocumentViewMode::HEX
+                     ? ui::detail::SceneAccess::registerPreparedRoles(
+                         scene_, node_,
+                         {"body", "gutter", "position", "hex-zero", "hex-printable", "hex-control", "hex-high-byte"})
+                     : ui::detail::SceneAccess::registerPreparedRoles(scene_, node_, {"body", "gutter", "position"});
       if (!roles) {
         roleFailureSerial_ = state->serial;
         // Queue one plain fallback turn before a diagnostic callback may retire
@@ -798,7 +832,24 @@ private:
       dragByteRange_ = documentScrollByteRange(*state->frame);
     }
 
-    const bool byteCommand = scrollSerial != scrollSerial_ && extent && scrollMaximum;
+    const bool horizontalCommand = state->config.mode == DocumentViewMode::HEX && scrollSerial != scrollSerial_ &&
+                                   horizontalOffset != horizontalBarOffset_;
+    if (horizontalCommand) {
+      const auto previous = state->serial;
+
+      state->horizontal = horizontalOffset;
+      state->rowDelta = 0;
+      state->refresh = true;
+      ++state->serial;
+      presentationReflow(previous, state->serial);
+    } else if (state->config.mode == DocumentViewMode::HEX && state->frame && state->frame->hex) {
+      state->horizontal = std::min(state->horizontal, horizontalMaximum);
+      if (state->horizontal != horizontalOffset && !synchronizeBar(state->horizontal, ScrollAxis::HORIZONTAL)) {
+        return;
+      }
+    }
+    horizontalBarOffset_ = state->horizontal;
+    const bool byteCommand = scrollSerial != scrollSerial_ && !horizontalCommand && extent && scrollMaximum;
     if (byteCommand) {
       const auto range = dragByteRange_.value_or(documentScrollByteRange(*state->frame));
       state->anchor = scrollOffset >= scrollMaximum
@@ -827,6 +878,15 @@ private:
     scrollSerial_ = scrollSerial;
     if (viewport.width != viewport_.width || viewport.height != viewport_.height || state->serial != serial_ ||
         state->refresh) {
+      if (sequentialHex && busy_ && !completion_) {
+        // Cancelling an advancing sequential read cannot roll its provider cursor back.
+        // Keep the latest presentation intent and drain this bounded turn asynchronously.
+        return;
+      }
+      if (sequentialHex && completion_ && completion_->scan) {
+        // Retain accepted bytes, not the obsolete frame or relative-command acknowledgement.
+        scan_ = completion_->scan;
+      }
       if (inFlightRows_) {
         restoreRelative();
         state->rowDelta = 0;
@@ -846,6 +906,7 @@ private:
       state->status.finalEnd = false;
       state->status.waiting = false;
       state->status.byteOffset = state->anchor;
+      state->status.mode = state->config.mode;
       intent_ = {state->config, state->width, viewport, state->anchor, state->horizontal, state->rowDelta, state->tail};
       intent_.seed = std::exchange(restored_, {});
       intent_.resume = resumeWaiting;
@@ -889,6 +950,7 @@ private:
         if (!state->frame->anchors.empty() && (intent_.tail || intent_.rowDelta)) {
           state->anchor = state->frame->anchors.front();
           state->status.byteOffset = state->anchor;
+          state->status.mode = state->config.mode;
         }
 
         if (batch && state->anchor == previousAnchor) {
@@ -913,7 +975,7 @@ private:
     dispatch(state);
   }
 
-  bool synchronizeBar(std::uint64_t offset) {
+  bool synchronizeBar(std::uint64_t offset, ScrollAxis axis = ScrollAxis::VERTICAL) {
     std::expected<void, TreeError> changed;
     const auto edited = app_.tree().edit(node_, [&](DocumentView &widget) {
       auto &scroll = ScrollWidgetAccess::state(widget);
@@ -922,7 +984,7 @@ private:
         changed = std::unexpected(plan.error());
         return;
       }
-      changed = ScrollControllerAccess::offset(*plan, ScrollAxis::VERTICAL, {offset, 0});
+      changed = ScrollControllerAccess::offset(*plan, axis, {offset, 0});
       if (!changed) {
         return;
       }
@@ -940,8 +1002,12 @@ private:
     return true;
   }
 
+  std::size_t retainedHexRows() const noexcept {
+    return scan_ && scan_->hex ? scan_->hex->rawRows.size() : 0;
+  }
+
   std::expected<SourceBudgetUsage, SourceError> nextPeak(const DocumentViewState &state) const {
-    const auto amount = documentPreparationBytes(viewport_, state.config);
+    const auto amount = documentPreparationBytes(viewport_, state.config, retainedHexRows());
     if (!amount) {
       return std::unexpected(amount.error());
     }
@@ -971,6 +1037,13 @@ private:
       return true;
     };
 
+    if (scan_ && scan_->hex) {
+      for (const auto &row : scan_->hex->rawRows) {
+        if (!includeOwned(row->credit.usage().bytes)) {
+          return std::unexpected(SourceError::PAGE_TOO_LARGE);
+        }
+      }
+    }
     // These private retained owners cannot disappear while this view is waiting.
     // Reject impossible overlap instead of promising a capacity event that cannot occur.
     if (!includeOwned(SourceBudget::ROOT_METADATA_BYTES + SourceBudget::CAPACITY_OBSERVER_BYTES) ||
@@ -1015,7 +1088,7 @@ private:
       fail({SourceError::PAGE_TOO_LARGE, {}, {}});
       return;
     }
-    const auto reserved = documentPreparationBytes(viewport_, state->config);
+    const auto reserved = documentPreparationBytes(viewport_, state->config, retainedHexRows());
     if (!reserved) {
       fail({reserved.error(), {}, {}});
       return;
@@ -1039,7 +1112,9 @@ private:
       latest_ = std::make_unique<BackgroundLatest>(*executor);
     }
     intent_.resume = continuation_ || intent_.resume;
-    auto previous = std::exchange(scan_, {});
+    intent_.retainedHexRows = retainedHexRows();
+    const bool retainReplay = state->config.mode == DocumentViewMode::HEX && !state->source->capabilities().seekable;
+    auto previous = retainReplay ? scan_ : std::exchange(scan_, {});
     auto job = std::make_unique<DocumentJob>(state->source, intent_, std::move(previous), generation_,
                                              std::move(*credit), connection_.publisher);
     auto admitted = latest_->replace(std::move(job));
@@ -1075,6 +1150,7 @@ private:
   std::uint64_t generation_{};
   std::uint64_t serial_{};
   std::uint64_t scrollSerial_{};
+  std::uint64_t horizontalBarOffset_{};
   std::optional<std::uint64_t> dragByteRange_;
   std::uint64_t navigationSerial_{};
   std::int64_t pendingRows_{};
@@ -1129,14 +1205,23 @@ std::expected<void, ManagedError> navigateDocument(ManagedScene &scene, Node<Doc
                                                    DocumentNavigation command, std::int64_t amount) {
   auto &tree = ui::detail::SceneAccess::application(scene).tree();
   std::shared_ptr<DocumentActivity> activity;
+  bool unsupported{};
   const auto read = tree.read(node, [&](const DocumentView &widget) {
-    activity = std::static_pointer_cast<DocumentActivity>(DocumentViewAccess::state(widget).activity);
+    const auto &state = DocumentViewAccess::state(widget);
+
+    activity = std::static_pointer_cast<DocumentActivity>(state.activity);
+    unsupported = state.source && !state.source->capabilities().seekable &&
+                  (command == DocumentNavigation::END || (command == DocumentNavigation::HOME && state.anchor) ||
+                   ((command == DocumentNavigation::ROWS || command == DocumentNavigation::PAGES) && amount < 0));
   });
   if (!read) {
     return std::unexpected(ui::detail::error(node, read.error()));
   }
   if (!activity) {
     return std::unexpected(ui::detail::error(node, TreeError::CLOSED));
+  }
+  if (unsupported) {
+    return std::unexpected(documentFailure(node, {SourceError::UNSUPPORTED, {}, {}}));
   }
   const auto moved = activity->navigate(command, amount);
   return moved ? std::expected<void, ManagedError>{} : std::unexpected(ui::detail::error(node, moved.error()));
@@ -1194,6 +1279,12 @@ Description<DocumentView> viewer(DocumentSource source, DocumentViewConfig confi
       const auto &document = context.controlSettings->documentSettings();
       effectiveConfig.lineNumbers = document.lineNumbers.value_or(config.lineNumbers);
       effectiveConfig.wrap = document.wrap.value_or(config.wrap);
+      effectiveConfig.mode = document.mode.value_or(config.mode);
+      effectiveConfig.hex.bytesPerRow = document.hexBytesPerRow.value_or(config.hex.bytesPerRow);
+      effectiveConfig.hex.groupSize = document.hexGroupSize.value_or(config.hex.groupSize);
+      effectiveConfig.hex.uppercase = document.hexUppercase.value_or(config.hex.uppercase);
+      effectiveConfig.hex.showAscii = document.hexShowAscii.value_or(config.hex.showAscii);
+      effectiveConfig.hex.autoFit = document.hexAutoFit.value_or(config.hex.autoFit);
       effectiveConfig.decoder.explicitEncoding = document.encoding.value_or(config.decoder.explicitEncoding);
       if (document.fastScroll || effectiveConfig.fastScroll) {
         auto fast = effectiveConfig.fastScroll.value_or(DocumentFastScroll{});
@@ -1225,6 +1316,18 @@ Description<DocumentView> viewer(DocumentSource source, DocumentViewConfig confi
         scene.emplace<DocumentView>(parent, scene.widthPolicy(), effectiveConfig, style, std::move(**frame), *scroll);
       if (!node) {
         return node;
+      }
+      const bool defaultHorizontal = !context.controlSettings->horizontal;
+      if (defaultHorizontal) {
+        (void)ui::detail::SceneAccess::application(scene).tree().edit(*node, [&](DocumentView &widget) {
+          auto &state = portals::detail::DocumentViewAccess::state(widget);
+          auto &native = portals::detail::ScrollWidgetAccess::state(widget);
+
+          state.textHorizontalPolicy = native.area.horizontal;
+          if (effectiveConfig.mode == DocumentViewMode::HEX) {
+            native.area.horizontal = ScrollBarPolicy::AUTO;
+          }
+        });
       }
       auto attached = portals::detail::attachDocument(scene, *node, source);
       if (!attached) {
@@ -1305,6 +1408,102 @@ std::expected<void, ManagedError> configureDocument(ManagedScene &scene, Node<Do
 }
 } // namespace
 
+std::expected<void, ManagedError> setDocumentMode(ManagedScene &scene, Node<DocumentView> node, DocumentViewMode mode) {
+  if (mode != DocumentViewMode::TEXT && mode != DocumentViewMode::HEX) {
+    return std::unexpected(ui::detail::error(node, TreeError::INVALID_ARGUMENT));
+  }
+  auto &tree = ui::detail::SceneAccess::application(scene).tree();
+  std::shared_ptr<detail::DocumentViewState> state;
+  const auto read = tree.read(node, [&](const DocumentView &widget) {
+    state = detail::DocumentViewAccess::shared(widget);
+  });
+  if (!read) {
+    return std::unexpected(ui::detail::error(node, read.error()));
+  }
+  if (state->config.mode == mode) {
+    return {};
+  }
+  if (state->source && !state->source->capabilities().seekable) {
+    return std::unexpected(detail::documentFailure(node, {SourceError::UNSUPPORTED, {}, {}}));
+  }
+  StyleRoleRegistration roles;
+  if (state->roles.snapshot()) {
+    auto replacement =
+      mode == DocumentViewMode::HEX
+        ? ui::detail::SceneAccess::replaceDocumentRoles(
+            scene, node, state->roles,
+            {"body", "gutter", "position", "hex-zero", "hex-printable", "hex-control", "hex-high-byte"})
+        : ui::detail::SceneAccess::replaceDocumentRoles(scene, node, state->roles, {"body", "gutter", "position"});
+    if (!replacement) {
+      return std::unexpected(replacement.error());
+    }
+    roles = std::move(*replacement);
+  }
+  const auto edited = tree.edit(node, [&](DocumentView &widget) {
+    auto &scroll = detail::ScrollWidgetAccess::state(widget);
+
+    if (roles.snapshot()) {
+      state->roles = std::move(roles);
+    }
+    if (state->textHorizontalPolicy) {
+      scroll.area.horizontal = mode == DocumentViewMode::HEX ? ScrollBarPolicy::AUTO : *state->textHorizontalPolicy;
+    }
+    state->config.mode = mode;
+    state->status.mode = mode;
+    state->status.logicalLine.reset();
+    state->status.totalLines.reset();
+    state->status.error.reset();
+    state->status.preparing = true;
+    state->refresh = true;
+    state->tail = false;
+    state->rowDelta = 0;
+    ++state->serial;
+    if (state->activity) {
+      std::static_pointer_cast<detail::DocumentActivity>(state->activity)->projectionChanged(state->serial);
+    }
+  });
+  if (!edited) {
+    return std::unexpected(ui::detail::error(node, edited.error()));
+  }
+  (void)tree.invalidate(node, Invalidation::LAYOUT);
+  return {};
+}
+
+std::expected<void, ManagedError> setDocumentHexOptions(ManagedScene &scene, Node<DocumentView> node,
+                                                        DocumentHexOptions options) {
+  if (!hexRowWidth({options.bytesPerRow, options.groupSize, options.uppercase, options.showAscii})) {
+    return std::unexpected(ui::detail::error(node, TreeError::INVALID_ARGUMENT));
+  }
+  auto &tree = ui::detail::SceneAccess::application(scene).tree();
+  bool unsupported{};
+  bool inactive{};
+  const auto read = tree.read(node, [&](const DocumentView &widget) {
+    const auto &state = detail::DocumentViewAccess::state(widget);
+
+    inactive = state.config.mode == DocumentViewMode::TEXT;
+    unsupported = state.config.mode == DocumentViewMode::HEX && state.source &&
+                  !state.source->capabilities().seekable &&
+                  (state.config.hex.bytesPerRow != options.bytesPerRow || state.config.hex.autoFit != options.autoFit);
+  });
+  if (!read || unsupported) {
+    return std::unexpected(!read ? ui::detail::error(node, read.error())
+                                 : detail::documentFailure(node, {SourceError::UNSUPPORTED, {}, {}}));
+  }
+  if (inactive) {
+    const auto edited = tree.edit(node, [options](DocumentView &widget) {
+      detail::DocumentViewAccess::state(widget).config.hex = options;
+    });
+    return edited ? std::expected<void, ManagedError>{} : std::unexpected(ui::detail::error(node, edited.error()));
+  }
+  return configureDocument(scene, node, [options](DocumentViewConfig &config) {
+    if (config.hex == options) {
+      return false;
+    }
+    config.hex = options;
+    return true;
+  });
+}
+
 std::expected<void, ManagedError> setDocumentLineNumbers(ManagedScene &scene, Node<DocumentView> node, bool enabled) {
   return configureDocument(scene, node, [enabled](DocumentViewConfig &config) {
     if (config.lineNumbers == enabled) {
@@ -1341,6 +1540,32 @@ std::expected<void, ManagedError> setDocumentEncoding(ManagedScene &scene, Node<
 } // namespace portals
 
 namespace portals::ui::detail {
+std::expected<void, ManagedError> documentMode(const std::shared_ptr<RefTarget> &target, Node<DocumentView> node,
+                                               DocumentViewMode mode, std::source_location origin) {
+  const auto scene = eventScene(target);
+  if (!scene) {
+    return std::unexpected(scene.error());
+  }
+  auto result = portals::setDocumentMode(**scene, node, mode);
+  if (!result) {
+    result.error().registrationOrigin = origin;
+  }
+  return result;
+}
+
+std::expected<void, ManagedError> documentHexOptions(const std::shared_ptr<RefTarget> &target, Node<DocumentView> node,
+                                                     DocumentHexOptions options, std::source_location origin) {
+  const auto scene = eventScene(target);
+  if (!scene) {
+    return std::unexpected(scene.error());
+  }
+  auto result = portals::setDocumentHexOptions(**scene, node, options);
+  if (!result) {
+    result.error().registrationOrigin = origin;
+  }
+  return result;
+}
+
 std::expected<void, ManagedError> setDocumentModel(const std::shared_ptr<RefTarget> &target, Node<DocumentView> node,
                                                    const DocumentSource &source, std::source_location origin) {
   auto scene = eventScene(target);

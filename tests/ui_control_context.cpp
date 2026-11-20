@@ -1996,3 +1996,40 @@ TEST_CASE("Viewer fast navigation properties merge in the immutable document ext
   take(ui::detail::ControlContextAccess::installScrollSchema(ordinary, "ScrollArea"));
   CHECK_FALSE(ordinary.resolve("ScrollArea", defaults));
 }
+
+TEST_CASE("HEX sparse settings merge explicit false and validate row options before construction") {
+  ControlContext controls;
+  take(ui::detail::ControlContextAccess::installScrollSchema(controls, "DocumentView"));
+  auto defaults = std::make_shared<ControlDocumentSettings>();
+  defaults->mode = DocumentViewMode::HEX;
+  defaults->hexBytesPerRow = 16;
+  defaults->hexUppercase = true;
+  defaults->hexAutoFit = true;
+  ControlSettings base;
+  base.document = defaults;
+  controls.defaults("DocumentView", base);
+  auto change = std::make_shared<ControlDocumentSettings>();
+  change->hexUppercase = false;
+  change->hexAutoFit = false;
+  ControlSettings patch;
+  patch.document = change;
+  const auto resolved = controls.resolve("DocumentView", patch);
+  REQUIRE(resolved);
+  const auto &hex = resolved->settings.documentSettings();
+  CHECK(hex.mode == DocumentViewMode::HEX);
+  CHECK(hex.hexBytesPerRow == 16);
+  REQUIRE(hex.hexUppercase);
+  CHECK_FALSE(*hex.hexUppercase);
+  REQUIRE(hex.hexAutoFit);
+  CHECK_FALSE(*hex.hexAutoFit);
+  change->hexBytesPerRow = MAX_HEX_ROW_BYTES;
+  CHECK(controls.resolve("DocumentView", patch));
+  for (const auto invalid : {std::size_t{0}, MAX_HEX_ROW_BYTES + 1}) {
+    change->hexBytesPerRow = invalid;
+    const auto failure = controls.resolve("DocumentView", patch);
+    REQUIRE_FALSE(failure);
+    CHECK(failure.error().code == Code::INVALID_VALUE);
+    REQUIRE(failure.error().diagnostic);
+    CHECK(failure.error().diagnostic->path == "DocumentView.hex.bytesPerRow");
+  }
+}

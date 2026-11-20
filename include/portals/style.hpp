@@ -421,6 +421,27 @@ public:
     return registerRoles(node, std::span<const std::string_view>(names.begin(), names.size()));
   }
 
+  /** @brief Atomically replace the bounded names of a live semantic registration.
+   * @param registration Live registration owned by this engine; its participation must survive staging.
+   * @param names Unique nonempty lower-kebab names, copied before publication within the configured limits.
+   * @return New scoped registration, retiring every copy of the old handle on success. Identical ordered names
+   * return shared participation without invalidation or a revision change. All checked failures preserve the
+   * previous registry, palettes, widget styles and revision. Retained old palette snapshots remain valid.
+   * Wrong-thread, active-frame, reentry, retired/foreign registration, stale node, argument, budget and allocation
+   * failures use the existing StyleError causes. No consumer callbacks run during publication.
+   */
+  std::expected<StyleRoleRegistration, StyleError> replaceRoles(const StyleRoleRegistration &registration,
+                                                                std::span<const std::string_view> names);
+
+  /** @param registration Live registration owned by this engine.
+   * @param names Borrowed names copied during this call.
+   * @return New scoped registration or the exact checked replacement failure.
+   */
+  std::expected<StyleRoleRegistration, StyleError> replaceRoles(const StyleRoleRegistration &registration,
+                                                                std::initializer_list<std::string_view> names) {
+    return replaceRoles(registration, std::span<const std::string_view>(names.begin(), names.size()));
+  }
+
   /** @param registration Live registration of this engine, retained by the caller.
    * @return One paint invalidation on success, or typed failure preserving the projection.
    */
@@ -547,7 +568,8 @@ private:
   std::expected<Invalidation, StyleError>
   install(StyleSheet sheet, std::vector<Binding> &&bindings, LayerState *candidate = nullptr, bool wholeReplace = false,
           const detail::StyleThemeLease *lease = nullptr, const PreviewCapture *previewCapture = nullptr,
-          bool notifyTheme = false, std::shared_ptr<const RoleRegistry> *roleCandidate = nullptr);
+          bool notifyTheme = false, std::shared_ptr<const RoleRegistry> *roleCandidate = nullptr,
+          detail::StyleRoleState *replacedRole = nullptr);
   std::expected<Invalidation, StyleError> replaceOwnedTheme(const StyleSheet &sheet, detail::StyleThemeLease lease);
   std::expected<void, StyleError> mergeBindings(std::span<const StyleRegistration> registrations,
                                                 std::optional<std::vector<Binding>> &destination);

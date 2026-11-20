@@ -1267,6 +1267,17 @@ endif()
 add_test(NAME consumer.document-encoding COMMAND portals_document_encoding_consumer)
 set_tests_properties(consumer.document-encoding PROPERTIES TIMEOUT 30)
 
+add_executable(portals_document_hex_consumer document_hex.cpp)
+add_library(portals_document_hex_headers OBJECT document_hex_header.cpp)
+foreach(target IN ITEMS portals_document_hex_consumer portals_document_hex_headers)
+  target_link_libraries(${target} PRIVATE portals::core)
+  if(MSVC)
+    target_compile_options(${target} PRIVATE /utf-8)
+  endif()
+endforeach()
+add_test(NAME consumer.document-hex COMMAND portals_document_hex_consumer)
+set_tests_properties(consumer.document-hex PROPERTIES TIMEOUT 30)
+
 add_executable(portals_document_view_consumer document_view.cpp)
 add_library(portals_document_view_headers OBJECT document_view_header.cpp ui_document_view_header.cpp)
 foreach(target IN ITEMS portals_document_view_consumer portals_document_view_headers)
@@ -1305,6 +1316,20 @@ add_executable(portals_document_navigation_consumer examples/document_view/navig
 target_link_libraries(portals_document_navigation_consumer PRIVATE portals::core)
 if(MSVC)
   target_compile_options(portals_document_navigation_consumer PRIVATE /utf-8)
+endif()
+
+add_executable(portals_document_hex_example_consumer examples/document_hex/main.cpp)
+
+target_link_libraries(portals_document_hex_example_consumer PRIVATE portals::core)
+if(MSVC)
+  target_compile_options(portals_document_hex_example_consumer PRIVATE /utf-8)
+endif()
+
+add_executable(portals_document_hex_resource_consumer docs/examples/guide_document_hex_resource.cpp)
+
+target_link_libraries(portals_document_hex_resource_consumer PRIVATE portals::core)
+if(MSVC)
+  target_compile_options(portals_document_hex_resource_consumer PRIVATE /utf-8)
 endif()
 
 # Keep this block last: package_fixture.cmake extracts its tail into an isolated project.

@@ -437,6 +437,13 @@ private:
   }
 
   const ControlPropertyDescriptor *descriptor(std::string_view path) const {
+    // Mode belongs to both Chart and DocumentView. Parsing preserves the chosen value;
+    // the existing resolved type mask validates which owning settings bag is allowed.
+    static constexpr std::array<std::string_view, 4> MODE_NAMES{"LINE", "CANDLES", "text", "hex"};
+    static constexpr ControlPropertyDescriptor MODE{"mode", ControlPropertyKind::ENUMERATION, 1, MODE_NAMES};
+    if (path == "mode") {
+      return &MODE;
+    }
     for (const auto type : {"FindBar",       "FormField",
                             "Password",      "LineEdit",
                             "ComboBox",      "DropDown",
@@ -718,10 +725,17 @@ private:
 
       const bool enabled = value == "true";
 
-      if (path == "lineNumbers" || path == "wrap") {
+      if (path == "lineNumbers" || path == "wrap" || path == "hex.uppercase" || path == "hex.showAscii" ||
+          path == "hex.autoFit") {
         auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
         if (path == "lineNumbers") {
           document->lineNumbers = enabled;
+        } else if (path == "hex.uppercase") {
+          document->hexUppercase = enabled;
+        } else if (path == "hex.showAscii") {
+          document->hexShowAscii = enabled;
+        } else if (path == "hex.autoFit") {
+          document->hexAutoFit = enabled;
         } else {
           document->wrap = enabled;
         }
@@ -810,7 +824,14 @@ private:
     }
 
     if (schema->kind == ControlPropertyKind::ENUMERATION) {
-      const auto value = name();
+      std::string modeLiteral(0, '\0');
+      if (path == "mode" && peek() == '"') {
+        const auto parsed = string(modeLiteral);
+        if (!parsed) {
+          return std::unexpected(withProperty(parsed.error(), type, path));
+        }
+      }
+      const auto value = modeLiteral.empty() ? name() : std::string_view(modeLiteral);
       const bool documentModifier = path == "fastKeyModifier" || path == "fastWheelModifier";
       const auto found = std::ranges::find_if(schema->enumNames, [&](std::string_view candidate) {
         return documentModifier ? std::ranges::equal(candidate, value,
@@ -839,6 +860,24 @@ private:
           document->fastWheelModifier = static_cast<key::Modifier>(index);
         }
         settings.document = std::move(document);
+      } else if (path == "mode") {
+        const auto resolved = controls_.resolve(type);
+        bool chartMode{};
+        if (resolved) {
+          const auto registered = detail::ResourceAccess::find(options_.registry, resolved->base);
+          chartMode =
+            registered && detail::ResourceAccess::entry(options_.registry, *registered).virtualView == "Chart";
+        }
+        if (resolved && ((chartMode && index >= 2) || (resolved->base == "DocumentView" && index < 2))) {
+          return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
+        }
+        if (index < 2) {
+          settings.mode = static_cast<ChartMode>(index);
+        } else {
+          auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+          document->mode = static_cast<DocumentViewMode>(index - 2);
+          settings.document = std::move(document);
+        }
       } else if (path == "encoding") {
         auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
         document->encoding = static_cast<DocumentEncoding>(index);
@@ -912,8 +951,6 @@ private:
         settings.verticalAlign = static_cast<LayoutAlign>(index);
       } else if (path == "contentPolicy") {
         settings.contentPolicy = static_cast<DataContentPolicy>(index);
-      } else if (path == "mode") {
-        settings.mode = static_cast<ChartMode>(index);
       } else if (path == "notification.placement") {
         settings.notification.placement = static_cast<ToastPlacement>(index);
       } else if (path == "notification.overflow") {
@@ -977,15 +1014,27 @@ private:
       return {};
     }
 
-    if (path == "fastScroll" || path == "keyStep" || path == "pageOverlap" || path == "pageSteps" ||
-        path == "spinnerInterval" || path == "interval" || path == "radioInitial.index") {
+    if (path == "hex.bytesPerRow" || path == "hex.groupSize" || path == "fastScroll" || path == "keyStep" ||
+        path == "pageOverlap" || path == "pageSteps" || path == "spinnerInterval" || path == "interval" ||
+        path == "radioInitial.index") {
       const auto value = capacity<std::uint64_t>();
 
       if (!value) {
         return std::unexpected(withProperty(value.error(), type, path));
       }
 
-      if (path == "fastScroll") {
+      if (path == "hex.bytesPerRow" || path == "hex.groupSize") {
+        if (!*value || *value > MAX_HEX_ROW_BYTES) {
+          return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
+        }
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        if (path == "hex.bytesPerRow") {
+          document->hexBytesPerRow = static_cast<std::size_t>(*value);
+        } else {
+          document->hexGroupSize = static_cast<std::size_t>(*value);
+        }
+        settings.document = std::move(document);
+      } else if (path == "fastScroll") {
         auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
         document->fastScroll = *value;
         settings.document = std::move(document);
@@ -1261,7 +1310,7 @@ private:
       if (take('{')) {
         const bool configurationStruct =
           options_.format == SceneResourceFormat::CONFIGURATION &&
-          (path == "scrollbar" || path == "scrollbar.horizontal" || path == "scrollbar.vertical" ||
+          (path == "hex" || path == "scrollbar" || path == "scrollbar.horizontal" || path == "scrollbar.vertical" ||
            path == "securePolicy" || path == "limits" || path == "frame" || path == "frame.sides" ||
            path == "frame.customGlyphs" || path == "frame.customTitleDecoration" || path == "format" ||
            path == "yRange" || path == "labels" || path == "dialog" || path == "dialog.closeButton" ||
@@ -1830,7 +1879,10 @@ private:
     if ((key == "history" || key == "limits" ||
          (key == "format" &&
           acceptsNativeProperty(target, detail::ControlFactoryKind::KEY_HELP_FALLBACK, "format.maxBytesPerBinding")) ||
-         (key == "frame" && acceptsFrameSettings(target)) || (key == "yRange" && acceptsChartRange(target)) ||
+         (key == "frame" && acceptsFrameSettings(target)) ||
+         (key == "hex" &&
+          acceptsNativeProperty(target, detail::ControlFactoryKind::SCROLL_FALLBACK, "hex.bytesPerRow")) ||
+         (key == "yRange" && acceptsChartRange(target)) ||
          (key == "scrollbar" &&
           acceptsNativeProperty(target, detail::ControlFactoryKind::SCROLL_FALLBACK, "scrollbar.pattern")) ||
          (key == "labels" &&
@@ -1986,6 +2038,11 @@ private:
       // A caller-owned child name wins the bare spelling; frame={...} remains an explicit native property.
       const bool frameGroup = token == "frame" && acceptsFrameSettings(document_.nodes[index]) &&
                               !detail::ResourceAccess::find(options_.registry, token);
+      const bool hexGroup =
+        token == "hex" &&
+        acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::SCROLL_FALLBACK, "hex.bytesPerRow") &&
+        !detail::ResourceAccess::find(options_.registry, token) &&
+        !detail::ControlContextAccess::hasDeclaredType(controls_, token);
       const bool scrollbarGroup =
         token == "scrollbar" &&
         acceptsNativeProperty(document_.nodes[index], detail::ControlFactoryKind::SCROLL_FALLBACK,
@@ -2052,7 +2109,7 @@ private:
         (protectedGroup && peek() == '{') ||
         (options_.format == SceneResourceFormat::CONFIGURATION &&
          (token == "history" || token == "limits" || (token == "padding" && !overlayPaddingChild) || frameGroup ||
-          scrollbarGroup || formatGroup || chartRangeGroup || labelsGroup || dialogGroup || messageGroup ||
+          hexGroup || scrollbarGroup || formatGroup || chartRangeGroup || labelsGroup || dialogGroup || messageGroup ||
           notificationGroup || selectorGroup || catalogGroup) &&
          peek() == '{') ||
         (document_.nodes[index].factory.kind == detail::ControlFactoryKind::DECLARATIVE_GRID_FALLBACK &&
