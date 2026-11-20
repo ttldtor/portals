@@ -89,7 +89,8 @@ struct Fixture {
 
   std::shared_ptr<const detail::DocumentPreparation> run(std::shared_ptr<const detail::DocumentScan> previous = {},
                                                          std::stop_token stop = {}) {
-    const auto amount = take(detail::documentPreparationBytes(intent.viewport, intent.config));
+    intent.retainedHexRows = previous && previous->hex ? previous->hex->rawRows.size() : 0;
+    const auto amount = take(detail::documentPreparationBytes(intent.viewport, intent.config, intent.retainedHexRows));
     auto credit = take(budget->reserve({amount, 0, 1, 0}));
     std::shared_ptr<const detail::DocumentPreparation> result;
     std::thread worker([&] {
@@ -971,4 +972,253 @@ TEST_CASE("tail keeps the last visual rows when one logical suffix line wraps ma
   CHECK(result->frame->rows[1].bytes() == std::string(10, 'x'));
   CHECK(result->frame->rows.back().bytes() == "last");
   CHECK(result->frame->finalEndVisible);
+}
+
+TEST_CASE("HEX raw rows preserve BOM controls and absolute offsets with one-byte turns") {
+  Fixture f(std::string("\xEF\xBB\xBF\x1B\0 A\xFF", 8), 1);
+  f.intent.config.mode = DocumentViewMode::HEX;
+  f.intent.config.workBytes = 1;
+  f.intent.viewport = {100, 4};
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  CHECK(result->frame->status.mode == DocumentViewMode::HEX);
+  CHECK_FALSE(result->frame->status.logicalLine);
+  CHECK_FALSE(result->frame->status.totalLines);
+  REQUIRE(result->frame->rows.size() == 1);
+  CHECK(result->frame->rows[0].bytes().starts_with("0000000000000000  EF BB BF 1B 00 20 41 FF"));
+  CHECK(result->frame->rows[0].bytes().find("\x1B") == std::string_view::npos);
+  CHECK(result->frame->visibleByteEnd == 8);
+  CHECK(result->frame->finalEndVisible);
+  CHECK(f.provider->admittedBytes.load() == 8);
+  REQUIRE(result->scan->hex);
+  CHECK(result->scan->hex->pending.empty());
+}
+
+TEST_CASE("HEX known End and E Eplus1 use a full last page without prefix reads") {
+  constexpr std::uint64_t EXTENT = (std::uint64_t{8} << 30) + 19;
+  for (const bool tail : {false, true}) {
+    for (const auto anchor : {EXTENT, EXTENT + 1}) {
+      Fixture f("z");
+      f.provider->syntheticExtent = EXTENT;
+      f.intent.viewport = {100, 4};
+      f.intent.config.mode = DocumentViewMode::HEX;
+      f.intent.anchor = anchor;
+      f.intent.tail = tail;
+      const auto result = f.finish();
+      REQUIRE_FALSE(result->error);
+      REQUIRE(result->frame);
+      REQUIRE(result->frame->anchors.size() == 4);
+      const auto first = (EXTENT / 16 + 1 - 4) * 16;
+      CHECK(result->frame->anchors.front() == first);
+      CHECK(f.provider->firstReadOffset.load() == first);
+      CHECK(result->frame->rows.front().bytes().starts_with("00000001FFFFFFE0"));
+      CHECK(result->frame->visibleByteEnd == EXTENT);
+      CHECK(result->frame->finalEndVisible);
+      CHECK(result->frame->status.byteOffset == (tail ? first : anchor));
+      CHECK(result->frame->status.anchorBeyondExtent == (anchor > EXTENT));
+      CHECK(f.provider->admittedBytes.load() <= 64);
+    }
+  }
+}
+
+TEST_CASE("HEX empty source remains empty and complete") {
+  Fixture f("");
+  f.intent.config.mode = DocumentViewMode::HEX;
+  f.intent.tail = true;
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  CHECK(result->frame->rows.empty());
+  CHECK(result->frame->finalEndVisible);
+  CHECK(result->frame->status.finalEnd);
+  CHECK(f.provider->reads.load() == 0);
+}
+
+TEST_CASE("HEX unknown End retains only the bounded final row window") {
+  Fixture f(std::string(81, 'Q'), 1);
+  f.provider->unknown = true;
+  f.provider->finalUnknown = true;
+  f.intent.config.mode = DocumentViewMode::HEX;
+  f.intent.config.workBytes = 3;
+  f.intent.tail = true;
+  f.intent.viewport = {100, 3};
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->anchors.size() == 3);
+  CHECK(result->frame->anchors.front() == 48);
+  CHECK(result->frame->visibleByteEnd == 81);
+  CHECK(result->frame->status.byteExtent == 81);
+}
+
+TEST_CASE("HEX fixed row cap is independent of viewport and auto-fit is optional") {
+  Fixture f(std::string(5000, 'R'));
+  f.intent.config.mode = DocumentViewMode::HEX;
+  f.intent.config.hex.bytesPerRow = MAX_HEX_ROW_BYTES;
+  f.intent.viewport = {80, 1};
+  const auto fixed = f.finish();
+  REQUIRE_FALSE(fixed->error);
+  REQUIRE(fixed->frame);
+  CHECK(fixed->frame->visibleByteEnd == MAX_HEX_ROW_BYTES);
+  CHECK(fixed->frame->rows[0].measure() == 80);
+  CHECK(fixed->scan->hex->bytesPerRow == MAX_HEX_ROW_BYTES);
+  f.intent.config.hex.autoFit = true;
+  const auto fitted = f.finish();
+  REQUIRE_FALSE(fitted->error);
+  REQUIRE(fitted->frame);
+  CHECK(fitted->scan->hex->bytesPerRow < 16);
+  CHECK(fitted->frame->hex->columns <= 80);
+}
+
+TEST_CASE("HEX preparation waiting is not EOF and revision changes discard partial rows") {
+  Fixture f(std::string(70, 'S'), 1);
+  f.intent.config.mode = DocumentViewMode::HEX;
+  f.intent.config.workBytes = 1;
+  f.intent.viewport = {100, 2};
+  auto partial = f.run();
+  REQUIRE_FALSE(partial->error);
+  REQUIRE(partial->continueWork);
+  REQUIRE(partial->scan->hex->pending.size() == 1);
+  ++f.provider->revision;
+  f.provider->text[0] = 'T';
+  const auto next = f.finish(1000, partial->scan);
+  REQUIRE_FALSE(next->error);
+  REQUIRE(next->frame);
+  CHECK(next->frame->rows.front().bytes().starts_with("0000000000000000  54 53"));
+  f.provider->unknown = true;
+  f.provider->temporaryEmpty = true;
+  f.intent.resume = false;
+  const auto waiting = f.finish();
+  REQUIRE_FALSE(waiting->error);
+  REQUIRE(waiting->frame);
+  CHECK(waiting->frame->status.waiting);
+  CHECK_FALSE(waiting->frame->status.finalEnd);
+  CHECK_FALSE(waiting->continueWork);
+  std::stop_source stop;
+  stop.request_stop();
+  const auto cancelled = f.run({}, stop.get_token());
+  REQUIRE(cancelled->error);
+  CHECK(cancelled->error->code == SourceError::CANCELLED);
+}
+
+static_assert(!std::is_nothrow_move_constructible_v<detail::DocumentHexRoleRow>);
+
+TEST_CASE("TEXT scans and frames never allocate HEX extension owners") {
+  Fixture f("plain text");
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  CHECK_FALSE(result->scan->hex);
+  CHECK_FALSE(result->frame->hex);
+}
+
+TEST_CASE("HEX unknown distant EOF does not invent an exact extent from an empty reply") {
+  Fixture f("abc");
+  f.provider->unknown = true;
+  f.provider->finalUnknown = true;
+  f.intent.config.mode = DocumentViewMode::HEX;
+  f.intent.anchor = std::uint64_t{1} << 32;
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  CHECK(result->frame->status.finalEnd);
+  CHECK_FALSE(result->frame->status.byteExtent);
+  CHECK(result->frame->rows.empty());
+  CHECK(result->frame->footer->bytes().starts_with("progress unknown"));
+}
+
+TEST_CASE("forward HEX transient replay prefix owns subcredit and is evicted at accepted anchor") {
+  Fixture f(std::string(1000, 'R'), 64 * 1024, false);
+  f.intent.config.mode = DocumentViewMode::HEX;
+  f.intent.viewport = {100, 4};
+  auto initial = f.run();
+  REQUIRE_FALSE(initial->error);
+  std::weak_ptr<const detail::DocumentHexRawRow> prefix = initial->scan->hex->rawRows.front();
+  f.intent.rowDelta = 1;
+  f.intent.resume = false;
+  auto moved = f.run(initial->scan);
+  REQUIRE_FALSE(moved->error);
+  REQUIRE(moved->frame);
+  CHECK(moved->frame->status.byteOffset == 16);
+  CHECK(moved->scan->hex->rawRows.front()->offset == 0);
+  CHECK(moved->scan->hex->rawRows.size() == 5);
+  f.intent.anchor = 16;
+  f.intent.rowDelta = 0;
+  f.intent.resume = false;
+  const auto accepted = f.run(moved->scan);
+  REQUIRE_FALSE(accepted->error);
+  REQUIRE(accepted->frame);
+  CHECK(accepted->scan->hex->rawRows.front()->offset == 16);
+  CHECK(accepted->scan->hex->rawRows.size() == 4);
+  initial.reset();
+  moved.reset();
+  CHECK(prefix.expired());
+}
+
+TEST_CASE("HEX accounting charges only bounded prepared columns and preserves surface limits") {
+  DocumentViewConfig config;
+  config.mode = DocumentViewMode::HEX;
+  const auto columns = take(hexRowWidth({}));
+  const auto wide = take(detail::documentPreparationBytes({190, 50}, config));
+  const auto exact = take(detail::documentPreparationBytes({static_cast<std::int32_t>(columns), 50}, config));
+  CHECK(wide == exact);
+  config.maxFrameCells = 100;
+  const auto tooManyCells = detail::documentPreparationBytes({190, 50}, config);
+  REQUIRE_FALSE(tooManyCells);
+  CHECK(tooManyCells.error() == SourceError::PAGE_TOO_LARGE);
+  config.maxFrameCells = 16384;
+  const auto overflow = detail::documentPreparationBytes({190, 50}, config, std::numeric_limits<std::size_t>::max());
+  REQUIRE_FALSE(overflow);
+  CHECK(overflow.error() == SourceError::PAGE_TOO_LARGE);
+  config.hex = {.bytesPerRow = MAX_HEX_ROW_BYTES, .autoFit = true};
+  const auto fitted = take(detail::documentHexRowOptions(config.hex, 30));
+  REQUIRE(fitted.bytesPerRow < MAX_HEX_ROW_BYTES);
+  config.hex.bytesPerRow = fitted.bytesPerRow;
+  config.hex.autoFit = false;
+  const auto fixed = take(detail::documentPreparationBytes({30, 4}, config));
+  config.hex.bytesPerRow = MAX_HEX_ROW_BYTES;
+  config.hex.autoFit = true;
+  CHECK(take(detail::documentPreparationBytes({30, 4}, config)) == fixed);
+}
+
+TEST_CASE("HEX horizontal and auto-fit maps and run capacities follow prepared row bytes") {
+  std::string bytes(0, '\0');
+  for (unsigned repeat = 0; repeat < 32; ++repeat) {
+    bytes.append("\0A\x1B\xFF", 4);
+  }
+  Fixture f(bytes);
+  f.intent.config.mode = DocumentViewMode::HEX;
+  f.intent.viewport = {190, 4};
+  for (const bool autoFit : {false, true}) {
+    f.intent.config.hex = {.bytesPerRow = autoFit ? MAX_HEX_ROW_BYTES : 16, .autoFit = autoFit};
+    f.intent.viewport.width = autoFit ? 30 : 190;
+    f.intent.horizontal = autoFit ? 5 : 70;
+    const auto result = f.finish();
+    REQUIRE_FALSE(result->error);
+    REQUIRE(result->frame);
+    const auto options =
+      take(detail::documentHexRowOptions(f.intent.config.hex, static_cast<std::size_t>(f.intent.viewport.width)));
+    const auto width = take(hexRowWidth(options));
+    const auto first = static_cast<std::size_t>(std::min<std::uint64_t>(f.intent.horizontal, width));
+    const auto count = std::min(static_cast<std::size_t>(f.intent.viewport.width), width - first);
+    for (std::size_t row = 0; row < result->frame->rows.size(); ++row) {
+      CHECK(result->scan->rows[row].bytes.size() == count);
+      const auto &roles = result->scan->hex->roles[row].columns;
+      CHECK(roles.size() == count);
+      CHECK(roles.capacity() <= count);
+      const auto &runs = result->frame->hex->rows[row];
+      CHECK(runs.capacity() <= count);
+      CHECK(result->frame->rows[row].graphemes().size() == count);
+      std::size_t classified{};
+      for (const auto &run : runs) {
+        classified += run.text.graphemes().size();
+      }
+      CHECK(classified <= count);
+    }
+  }
+  f.intent.config.maxFrameBytes = 20;
+  const auto payload = f.finish();
+  REQUIRE(payload->error);
+  CHECK(payload->error->code == SourceError::PAGE_TOO_LARGE);
 }

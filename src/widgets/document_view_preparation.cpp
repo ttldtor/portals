@@ -815,6 +815,12 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
                                                            std::shared_ptr<const DocumentScan> previous,
                                                            std::uint64_t generation, SourceCredit credit,
                                                            std::stop_token stop) {
+  if (intent.config.mode == DocumentViewMode::HEX) {
+    return prepareHexDocument(std::move(source), intent, std::move(previous), generation, std::move(credit), stop);
+  }
+  if (previous && previous->hex) {
+    previous.reset();
+  }
   auto result = std::make_shared<DocumentPreparation>();
   result->credit = std::move(credit);
   result->generation = generation;

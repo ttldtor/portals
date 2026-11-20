@@ -532,3 +532,294 @@ TEST_CASE("owning role stages reject allocator reentry before their borrowed reg
     }
   }
 }
+
+TEST_CASE("role replacement switches text hex text and retires only the replaced participation") {
+  Fixture f;
+  const auto plain = take(f.tree->emplace<Widget>(f.root));
+  take(f.engine.bind(plain, {"Widget"}));
+  auto text = f.roles();
+  auto textCopy = text;
+  auto survivorNode = take(f.tree->emplace<Widget>(f.root));
+  take(f.engine.bind(survivorNode, {"Widget"}));
+  auto survivor = take(f.engine.registerRoles(survivorNode, {"body"}));
+  take(f.engine.replacePss("Widget{foreground:#112233;role-gutter-foreground:#010203;"
+                           "role-hex-byte-foreground:#040506;role-hex-ascii-bold:true;}"));
+  const auto oldText = text.snapshot();
+  const auto survivorPalette = survivor.snapshot();
+  std::shared_ptr<const StyleSnapshot> plainStyle;
+  take(f.tree->read(plain, [&](const Widget &widget) {
+    plainStyle = widget.computedStyle();
+  }));
+  const auto revision = f.engine.revision();
+  take(f.tree->consumeFrameRequest());
+
+  auto hex = take(f.engine.replaceRoles(text, {"body", "hex-offset", "hex-byte", "hex-ascii"}));
+  CHECK_FALSE(text.snapshot());
+  CHECK_FALSE(textCopy.snapshot());
+  CHECK(text.revision() == 0);
+  CHECK(hex.revision() == revision + 1);
+  REQUIRE(hex.snapshot());
+  CHECK(hex.snapshot()->values.size() == 4);
+  CHECK_FALSE(hex.snapshot()->find("gutter"));
+  CHECK(hex.snapshot()->find("hex-byte")->foreground == RgbColor{4, 5, 6});
+  CHECK(hex.snapshot()->find("hex-ascii")->bold);
+  CHECK(oldText->find("gutter")->foreground == RgbColor{1, 2, 3});
+  CHECK(survivor.snapshot() == survivorPalette);
+  CHECK(survivor.revision() == revision + 1);
+  CHECK(take(f.tree->consumeFrameRequest()) == Invalidation::PAINT);
+  take(f.tree->read(plain, [&](const Widget &widget) {
+    CHECK(widget.computedStyle() == plainStyle);
+    CHECK(widget.styleRevision() == f.engine.revision());
+  }));
+
+  const auto oldHex = hex.snapshot();
+  text = take(f.engine.replaceRoles(hex, {"body", "gutter", "position"}));
+  CHECK_FALSE(hex.snapshot());
+  REQUIRE(text.snapshot());
+  CHECK(*text.snapshot() == *oldText);
+  CHECK_FALSE(text.snapshot()->find("hex-byte"));
+  CHECK(oldHex->find("hex-byte")->foreground == RgbColor{4, 5, 6});
+  CHECK(f.engine.revision() == revision + 2);
+}
+
+TEST_CASE("identical role replacement shares participation without allocation revision or redraw") {
+  Fixture f;
+  auto roles = f.roles();
+  const auto before = roles.snapshot();
+  const auto revision = f.engine.revision();
+  take(f.tree->consumeFrameRequest());
+  role_allocation_test::failNext = true;
+  auto same = f.engine.replaceRoles(roles, {"body", "gutter", "position"});
+  const bool allocationUntouched = std::exchange(role_allocation_test::failNext, false);
+  REQUIRE(same);
+  CHECK(allocationUntouched);
+  CHECK(roles.snapshot() == before);
+  CHECK(same->snapshot() == before);
+  CHECK(f.engine.revision() == revision);
+  CHECK(take(f.tree->consumeFrameRequest()) == Invalidation::NONE);
+  roles = {};
+  CHECK(same->snapshot() == before);
+  take(f.engine.unregisterRoles(*same));
+  CHECK_FALSE(same->snapshot());
+}
+
+TEST_CASE("replacement validates names and net role limits without consuming another registration slot") {
+  auto scheduler = take(Scheduler::create());
+  auto tree = take(WidgetTree::create(*scheduler));
+  const auto root = take(tree->root());
+  const auto first = take(tree->emplace<Widget>(root));
+  const auto second = take(tree->emplace<Widget>(root));
+  StyleEngine engine(*tree, 2, {2, 3, 4});
+  take(engine.bind(first, {"Widget"}));
+  take(engine.bind(second, {"Widget"}));
+  auto roles = take(engine.registerRoles(first, {"body", "gutter", "position"}));
+  auto other = take(engine.registerRoles(second, {"body"}));
+  const auto before = roles.snapshot();
+  const auto revision = engine.revision();
+  take(tree->consumeFrameRequest());
+
+  for (const auto names : {std::initializer_list<std::string_view>{},
+                           {"body", "body"},
+                           {"Upper"},
+                           {"bad_name"},
+                           {"bad-"},
+                           {"one", "two", "three", "four"}}) {
+    const auto failed = engine.replaceRoles(roles, names);
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().cause == TreeError::INVALID_ARGUMENT);
+    CHECK(roles.snapshot() == before);
+    CHECK(engine.revision() == revision);
+  }
+  const std::string tooLong(MAX_STYLE_ROLE_NAME_BYTES + 1, 'a');
+  CHECK_FALSE(engine.replaceRoles(roles, {tooLong}));
+  // Three other names plus the existing three exceed the aggregate budget.
+  CHECK_FALSE(engine.replaceRoles(other, {"hex-offset", "hex-byte", "hex-ascii"}));
+  CHECK(take(tree->consumeFrameRequest()) == Invalidation::NONE);
+
+  auto replacement = take(engine.replaceRoles(roles, {"hex-offset", "hex-byte", "hex-ascii"}));
+  CHECK(replacement.snapshot()->values.size() == 3);
+  CHECK(other.snapshot());
+  CHECK_FALSE(roles.snapshot());
+}
+
+TEST_CASE("replacement rejects foreign retired stale framed and foreign-thread use") {
+  Fixture f;
+  Fixture foreign;
+  auto roles = f.roles();
+  const auto before = roles.snapshot();
+  const auto revision = f.engine.revision();
+  CHECK_FALSE(f.engine.replaceRoles({}, {"body"}));
+  const auto wrongEngine = foreign.engine.replaceRoles(roles, {"hex-byte"});
+  REQUIRE_FALSE(wrongEngine);
+  CHECK(wrongEngine.error().cause == TreeError::INVALID_ARGUMENT);
+  take(f.tree->frame([&] {
+    const auto framed = f.engine.replaceRoles(roles, {"hex-byte"});
+    REQUIRE_FALSE(framed);
+    CHECK(framed.error().cause == TreeError::WOULD_BLOCK);
+  }));
+  std::optional<TreeError> wrongThread;
+  std::thread thread([&] {
+    const auto failed = f.engine.replaceRoles(roles, {"hex-byte"});
+    if (!failed) {
+      wrongThread = failed.error().cause;
+    }
+  });
+  thread.join();
+  CHECK(wrongThread == TreeError::WRONG_THREAD);
+  CHECK(roles.snapshot() == before);
+  CHECK(f.engine.revision() == revision);
+  auto next = take(f.engine.replaceRoles(roles, {"hex-byte"}));
+  CHECK_FALSE(f.engine.replaceRoles(roles, {"body"}));
+  take(f.tree->remove(f.subject));
+  CHECK_FALSE(f.engine.replaceRoles(next, {"body"}));
+}
+
+TEST_CASE("replacement allocation failures preserve old registry palettes styles and pending invalidation") {
+  for (const bool duringProjection : {false, true}) {
+    CAPTURE(duringProjection);
+    auto scheduler = take(Scheduler::create());
+    auto tree = take(WidgetTree::create(*scheduler));
+    StyleEngine engine(*tree);
+    const auto node = take(tree->emplace<RoleAllocationHook>(take(tree->root())));
+    take(engine.bind(node, {"Widget"}));
+    auto roles = take(engine.registerRoles(node, {"body"}));
+    const auto before = roles.snapshot();
+    const auto revision = engine.revision();
+    std::shared_ptr<const StyleSnapshot> style;
+    take(tree->read(node, [&](const RoleAllocationHook &widget) {
+      style = widget.computedStyle();
+    }));
+    take(tree->edit(node, [&](RoleAllocationHook &widget) {
+      widget.reject = duringProjection;
+    }));
+    take(tree->consumeFrameRequest());
+    const auto rejectedBefore = role_allocation_test::rejected;
+    role_allocation_test::failNext = !duringProjection;
+    const auto failed = engine.replaceRoles(roles, {"hex-offset", "hex-byte", "hex-ascii"});
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().cause == TreeError::NO_MEMORY);
+    CHECK(role_allocation_test::rejected == rejectedBefore + 1);
+    CHECK_FALSE(role_allocation_test::failNext);
+    CHECK(roles.snapshot() == before);
+    CHECK(roles.revision() == revision);
+    CHECK(engine.revision() == revision);
+    CHECK(take(tree->consumeFrameRequest()) == Invalidation::NONE);
+    take(tree->read(node, [&](const RoleAllocationHook &widget) {
+      CHECK(widget.computedStyle() == style);
+      CHECK(widget.styleRevision() == revision);
+    }));
+    take(tree->edit(node, [](RoleAllocationHook &widget) {
+      widget.reject = false;
+    }));
+    auto replacement = take(engine.replaceRoles(roles, {"hex-byte"}));
+    CHECK(replacement.snapshot()->find("hex-byte"));
+    CHECK(before->find("body"));
+    CHECK_FALSE(roles.snapshot());
+  }
+}
+
+TEST_CASE("replacement aborts when its consumer retires during registry defaults or palette allocation") {
+  for (unsigned phase = 0; phase < 3; ++phase) {
+    CAPTURE(phase);
+    auto scheduler = take(Scheduler::create());
+    auto tree = take(WidgetTree::create(*scheduler));
+    StyleEngine engine(*tree);
+    const auto node = take(tree->emplace<RoleAllocationHook>(take(tree->root())));
+    take(engine.bind(node, {"Widget"}));
+    auto roles = take(engine.registerRoles(node, {"body"}));
+    const auto state = portals::detail::StyleRoleTestAccess::state(roles);
+    const auto before = roles.snapshot();
+    const auto revision = engine.revision();
+    take(tree->edit(node, [&](RoleAllocationHook &widget) {
+      if (phase != 0) {
+        widget.retire = &roles;
+        widget.duringAllocation = phase == 2;
+      }
+    }));
+    take(tree->consumeFrameRequest());
+    if (phase == 0) {
+      role_allocation_test::retireOnNext = &roles;
+    }
+    const auto failed = engine.replaceRoles(roles, {"hex-byte"});
+    REQUIRE_FALSE(failed);
+    CHECK(failed.error().cause == TreeError::INVALID_ARGUMENT);
+    CHECK_FALSE(role_allocation_test::retireOnNext);
+    CHECK_FALSE(roles.snapshot());
+    CHECK(state->participation.expired());
+    CHECK(state->palette == before);
+    CHECK(state->revision == revision);
+    CHECK(engine.revision() == revision);
+    CHECK(take(tree->consumeFrameRequest()) == Invalidation::NONE);
+    auto fresh = take(engine.registerRoles(node, {"body"}));
+    CHECK(fresh.snapshot());
+  }
+}
+
+TEST_CASE("replacement guards owning allocations against nested role and style mutation") {
+  for (unsigned action = 0; action < 4; ++action) {
+    CAPTURE(action);
+    Fixture f;
+    auto roles = f.roles();
+    const auto oldPalette = roles.snapshot();
+    const auto other = take(f.tree->emplace<Widget>(f.root));
+    take(f.engine.bind(other, {"Widget"}));
+    const auto revision = f.engine.revision();
+    std::optional<TreeError> nestedCause;
+    role_allocation_test::callback = [&] {
+      if (action == 0) {
+        const auto result = f.engine.replaceRoles(roles, {"nested"});
+        if (!result) {
+          nestedCause = result.error().cause;
+        }
+      } else if (action == 1) {
+        const auto result = f.engine.registerRoles(other, {"nested"});
+        if (!result) {
+          nestedCause = result.error().cause;
+        }
+      } else {
+        const auto result = action == 2 ? f.engine.unregisterRoles(roles) : f.engine.refresh();
+        if (!result) {
+          nestedCause = result.error().cause;
+        }
+      }
+    };
+    role_allocation_test::onAllocate = [] {
+      role_allocation_test::callback();
+    };
+    auto replaced = f.engine.replaceRoles(roles, {"hex-byte"});
+    role_allocation_test::callback = {};
+    REQUIRE(replaced);
+    CHECK_FALSE(role_allocation_test::onAllocate);
+    CHECK(nestedCause == TreeError::WOULD_BLOCK);
+    CHECK_FALSE(roles.snapshot());
+    CHECK(replaced->snapshot()->find("hex-byte"));
+    CHECK(f.engine.revision() == revision + 1);
+    CHECK(oldPalette->find("body"));
+  }
+}
+
+TEST_CASE("replacement revalidates a target removed by an owning allocation before install") {
+  Fixture f;
+  auto roles = f.roles();
+  const auto before = roles.snapshot();
+  const auto revision = f.engine.revision();
+  std::optional<TreeError> removalFailure;
+  role_allocation_test::callback = [&] {
+    const auto removed = f.tree->remove(f.subject);
+    if (!removed) {
+      removalFailure = removed.error();
+    }
+  };
+  role_allocation_test::onAllocate = [] {
+    role_allocation_test::callback();
+  };
+  const auto failed = f.engine.replaceRoles(roles, {"hex-byte"});
+  role_allocation_test::callback = {};
+  CHECK_FALSE(removalFailure);
+  CHECK_FALSE(role_allocation_test::onAllocate);
+  REQUIRE_FALSE(failed);
+  CHECK(failed.error().cause == TreeError::STALE_NODE);
+  CHECK(roles.snapshot() == before);
+  CHECK(roles.revision() == revision);
+  CHECK(f.engine.revision() == revision);
+}

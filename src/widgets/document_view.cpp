@@ -41,6 +41,13 @@ DocumentView::DocumentView(WidthPolicy width, DocumentViewConfig config, Control
       document_(std::make_shared<detail::DocumentViewState>()) {
   document_->width = width;
   document_->config = config;
+  document_->status.mode = config.mode;
+  if (!scroll) {
+    document_->textHorizontalPolicy = ScrollBarPolicy::NEVER;
+    if (config.mode == DocumentViewMode::HEX) {
+      detail::ScrollWidgetAccess::state(*this).area.horizontal = ScrollBarPolicy::AUTO;
+    }
+  }
 }
 
 DocumentView::~DocumentView() = default;
@@ -54,7 +61,9 @@ std::expected<CellSize, TreeError> DocumentView::measureChildren(std::span<const
   const auto insets = detail::scrollFrameInsets(scroll);
   const auto frame = document_->frame;
   const auto rows = frame ? frame->rows.size() : 0;
-  const auto width = frame ? frame->viewport.width : 0;
+  const auto width = frame && frame->hex ? static_cast<std::int32_t>(frame->hex->columns)
+                     : frame             ? frame->viewport.width
+                                         : 0;
   // The vertical chrome projects byte position, never the size of the resident row window.
   // Unknown extents have no global thumb; keyboard and wheel navigation remain available.
   scroll.extent = {static_cast<std::uint64_t>(std::max(width, 0)),
@@ -133,6 +142,21 @@ std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
       painted = context.submit(std::span(&command, 1));
       if (!painted) {
         return painted;
+      }
+    }
+    if (frame->hex && row < frame->hex->rows.size()) {
+      for (const auto &run : frame->hex->rows[row]) {
+        const auto name = run.role == detail::DocumentHexRole::GUTTER      ? "gutter"
+                          : run.role == detail::DocumentHexRole::ZERO      ? "hex-zero"
+                          : run.role == detail::DocumentHexRole::PRINTABLE ? "hex-printable"
+                          : run.role == detail::DocumentHexRole::CONTROL   ? "hex-control"
+                                                                           : "hex-high-byte";
+        const RenderCommand command =
+          TextCommand{{bodyArea->origin().x + run.column, y}, run.text, *bodyArea, roleStyle(name)};
+        painted = context.submit(std::span(&command, 1));
+        if (!painted) {
+          return painted;
+        }
       }
     }
     if (!gutterArea->empty() && frame->gutters && row < frame->gutters->size()) {

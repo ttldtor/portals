@@ -1648,6 +1648,91 @@ std::expected<StyleRoleRegistration, StyleError> StyleEngine::registerRoles(Node
   }
 }
 
+std::expected<StyleRoleRegistration, StyleError> StyleEngine::replaceRoles(const StyleRoleRegistration &registration,
+                                                                           std::span<const std::string_view> names) {
+  auto boundary = checkBoundary();
+
+  if (!boundary) {
+    return std::unexpected(boundary.error());
+  }
+
+  // Pin metadata, not participation: dropping the last consumer during staging must abort replacement.
+  const auto state = registration.state_;
+
+  if (!state || !state->active || state->participation.expired() || state->engine.lock() != lifetime_) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Semantic registration is not owned by this engine"));
+  }
+
+  auto target = tree_.access(state->node.id(), false);
+
+  if (!target) {
+    return std::unexpected(error(target.error(), "Semantic target is unavailable"));
+  }
+  if (!roleLimits_.maxRegistrations || !roleLimits_.maxRolesPerRegistration || !roleLimits_.maxTotalRoles ||
+      roleLimits_.maxRolesPerRegistration > roleLimits_.maxTotalRoles || names.empty() ||
+      names.size() > roleLimits_.maxRolesPerRegistration || names.size() > roleLimits_.maxTotalRoles ||
+      std::ranges::find(bindings_, state->node, &Binding::node) == bindings_.end()) {
+    return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid semantic replacement or limits"));
+  }
+  for (std::size_t index = 0; index < names.size(); ++index) {
+    if (!detail::validStyleRoleName(names[index]) ||
+        std::ranges::find(names.first(index), names[index]) != names.first(index).end()) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Invalid or duplicate semantic role name"));
+    }
+  }
+  if (std::ranges::equal(names, state->names)) {
+    return registration;
+  }
+
+  LayerMutationGuard guard(stagingLayers_, true);
+
+  try {
+    RoleRegistry registrations(0);
+    std::size_t roles = names.size();
+
+    for (const auto &weak : roleRegistrations_ ? std::span(*roleRegistrations_)
+                                               : std::span<const std::weak_ptr<detail::StyleRoleState>>{}) {
+      if (auto current = weak.lock(); current && current != state && current->active &&
+                                      !current->participation.expired() && tree_.access(current->node.id(), false)) {
+        if (current->names.size() > roleLimits_.maxTotalRoles - roles) {
+          return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Semantic role limit exhausted"));
+        }
+
+        roles += current->names.size();
+        registrations.push_back(current);
+      }
+    }
+    if (registrations.size() >= std::min(roleLimits_.maxRegistrations, maxBindings_)) {
+      return std::unexpected(error(TreeError::INVALID_ARGUMENT, "Semantic registration limit exhausted"));
+    }
+
+    StyleRoleRegistration result;
+    result.state_ = std::make_shared<detail::StyleRoleState>();
+    result.state_->node = state->node;
+    result.state_->engine = lifetime_;
+    result.participation_ = std::make_shared<const char>(char{});
+    result.state_->participation = result.participation_;
+
+    for (const auto name : names) {
+      result.state_->names.emplace_back(name);
+    }
+
+    registrations.push_back(result.state_);
+
+    auto candidate = std::make_shared<const RoleRegistry>(registrations);
+    auto installed = install(sheet_, std::vector<Binding>(bindings_), nullptr, false, nullptr, nullptr, false,
+                             &candidate, state.get());
+
+    if (!installed) {
+      return std::unexpected(installed.error());
+    }
+
+    return result;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(error(TreeError::NO_MEMORY, "Semantic replacement allocation failed"));
+  }
+}
+
 std::expected<Invalidation, StyleError> StyleEngine::unregisterRoles(const StyleRoleRegistration &registration) {
   auto boundary = checkBoundary();
   if (!boundary) {
@@ -1688,11 +1773,10 @@ std::uint64_t StyleEngine::revision() const noexcept {
   return revision_;
 }
 
-std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, std::vector<Binding> &&bindings,
-                                                             LayerState *candidate, bool wholeReplace,
-                                                             const detail::StyleThemeLease *lease,
-                                                             const PreviewCapture *previewCapture, bool notifyTheme,
-                                                             std::shared_ptr<const RoleRegistry> *roleCandidate) {
+std::expected<Invalidation, StyleError>
+StyleEngine::install(StyleSheet sheet, std::vector<Binding> &&bindings, LayerState *candidate, bool wholeReplace,
+                     const detail::StyleThemeLease *lease, const PreviewCapture *previewCapture, bool notifyTheme,
+                     std::shared_ptr<const RoleRegistry> *roleCandidate, detail::StyleRoleState *replacedRole) {
   if (previewCapture) {
     auto valid = validatePreviewCapture(*previewCapture);
 
@@ -2006,6 +2090,20 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
         }
       }
 
+      if (replacedRole) {
+        if (!replacedRole->active || replacedRole->participation.expired()) {
+          result = std::unexpected(error(TreeError::INVALID_ARGUMENT, "Semantic consumer retired during replacement"));
+          return;
+        }
+
+        auto target = tree_.access(replacedRole->node.id(), true);
+
+        if (!target) {
+          result = std::unexpected(error(target.error(), "Semantic target changed during replacement"));
+          return;
+        }
+      }
+
       auto receiver = notifyTheme || wholeReplace ? themeReceiver_.lock() : nullptr;
       if (receiver && (receiver->retired || !tree_.access(receiver->node.id(), true))) {
         receiver.reset();
@@ -2043,6 +2141,9 @@ std::expected<Invalidation, StyleError> StyleEngine::install(StyleSheet sheet, s
           role.registration->palette = std::move(role.palette);
           role.registration->revision = revision_ + 1;
         }
+      }
+      if (replacedRole) {
+        replacedRole->active = false;
       }
       if (roleCandidate) {
         roleRegistrations_.swap(*roleCandidate);

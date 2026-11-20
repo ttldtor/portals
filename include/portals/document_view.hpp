@@ -3,6 +3,7 @@
 #pragma once
 
 #include <portals/document_encoding.hpp>
+#include <portals/document_hex.hpp>
 #include <portals/document_source.hpp>
 #include <portals/input.hpp>
 #include <portals/scroll_controls.hpp>
@@ -31,6 +32,22 @@ struct DocumentFastScroll {
   key::Modifier wheel{key::ALT};     ///< Exact wheel modifier, subject to host-terminal input forwarding.
 };
 
+/** @brief Projection of the same original source bytes. */
+enum class DocumentViewMode {
+  TEXT, ///< Decode and lay out text using retained text settings.
+  HEX   ///< Project raw fixed-width byte rows without decoding.
+};
+
+/** @brief Fixed raw-byte rows; auto-fit may choose a smaller row at preparation time. */
+struct DocumentHexOptions {
+  std::size_t bytesPerRow{16}; ///< Byte slots per row, from 1 through MAX_HEX_ROW_BYTES.
+  std::size_t groupSize{8};    ///< Group separation, from 1 through MAX_HEX_ROW_BYTES.
+  bool uppercase{true};        ///< Uppercase hexadecimal digits.
+  bool showAscii{true};        ///< Safe printable ASCII alongside byte values.
+  bool autoFit{};              ///< Fit up to bytesPerRow slots to the viewport; fixed by default.
+  bool operator==(const DocumentHexOptions &) const noexcept = default; ///< @return Value equality.
+};
+
 /** @brief Bounded text projection; these limits never restrict logical line length. */
 struct DocumentViewConfig {
   DocumentDecoderOptions decoder{.hint = DocumentEncoding::UTF8}; ///< UTF-8 hint; explicit encoding takes precedence.
@@ -38,14 +55,17 @@ struct DocumentViewConfig {
   std::size_t maxFrameBytes{64 * 1024}; ///< Rendered payload cap, including escaped controls and cluster continuations.
   std::size_t workBytes{256 * 1024};    ///< Maximum source bytes admitted per worker turn.
   bool wrap{true};                      ///< Wrap complete ordinary graphemes at the viewport edge.
-  bool lineNumbers{};                   ///< Show proven logical line numbers in a fixed gutter.
-  std::optional<DocumentFastScroll> fastScroll; ///< Absent keeps modified scrolling disabled.
+  DocumentViewMode mode{DocumentViewMode::TEXT}; ///< Active projection; text settings remain retained in HEX.
+  DocumentHexOptions hex{};                      ///< Raw-byte row options, used only by HEX.
+  bool lineNumbers{};                            ///< Show proven logical line numbers in a fixed gutter.
+  std::optional<DocumentFastScroll> fastScroll;  ///< Absent keeps modified scrolling disabled.
 };
 
 /** @brief Owning scalar observation; no source I/O or preparation is performed by status commands. */
 struct DocumentViewStatus {
-  DocumentRevision revision;         ///< Last worker-observed exact source revision.
-  std::uint64_t byteOffset{};        ///< Requested original byte anchor, preserved during reflow.
+  DocumentRevision revision;                     ///< Last worker-observed exact source revision.
+  DocumentViewMode mode{DocumentViewMode::TEXT}; ///< Committed projection; HEX has no logical line counts.
+  std::uint64_t byteOffset{};                    ///< Requested original byte anchor, preserved during reflow.
   std::uint64_t visibleByteOffset{}; ///< Proven first rendered row/fragment byte, independent of the requested anchor.
   std::optional<std::uint64_t> byteExtent;  ///< Last observed exact extent, or unknown.
   std::optional<std::uint64_t> logicalLine; ///< One-based proven line containing the anchor.
@@ -101,6 +121,8 @@ std::expected<void, SourceError> refreshDocument(WidgetTree &tree, Node<Document
  */
 std::expected<DocumentViewStatus, TreeError> documentViewStatus(WidgetTree &tree, Node<DocumentView> node);
 /// @cond INTERNAL
+std::expected<void, ManagedError> setDocumentMode(ManagedScene &, Node<DocumentView>, DocumentViewMode);
+std::expected<void, ManagedError> setDocumentHexOptions(ManagedScene &, Node<DocumentView>, DocumentHexOptions);
 std::expected<void, ManagedError> setDocumentLineNumbers(ManagedScene &, Node<DocumentView>, bool);
 std::expected<void, ManagedError> setDocumentWrap(ManagedScene &, Node<DocumentView>, bool);
 std::expected<void, ManagedError> setDocumentEncoding(ManagedScene &, Node<DocumentView>, DocumentEncoding);

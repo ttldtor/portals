@@ -7007,3 +7007,234 @@ TEST_CASE("loaded Viewer navigation uses existing schema with case-insensitive m
     CHECK(failure.sceneResource->code == Code::INVALID_VALUE);
   }
 }
+
+TEST_CASE("loaded HEX settings remain sparse and preserve Chart mode vocabulary") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto owner = ui::scene(R"(
+    defaults { DocumentView { mode="hex" hex.bytesPerRow=32 hex.uppercase=true hex.autoFit=true } }
+    definitions { Reader = DocumentView { hex.groupSize=4 hex.showAscii=false } }
+    scene { Reader#reader { file="missing-cold-file.txt" hex.bytesPerRow=8 hex.uppercase=false hex.autoFit=false } }
+  )",
+                         options);
+  auto reader = owner.get<DocumentView>("reader");
+  bool observed{};
+  owner.configure([&](ManagedScene &, Application &application) {
+    REQUIRE(application.tree().read(reader.node(), [&](const DocumentView &widget) {
+      const auto &config = detail::DocumentViewAccess::state(widget).config;
+      CHECK(config.mode == DocumentViewMode::HEX);
+      CHECK(config.hex.bytesPerRow == 8);
+      CHECK(config.hex.groupSize == 4);
+      CHECK_FALSE(config.hex.uppercase);
+      CHECK_FALSE(config.hex.showAscii);
+      CHECK_FALSE(config.hex.autoFit);
+      observed = true;
+    }));
+  });
+  REQUIRE(owner.prepareChecked());
+  CHECK(observed);
+  REQUIRE(owner.close());
+  REQUIRE(options.registry.add<Chart<int>>("Chart", [](ui::SceneResourceArguments) {
+    return ui::Description<Chart<int>>{};
+  }));
+  for (const auto &source :
+       {"scene { DocumentView { file=\"x\" mode=\"candles\" } }", "scene { DocumentView { file=\"x\" mode=CANDLES } }",
+        "scene { Chart { mode=\"hex\" } }", "scene { DocumentView { file=\"x\" hex.bytesPerRow=0 } }",
+        "scene { DocumentView { file=\"x\" hex.groupSize=4097 } }"}) {
+    const auto failure = rejected(source, options);
+    REQUIRE(failure.sceneResource);
+    CHECK(failure.sceneResource->code == Code::INVALID_VALUE);
+  }
+
+  struct EmptyRows final : ModelSnapshot<int> {
+    EmptyRows() : ModelSnapshot(1, 0) {
+    }
+
+    ModelRows<int> read(RowRange) const override {
+      return {RangeState::READY, {}, {}};
+    }
+  };
+
+  auto app = Application::create();
+  REQUIRE(app);
+  auto scene = ManagedScene::create(**app);
+  REQUIRE(scene);
+  auto model = (*scene)->model<int>(std::make_shared<EmptyRows>());
+  REQUIRE(model);
+  ui::SceneResourceOptions chartOptions;
+  chartOptions.format = ui::SceneResourceFormat::CONFIGURATION;
+  REQUIRE(chartOptions.registry.add<Chart<int>>("Plot", [model = *model](ui::SceneResourceArguments) {
+    return ui::chart(model, [](const int &) -> std::optional<Ohlc> {
+      return std::nullopt;
+    });
+  }));
+  REQUIRE(ui::mount(**scene, ui::resource("scene { Plot { mode=CANDLES } }", chartOptions)));
+  REQUIRE((*scene)->close());
+}
+
+TEST_CASE("HEX palette allocation rejection preserves the old registration and projection") {
+  struct HoldingExecutor final : BackgroundExecutor {
+    std::shared_ptr<BackgroundJob> job;
+
+    std::expected<BackgroundTicket, BackgroundError> submit(std::unique_ptr<BackgroundJob> &input) override {
+      if (job) {
+        return std::unexpected(BackgroundError::WOULD_BLOCK);
+      }
+      job = std::move(input);
+      return BackgroundTicket(job);
+    }
+
+    void service() noexcept override {
+    }
+
+    std::uint64_t capacityEpoch() const noexcept override {
+      return 0;
+    }
+  } executor;
+
+  ui::Ref<DocumentView> reader;
+  auto owner = ui::scene(ui::viewer(reader, ui::document(std::make_shared<const std::string>("original bytes"))),
+                         {.application = {.backgroundExecutor = &executor}});
+  REQUIRE(owner.prepareChecked());
+  auto &scene = owner.managed()->get();
+  auto &app = ui::detail::SceneAccess::application(scene);
+  const CellSize size{60, 6};
+  REQUIRE(scene.prepare(app, size));
+  const auto bounds = CellRect::from({}, size);
+  REQUIRE(bounds);
+  std::optional<LayoutSnapshot> layout;
+  REQUIRE(app.tree().frame([&] {
+    REQUIRE(layoutTree(app.tree(), app.root(), *bounds, *bounds));
+    const auto captured = LayoutSnapshot::capture(app.tree(), app.root(), LayoutSnapshotProfile::GEOMETRY);
+    REQUIRE(captured);
+    layout.emplace(*captured);
+  }));
+  REQUIRE(scene.prepareViews(app, *layout));
+  StyleRoleRegistration original;
+  std::shared_ptr<const detail::DocumentPreparedFrame> frame;
+  REQUIRE(app.tree().read(reader.node(), [&](const DocumentView &widget) {
+    const auto &state = detail::DocumentViewAccess::state(widget);
+    original = state.roles;
+    frame = state.frame;
+  }));
+  const auto palette = original.snapshot();
+  REQUIRE(palette);
+  REQUIRE(palette->values.size() == 3);
+  allocationsBeforeFailure = 0;
+  const auto changed = reader.setMode(DocumentViewMode::HEX);
+  allocationsBeforeFailure = -1;
+  REQUIRE_FALSE(changed);
+  const auto *failure = std::get_if<StyleError>(&changed.error().cause);
+  REQUIRE(failure);
+  CHECK(failure->cause == TreeError::NO_MEMORY);
+  CHECK(original.snapshot() == palette);
+  REQUIRE(app.tree().read(reader.node(), [&](const DocumentView &widget) {
+    const auto &state = detail::DocumentViewAccess::state(widget);
+    CHECK(state.config.mode == DocumentViewMode::TEXT);
+    CHECK(state.anchor == 0);
+    CHECK(state.frame == frame);
+    CHECK(state.roles.snapshot() == palette);
+  }));
+  REQUIRE(owner.close());
+  executor.job.reset();
+}
+
+TEST_CASE("exact public HEX resource example prepares before any document worker IO") {
+  const auto example =
+    std::filesystem::path(__FILE__).parent_path().parent_path() / "docs/examples/guide_document_hex_resource.cpp";
+  std::ifstream input(example, std::ios::binary);
+  REQUIRE(input);
+  const std::string cpp((std::istreambuf_iterator<char>(input)), std::istreambuf_iterator<char>());
+  constexpr std::string_view OPEN = "R\"scene(";
+  constexpr std::string_view CLOSE = ")scene\"";
+  const auto first = cpp.find(OPEN);
+  REQUIRE(first != std::string::npos);
+  const auto last = cpp.find(CLOSE, first + OPEN.size());
+  REQUIRE(last != std::string::npos);
+  std::string source(std::string_view(cpp).substr(first + OPEN.size(), last - first - OPEN.size()));
+  std::erase(source, '\r');
+  auto owner = ui::scene(source, {.format = ui::SceneResourceFormat::CONFIGURATION});
+  const auto reader = owner.get<DocumentView>("reader");
+  const auto prepared = owner.prepareChecked();
+  if (!prepared) {
+    ui::SceneReport report;
+    report.failure = prepared.error();
+    ui::reportToStderr(report);
+  }
+  REQUIRE(prepared);
+  auto &scene = owner.managed()->get();
+  auto &app = ui::detail::SceneAccess::application(scene);
+  REQUIRE(app.tree().read(reader.node(), [](const DocumentView &widget) {
+    const auto &config = detail::DocumentViewAccess::state(widget).config;
+    CHECK(config.mode == DocumentViewMode::HEX);
+    CHECK(config.hex.bytesPerRow == 16);
+    CHECK(config.hex.groupSize == 8);
+    CHECK(config.hex.uppercase);
+    CHECK(config.hex.showAscii);
+    CHECK(config.hex.autoFit);
+    const auto *frame = detail::scrollFrameOptions(detail::ScrollWidgetAccess::state(widget));
+    REQUIRE(frame);
+    CHECK(frame->pattern == FramePattern::ROUNDED);
+  }));
+  REQUIRE(owner.close());
+}
+
+TEST_CASE("HEX groups share sparse inherited leaves and preserve foreign type masks") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto owner = ui::scene(R"(
+    defaults { DocumentView { hex { bytesPerRow=32 uppercase=true autoFit=true } } }
+    definitions { Reader=DocumentView { hex { groupSize=4 showAscii=false } } }
+    scene { Reader#reader { file="missing-cold-file.txt" mode=hex hex { bytesPerRow=8 uppercase=false autoFit=false } } }
+  )",
+                         options);
+  const auto reader = owner.get<DocumentView>("reader");
+  REQUIRE(owner.prepareChecked());
+  auto &scene = owner.managed()->get();
+  auto &app = ui::detail::SceneAccess::application(scene);
+  REQUIRE(app.tree().read(reader.node(), [](const DocumentView &widget) {
+    const auto &hex = detail::DocumentViewAccess::state(widget).config.hex;
+    CHECK(hex.bytesPerRow == 8);
+    CHECK(hex.groupSize == 4);
+    CHECK_FALSE(hex.uppercase);
+    CHECK_FALSE(hex.showAscii);
+    CHECK_FALSE(hex.autoFit);
+  }));
+  REQUIRE(owner.close());
+  for (const auto source :
+       {"defaults{Button{hex{bytesPerRow=16}}}scene{Button{}}", "scene{ScrollArea{hex.bytesPerRow=16 Label{}}}",
+        "scene{ScrollArea{hex={bytesPerRow=16} Label{}}}", "scene{DocumentView{file=\"x\" hex{unknown=true}}}"}) {
+    const auto failure = rejected(source, options);
+    REQUIRE(failure.sceneResource);
+    CHECK(failure.sceneResource->code == Code::UNKNOWN_PROPERTY);
+    REQUIRE(failure.sceneResource->propertyPath);
+    CHECK(failure.sceneResource->propertyPath->find("hex") != std::string::npos);
+  }
+  const auto duplicate = rejected("scene{DocumentView{file=\"x\" hex{bytesPerRow=16} hex.bytesPerRow=8}}", options);
+  REQUIRE(duplicate.sceneResource);
+  CHECK(duplicate.sceneResource->code == Code::DUPLICATE_PROPERTY);
+}
+
+TEST_CASE("HEX native group respects caller child names and explicit group assignment") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  unsigned factories{};
+  REQUIRE(options.registry.add<Label>("hex", [&](ui::SceneResourceArguments) {
+    ++factories;
+    return ui::label("caller child");
+  }));
+  const auto child = rejected("scene{DocumentView{file=\"x\" hex{bytesPerRow=8}}}", options);
+  REQUIRE(child.sceneResource);
+  CHECK(child.sceneResource->code == Code::CHILDREN_FORBIDDEN);
+  CHECK(factories == 0);
+  auto owner = ui::scene("scene{DocumentView#reader{file=\"x\" mode=hex hex={bytesPerRow=8}}}", options);
+  const auto reader = owner.get<DocumentView>("reader");
+  REQUIRE(owner.prepareChecked());
+  auto &scene = owner.managed()->get();
+  auto &app = ui::detail::SceneAccess::application(scene);
+  REQUIRE(app.tree().read(reader.node(), [](const DocumentView &widget) {
+    CHECK(detail::DocumentViewAccess::state(widget).config.hex.bytesPerRow == 8);
+  }));
+  CHECK(factories == 0);
+  REQUIRE(owner.close());
+}

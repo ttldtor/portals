@@ -83,6 +83,37 @@ public:
     return std::move(*this);
   }
 
+  /** @param value Projection of the same byte source. @return Consuming viewer recipe. */
+  Description &&mode(DocumentViewMode value) &&
+    requires std::same_as<T, DocumentView>
+  {
+    ControlSettings patch;
+    auto document = std::make_shared<ControlDocumentSettings>();
+
+    document->mode = value;
+    patch.document = std::move(document);
+
+    return std::move(*this).scalarSettings(std::move(patch));
+  }
+
+  /** @param options Fixed raw-byte row layout. @return Consuming HEX viewer recipe. */
+  Description &&hex(DocumentHexOptions options = {}) &&
+    requires std::same_as<T, DocumentView>
+  {
+    ControlSettings patch;
+    auto document = std::make_shared<ControlDocumentSettings>();
+
+    document->mode = DocumentViewMode::HEX;
+    document->hexBytesPerRow = options.bytesPerRow;
+    document->hexGroupSize = options.groupSize;
+    document->hexUppercase = options.uppercase;
+    document->hexShowAscii = options.showAscii;
+    document->hexAutoFit = options.autoFit;
+    patch.document = std::move(document);
+
+    return std::move(*this).scalarSettings(std::move(patch));
+  }
+
   /** @param enabled Show proven logical line numbers. @return Consuming text viewer recipe. */
   Description &&lineNumbers(bool enabled = true) &&
     requires std::same_as<T, DocumentView>

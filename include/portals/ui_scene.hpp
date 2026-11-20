@@ -928,7 +928,8 @@ private:
 
     try {
       addConfiguration(
-        [chord, declaration = detail::retainAction(callback), callback = std::move(callback)](ManagedScene &scene) mutable {
+        [chord, declaration = detail::retainAction(callback),
+         callback = std::move(callback)](ManagedScene &scene) mutable {
           (void)declaration;
           return scene.onKey(chord, std::move(callback));
         },
@@ -948,8 +949,8 @@ private:
     }
     try {
       addConfiguration(
-        [selection, info = std::move(info), declaration = detail::retainAction(callback), callback = std::move(callback),
-         origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
+        [selection, info = std::move(info), declaration = detail::retainAction(callback),
+         callback = std::move(callback), origin](ManagedScene &scene) mutable -> std::expected<void, ManagedError> {
           (void)declaration;
           auto metadata = info.resolve(scene);
           if (!metadata) {
@@ -984,7 +985,8 @@ private:
 
     try {
       addConfiguration(
-        [selection, declaration = detail::retainAction(callback), callback = std::move(callback), origin](ManagedScene &scene) mutable {
+        [selection, declaration = detail::retainAction(callback), callback = std::move(callback),
+         origin](ManagedScene &scene) mutable {
           (void)declaration;
           return scene.onKey(selection, std::move(callback), origin);
         },
@@ -1030,8 +1032,8 @@ private:
 
     try {
       addConfiguration(
-        [shortcut = std::move(*shortcut), declaration = detail::retainAction(callback), callback = std::move(callback), behavior, options,
-         origin](ManagedScene &scene) mutable {
+        [shortcut = std::move(*shortcut), declaration = detail::retainAction(callback), callback = std::move(callback),
+         behavior, options, origin](ManagedScene &scene) mutable {
           (void)declaration;
           return scene.onKey(std::move(shortcut), std::move(callback), behavior, options, origin);
         },
@@ -1103,8 +1105,7 @@ struct SceneAccess {
    * @param activity Weakly retained active-cycle work, bounded by the existing node budget.
    * @return Checked admission; inactive records are pruned without scanning idle controls.
    */
-  static std::expected<void, ManagedError> admitActivity(ManagedScene &owner,
-                                                         std::shared_ptr<SceneActivity> activity) {
+  static std::expected<void, ManagedError> admitActivity(ManagedScene &owner, std::shared_ptr<SceneActivity> activity) {
     return owner.admitActivity(std::move(activity));
   }
 
@@ -1190,6 +1191,27 @@ struct SceneAccess {
       return std::unexpected(ManagedError{ManagedPhase::STYLE, node.id(), registered.error(), {}, {}});
     }
     return *registered;
+  }
+
+  /** @param owner UI owner outside callbacks. @param node Live viewer.
+   * @param registration Existing role participation. @param names Replacement names copied by the engine.
+   * @return Atomically replaced palette registration, without invoking the collector.
+   */
+  static std::expected<StyleRoleRegistration, ManagedError>
+  replaceDocumentRoles(ManagedScene &owner, Node<Widget> node, const StyleRoleRegistration &registration,
+                       std::initializer_list<std::string_view> names) {
+    if (owner.owner_ != std::this_thread::get_id()) {
+      return std::unexpected(ManagedError{ManagedPhase::STYLE, node.id(), TreeError::WRONG_THREAD, {}, {}});
+    }
+    if (owner.closed_ || owner.reporting_ || owner.styling_ || owner.stylesDirty_) {
+      return std::unexpected(ManagedError{
+        ManagedPhase::STYLE, node.id(), owner.closed_ ? TreeError::CLOSED : TreeError::WOULD_BLOCK, {}, {}});
+    }
+    auto replaced = owner.styles_.replaceRoles(registration, names);
+    if (!replaced) {
+      return std::unexpected(ManagedError{ManagedPhase::STYLE, node.id(), replaced.error(), {}, {}});
+    }
+    return std::move(*replaced);
   }
 
   /** @param owner Managed owner whose close entry must first stop facade-owned external work.

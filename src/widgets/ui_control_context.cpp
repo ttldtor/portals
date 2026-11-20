@@ -68,6 +68,7 @@ constexpr std::array<std::string_view, 2> DIALOG_MODE_NAMES{"MODAL", "NON_MODAL"
 constexpr std::array<std::string_view, 3> DIALOG_PLACEMENT_NAMES{"CENTER", "BELOW_START", "ABOVE_START"};
 constexpr std::array<std::string_view, 2> CHART_MODE_NAMES{"LINE", "CANDLES"};
 constexpr std::array<std::string_view, 2> CHART_GLYPH_NAMES{"ASCII", "BOX_DRAWING"};
+constexpr std::array<std::string_view, 2> DOCUMENT_MODE_NAMES{"text", "hex"};
 constexpr std::array<std::string_view, 3> DOCUMENT_MODIFIER_NAMES{"SHIFT", "ALT", "CTRL"};
 constexpr std::array<std::string_view, 8> DOCUMENT_ENCODING_NAMES{
   "UNRESOLVED", "UTF8", "UTF16LE", "UTF16BE", "UTF32LE", "UTF32BE", "WINDOWS1251", "WINDOWS1252"};
@@ -348,7 +349,13 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"encoding", Kind::ENUMERATION, 1, DOCUMENT_ENCODING_NAMES},
    {"fastScroll", Kind::UNSIGNED_INTEGER, 1, {}},
    {"fastKeyModifier", Kind::ENUMERATION, 1, DOCUMENT_MODIFIER_NAMES},
-   {"fastWheelModifier", Kind::ENUMERATION, 1, DOCUMENT_MODIFIER_NAMES}}};
+   {"fastWheelModifier", Kind::ENUMERATION, 1, DOCUMENT_MODIFIER_NAMES},
+   {"mode", Kind::ENUMERATION, 1, DOCUMENT_MODE_NAMES},
+   {"hex.bytesPerRow", Kind::UNSIGNED_INTEGER, 2, {}},
+   {"hex.groupSize", Kind::UNSIGNED_INTEGER, 2, {}},
+   {"hex.uppercase", Kind::BOOLEAN, 2, {}},
+   {"hex.showAscii", Kind::BOOLEAN, 2, {}},
+   {"hex.autoFit", Kind::BOOLEAN, 2, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -380,7 +387,8 @@ constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 
 constexpr Mask SCROLL_COMMON_MASK =
   SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48, 231, 232, 233);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
-constexpr Mask DOCUMENT_VIEW_MASK = SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267, 268, 269, 270);
+constexpr Mask DOCUMENT_VIEW_MASK =
+  SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
 constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 225, 226, 227, 228, 229);
 constexpr Mask OVERLAY_MASK = SIZE_MASK | propertyMask(22, 23, 24, 25, 56, 57);
@@ -477,9 +485,9 @@ constexpr auto SCROLL_AREA_SCHEMA = withFrame(
                  PROPERTIES[241], PROPERTIES[242], PROPERTIES[243], PROPERTIES[244], PROPERTIES[245], PROPERTIES[246],
                  PROPERTIES[247], PROPERTIES[248]}));
 constexpr auto DOCUMENT_VIEW_SCHEMA = [] {
-  std::array<ControlPropertyDescriptor, SCROLL_AREA_SCHEMA.size() + 7> schema{};
+  std::array<ControlPropertyDescriptor, SCROLL_AREA_SCHEMA.size() + 13> schema{};
   std::ranges::copy(SCROLL_AREA_SCHEMA, schema.begin());
-  for (std::size_t index = 0; index < 7; ++index) {
+  for (std::size_t index = 0; index < 13; ++index) {
     schema[SCROLL_AREA_SCHEMA.size() + index] = PROPERTIES[264 + index];
   }
   return schema;
@@ -593,7 +601,10 @@ constexpr bool schemaMatchesMask(const std::array<ControlPropertyDescriptor, N> 
   Mask actual;
 
   for (const auto &descriptor : schema) {
-    const auto found = std::ranges::find(PROPERTIES, descriptor.path, &ControlPropertyDescriptor::path);
+    // A public property spelling can have a type-specific enum vocabulary (Chart/DocumentView mode).
+    const auto found = std::ranges::find_if(PROPERTIES, [&](const auto &candidate) {
+      return candidate.path == descriptor.path && candidate.enumNames.data() == descriptor.enumNames.data();
+    });
 
     if (found == PROPERTIES.end()) {
       return false;
@@ -1085,7 +1096,13 @@ ControlContextError exceptionError() noexcept {
   X(documentSettings().encoding, 267)                                                                                  \
   X(documentSettings().fastScroll, 268)                                                                                \
   X(documentSettings().fastKeyModifier, 269)                                                                           \
-  X(documentSettings().fastWheelModifier, 270)
+  X(documentSettings().fastWheelModifier, 270)                                                                         \
+  X(documentSettings().mode, 271)                                                                                      \
+  X(documentSettings().hexBytesPerRow, 272)                                                                            \
+  X(documentSettings().hexGroupSize, 273)                                                                              \
+  X(documentSettings().hexUppercase, 274)                                                                              \
+  X(documentSettings().hexShowAscii, 275)                                                                              \
+  X(documentSettings().hexAutoFit, 276)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES =
@@ -1209,6 +1226,12 @@ void merge(ControlSettings &target, const ControlSettings &patch) {
     assign(document->fastScroll, source.fastScroll, 268);
     assign(document->fastKeyModifier, source.fastKeyModifier, 269);
     assign(document->fastWheelModifier, source.fastWheelModifier, 270);
+    assign(document->mode, source.mode, 271);
+    assign(document->hexBytesPerRow, source.hexBytesPerRow, 272);
+    assign(document->hexGroupSize, source.hexGroupSize, 273);
+    assign(document->hexUppercase, source.hexUppercase, 274);
+    assign(document->hexShowAscii, source.hexShowAscii, 275);
+    assign(document->hexAutoFit, source.hexAutoFit, 276);
     target.document = std::move(document);
   }
 }
@@ -1223,6 +1246,9 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
 
     return positive ? value > 0 : value >= 0;
   } else if constexpr (std::unsigned_integral<T> && !std::same_as<T, bool>) {
+    if (index == 272 || index == 273) {
+      return value > 0 && value <= MAX_HEX_ROW_BYTES;
+    }
     if (index == 268) {
       return value > 0 && value <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
     }
@@ -1236,6 +1262,8 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
     return std::isfinite(value) && ((index != WHEEL_STEP_PROPERTY && index != SLIDER_STEP_PROPERTY) || value > 0);
   } else if constexpr (std::same_as<T, key::Modifier>) {
     return value == key::SHIFT || value == key::ALT || value == key::CTRL;
+  } else if constexpr (std::same_as<T, DocumentViewMode>) {
+    return value == DocumentViewMode::TEXT || value == DocumentViewMode::HEX;
   } else if constexpr (std::same_as<T, DocumentEncoding>) {
     return value >= DocumentEncoding::UNRESOLVED && value <= DocumentEncoding::WINDOWS1252;
   } else if constexpr (std::same_as<T, ToastPlacement>) {
@@ -1479,6 +1507,12 @@ void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &
     apply(document->fastScroll, source.fastScroll);
     apply(document->fastKeyModifier, source.fastKeyModifier);
     apply(document->fastWheelModifier, source.fastWheelModifier);
+    apply(document->mode, source.mode);
+    apply(document->hexBytesPerRow, source.hexBytesPerRow);
+    apply(document->hexGroupSize, source.hexGroupSize);
+    apply(document->hexUppercase, source.hexUppercase);
+    apply(document->hexShowAscii, source.hexShowAscii);
+    apply(document->hexAutoFit, source.hexAutoFit);
     target.document = std::move(document);
   }
   target.origin = patch.origin;
@@ -1511,6 +1545,12 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"fastScroll", patch.documentSettings().fastScroll.has_value()},
       std::pair<std::string_view, bool>{"fastKeyModifier", patch.documentSettings().fastKeyModifier.has_value()},
       std::pair<std::string_view, bool>{"fastWheelModifier", patch.documentSettings().fastWheelModifier.has_value()},
+      std::pair<std::string_view, bool>{"mode", patch.documentSettings().mode.has_value()},
+      std::pair<std::string_view, bool>{"hex.bytesPerRow", patch.documentSettings().hexBytesPerRow.has_value()},
+      std::pair<std::string_view, bool>{"hex.groupSize", patch.documentSettings().hexGroupSize.has_value()},
+      std::pair<std::string_view, bool>{"hex.uppercase", patch.documentSettings().hexUppercase.has_value()},
+      std::pair<std::string_view, bool>{"hex.showAscii", patch.documentSettings().hexShowAscii.has_value()},
+      std::pair<std::string_view, bool>{"hex.autoFit", patch.documentSettings().hexAutoFit.has_value()},
       std::pair<std::string_view, bool>{"preset", patch.spinnerPreset.has_value()},
       std::pair<std::string_view, bool>{"frames", patch.spinnerFrames.has_value()},
       std::pair<std::string_view, bool>{"interval", patch.spinnerTick.has_value()},
@@ -3088,7 +3128,10 @@ bool ControlContext::matchesRegisteredType(std::string_view name,
   }
   Mask mask{};
   for (const auto path : properties) {
-    const auto index = propertyIndex(path);
+    auto index = propertyIndex(path);
+    if (path == "mode" && found->mask.test(271)) {
+      index = 271;
+    }
     if (index == PROPERTIES.size() || mask.test(index)) {
       return false;
     }
