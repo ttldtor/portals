@@ -68,7 +68,9 @@ constexpr std::array<std::string_view, 2> DIALOG_MODE_NAMES{"MODAL", "NON_MODAL"
 constexpr std::array<std::string_view, 3> DIALOG_PLACEMENT_NAMES{"CENTER", "BELOW_START", "ABOVE_START"};
 constexpr std::array<std::string_view, 2> CHART_MODE_NAMES{"LINE", "CANDLES"};
 constexpr std::array<std::string_view, 2> CHART_GLYPH_NAMES{"ASCII", "BOX_DRAWING"};
-constexpr std::array<std::string_view, 8> DOCUMENT_ENCODING_NAMES{"UNRESOLVED", "UTF8", "UTF16LE", "UTF16BE", "UTF32LE", "UTF32BE", "WINDOWS1251", "WINDOWS1252"};
+constexpr std::array<std::string_view, 3> DOCUMENT_MODIFIER_NAMES{"SHIFT", "ALT", "CTRL"};
+constexpr std::array<std::string_view, 8> DOCUMENT_ENCODING_NAMES{
+  "UNRESOLVED", "UTF8", "UTF16LE", "UTF16BE", "UTF32LE", "UTF32BE", "WINDOWS1251", "WINDOWS1252"};
 constexpr std::array<std::string_view, 2> AXIS_NAMES{"HORIZONTAL", "VERTICAL"};
 constexpr std::array<std::string_view, 4> SPINNER_PRESET_NAMES{"DOTS", "LINE", "BRAILLE", "BAR_BOUNCE"};
 constexpr std::array<std::string_view, 2> SPINNER_DIRECTION_NAMES{"FORWARD", "REVERSE"};
@@ -343,7 +345,10 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"file", Kind::LITERAL_STRING, 1, {}},
    {"lineNumbers", Kind::BOOLEAN, 1, {}},
    {"wrap", Kind::BOOLEAN, 1, {}},
-   {"encoding", Kind::ENUMERATION, 1, DOCUMENT_ENCODING_NAMES}}};
+   {"encoding", Kind::ENUMERATION, 1, DOCUMENT_ENCODING_NAMES},
+   {"fastScroll", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"fastKeyModifier", Kind::ENUMERATION, 1, DOCUMENT_MODIFIER_NAMES},
+   {"fastWheelModifier", Kind::ENUMERATION, 1, DOCUMENT_MODIFIER_NAMES}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -375,7 +380,7 @@ constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 
 constexpr Mask SCROLL_COMMON_MASK =
   SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48, 231, 232, 233);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
-constexpr Mask DOCUMENT_VIEW_MASK = SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267);
+constexpr Mask DOCUMENT_VIEW_MASK = SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267, 268, 269, 270);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
 constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 225, 226, 227, 228, 229);
 constexpr Mask OVERLAY_MASK = SIZE_MASK | propertyMask(22, 23, 24, 25, 56, 57);
@@ -472,9 +477,9 @@ constexpr auto SCROLL_AREA_SCHEMA = withFrame(
                  PROPERTIES[241], PROPERTIES[242], PROPERTIES[243], PROPERTIES[244], PROPERTIES[245], PROPERTIES[246],
                  PROPERTIES[247], PROPERTIES[248]}));
 constexpr auto DOCUMENT_VIEW_SCHEMA = [] {
-  std::array<ControlPropertyDescriptor, SCROLL_AREA_SCHEMA.size() + 4> schema{};
+  std::array<ControlPropertyDescriptor, SCROLL_AREA_SCHEMA.size() + 7> schema{};
   std::ranges::copy(SCROLL_AREA_SCHEMA, schema.begin());
-  for (std::size_t index = 0; index < 4; ++index) {
+  for (std::size_t index = 0; index < 7; ++index) {
     schema[SCROLL_AREA_SCHEMA.size() + index] = PROPERTIES[264 + index];
   }
   return schema;
@@ -1073,14 +1078,18 @@ ControlContextError exceptionError() noexcept {
   PORTALS_CONTROL_SPINNER_LEAVES(X)                                                                                    \
   PORTALS_CONTROL_SCROLLBAR_LEAVES(X)
 
-#define PORTALS_DOCUMENT_LEAVES(X) \
-  X(documentSettings().file, 264) \
-  X(documentSettings().lineNumbers, 265) \
-  X(documentSettings().wrap, 266) \
-  X(documentSettings().encoding, 267)
+#define PORTALS_DOCUMENT_LEAVES(X)                                                                                     \
+  X(documentSettings().file, 264)                                                                                      \
+  X(documentSettings().lineNumbers, 265)                                                                               \
+  X(documentSettings().wrap, 266)                                                                                      \
+  X(documentSettings().encoding, 267)                                                                                  \
+  X(documentSettings().fastScroll, 268)                                                                                \
+  X(documentSettings().fastKeyModifier, 269)                                                                           \
+  X(documentSettings().fastWheelModifier, 270)
 
 #define LEAF_INDEX(field, index) index,
-constexpr auto LEAF_INDICES = std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX) PORTALS_DOCUMENT_LEAVES(LEAF_INDEX)});
+constexpr auto LEAF_INDICES =
+  std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX) PORTALS_DOCUMENT_LEAVES(LEAF_INDEX)});
 #undef LEAF_INDEX
 static_assert(LEAF_INDICES.size() == detail::CONTROL_PROPERTY_COUNT);
 static_assert([] {
@@ -1197,6 +1206,9 @@ void merge(ControlSettings &target, const ControlSettings &patch) {
     assign(document->lineNumbers, source.lineNumbers, 265);
     assign(document->wrap, source.wrap, 266);
     assign(document->encoding, source.encoding, 267);
+    assign(document->fastScroll, source.fastScroll, 268);
+    assign(document->fastKeyModifier, source.fastKeyModifier, 269);
+    assign(document->fastWheelModifier, source.fastWheelModifier, 270);
     target.document = std::move(document);
   }
 }
@@ -1211,6 +1223,9 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
 
     return positive ? value > 0 : value >= 0;
   } else if constexpr (std::unsigned_integral<T> && !std::same_as<T, bool>) {
+    if (index == 268) {
+      return value > 0 && value <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
+    }
     return index == 155 ? value >= 2 : !POSITIVE_UNSIGNED_MASK.test(index) || value > 0;
   } else if constexpr (std::same_as<T, std::string>) {
     return detail::validControlLiteral(value) && (index != 68 || !value.empty()) &&
@@ -1219,6 +1234,8 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
            ((index != 191 && index != 192) || value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES);
   } else if constexpr (std::same_as<T, double>) {
     return std::isfinite(value) && ((index != WHEEL_STEP_PROPERTY && index != SLIDER_STEP_PROPERTY) || value > 0);
+  } else if constexpr (std::same_as<T, key::Modifier>) {
+    return value == key::SHIFT || value == key::ALT || value == key::CTRL;
   } else if constexpr (std::same_as<T, DocumentEncoding>) {
     return value >= DocumentEncoding::UNRESOLVED && value <= DocumentEncoding::WINDOWS1252;
   } else if constexpr (std::same_as<T, ToastPlacement>) {
@@ -1459,6 +1476,9 @@ void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &
     apply(document->lineNumbers, source.lineNumbers);
     apply(document->wrap, source.wrap);
     apply(document->encoding, source.encoding);
+    apply(document->fastScroll, source.fastScroll);
+    apply(document->fastKeyModifier, source.fastKeyModifier);
+    apply(document->fastWheelModifier, source.fastWheelModifier);
     target.document = std::move(document);
   }
   target.origin = patch.origin;
@@ -1488,6 +1508,9 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"lineNumbers", patch.documentSettings().lineNumbers.has_value()},
       std::pair<std::string_view, bool>{"wrap", patch.documentSettings().wrap.has_value()},
       std::pair<std::string_view, bool>{"encoding", patch.documentSettings().encoding.has_value()},
+      std::pair<std::string_view, bool>{"fastScroll", patch.documentSettings().fastScroll.has_value()},
+      std::pair<std::string_view, bool>{"fastKeyModifier", patch.documentSettings().fastKeyModifier.has_value()},
+      std::pair<std::string_view, bool>{"fastWheelModifier", patch.documentSettings().fastWheelModifier.has_value()},
       std::pair<std::string_view, bool>{"preset", patch.spinnerPreset.has_value()},
       std::pair<std::string_view, bool>{"frames", patch.spinnerFrames.has_value()},
       std::pair<std::string_view, bool>{"interval", patch.spinnerTick.has_value()},
@@ -2512,8 +2535,8 @@ std::expected<void, ControlContextError> ControlContextAccess::installScrollSche
     schema.name = name;
     schema.mask = name == "DocumentView" ? DOCUMENT_VIEW_MASK
                   : name == "ScrollArea" ? SCROLL_AREA_MASK
-                  : name == "LogView"                              ? LOG_VIEW_MASK
-                                                                   : SCROLL_BAR_MASK;
+                  : name == "LogView"    ? LOG_VIEW_MASK
+                                         : SCROLL_BAR_MASK;
     schema.factoryKind = ControlFactoryKind::SCROLL_FALLBACK;
     next->scrollFallbacks[name == "ScrollArea" ? 0 : name == "LogView" ? 2 : name == "DocumentView" ? 3 : 1] = schema;
     context.data_ = std::move(next);

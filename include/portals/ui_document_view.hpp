@@ -85,4 +85,12 @@ std::expected<void, ManagedError> setDocumentWrap(ManagedScene &scene, Node<Docu
  */
 std::expected<void, ManagedError> setDocumentEncoding(ManagedScene &scene, Node<DocumentView> node,
                                                       DocumentEncoding encoding);
+
+/// @cond INTERNAL
+namespace detail {
+std::expected<void, ManagedError> navigateDocument(ManagedScene &, Node<DocumentView>, DocumentNavigation,
+                                                   std::int64_t);
+}
+
+/// @endcond
 } // namespace portals

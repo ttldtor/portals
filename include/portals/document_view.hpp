@@ -4,6 +4,7 @@
 
 #include <portals/document_encoding.hpp>
 #include <portals/document_source.hpp>
+#include <portals/input.hpp>
 #include <portals/scroll_controls.hpp>
 
 namespace portals {
@@ -13,7 +14,22 @@ struct ManagedError;
 namespace detail {
 struct DocumentViewState;
 struct DocumentViewAccess;
+/// @cond INTERNAL
+enum class DocumentNavigation {
+  ROWS,
+  PAGES,
+  HOME,
+  END
+};
+/// @endcond
 } // namespace detail
+
+/** @brief Optional Viewer-only absolute fast navigation policy; no runtime or source ownership. */
+struct DocumentFastScroll {
+  std::uint64_t step{8};             ///< Positive visual rows per modified arrow/wheel unit, at most INT64_MAX.
+  key::Modifier keyboard{key::CTRL}; ///< Exact modifier for Up/Down; no additional modifiers are accepted.
+  key::Modifier wheel{key::ALT};     ///< Exact wheel modifier, subject to host-terminal input forwarding.
+};
 
 /** @brief Bounded text projection; these limits never restrict logical line length. */
 struct DocumentViewConfig {
@@ -23,6 +39,7 @@ struct DocumentViewConfig {
   std::size_t workBytes{256 * 1024};    ///< Maximum source bytes admitted per worker turn.
   bool wrap{true};                      ///< Wrap complete ordinary graphemes at the viewport edge.
   bool lineNumbers{};                   ///< Show proven logical line numbers in a fixed gutter.
+  std::optional<DocumentFastScroll> fastScroll; ///< Absent keeps modified scrolling disabled.
 };
 
 /** @brief Owning scalar observation; no source I/O or preparation is performed by status commands. */
@@ -35,11 +52,11 @@ struct DocumentViewStatus {
   std::optional<std::uint64_t> totalLines;  ///< Proven final logical count, or unknown.
   std::optional<DocumentError> error;       ///< Latest preparation failure, if any.
   bool anchorBeyondExtent{}; ///< Requested anchor exceeds the last known extent; rendering projects available content.
-  bool backpressured{}; ///< Shared capacity is busy; source-budget capacity notification permits a bounded retry.
-  bool preparing{true}; ///< Bounded work remains for the latest intent.
-  bool waiting{};       ///< Provider returned no bytes without definitive EOF; explicit refresh resumes it.
-  bool finalEnd{};      ///< Latest worker reached definitive EOF.
-  bool fragmentedCluster{}; ///< Grapheme continuation used when a cluster or bounded context cannot be proven locally.
+  bool backpressured{};      ///< Shared capacity is busy; source-budget capacity notification permits a bounded retry.
+  bool preparing{true};      ///< Bounded work remains for the latest intent.
+  bool waiting{};            ///< Provider returned no bytes without definitive EOF; explicit refresh resumes it.
+  bool finalEnd{};           ///< Latest worker reached definitive EOF.
+  bool fragmentedCluster{};  ///< Grapheme continuation used when a cluster or bounded context cannot be proven locally.
 };
 
 /** @brief Read-only retained document viewport; source I/O, decoding and layout run on application workers.

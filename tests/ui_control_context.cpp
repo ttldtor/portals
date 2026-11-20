@@ -1960,3 +1960,39 @@ TEST_CASE("context captures document bags independently of mutable aliases") {
     CHECK_FALSE(*resolved->settings.documentSettings().wrap);
   }
 }
+
+TEST_CASE("Viewer fast navigation properties merge in the immutable document extension") {
+  ControlContext controls;
+  take(ui::detail::ControlContextAccess::installScrollSchema(controls, "DocumentView"));
+  auto defaultsBag = std::make_shared<ControlDocumentSettings>();
+  defaultsBag->fastScroll = 8;
+  defaultsBag->fastKeyModifier = key::CTRL;
+  defaultsBag->fastWheelModifier = key::ALT;
+  ControlSettings defaults;
+  defaults.document = defaultsBag;
+  controls.defaults("DocumentView", defaults);
+  defaultsBag->fastScroll = 0;
+  auto patchBag = std::make_shared<ControlDocumentSettings>();
+  patchBag->fastKeyModifier = key::SHIFT;
+  ControlSettings patch;
+  patch.document = patchBag;
+  const auto resolved = controls.resolve("DocumentView", patch);
+  REQUIRE(resolved);
+  CHECK(resolved->settings.documentSettings().fastScroll == 8);
+  CHECK(resolved->settings.documentSettings().fastKeyModifier == key::SHIFT);
+  CHECK(resolved->settings.documentSettings().fastWheelModifier == key::ALT);
+  CHECK_FALSE(ControlSettings{}.document);
+
+  for (const auto value : {std::uint64_t{0}, std::uint64_t{1} << 63}) {
+    patchBag->fastScroll = value;
+    const auto invalid = controls.resolve("DocumentView", patch);
+    REQUIRE_FALSE(invalid);
+    CHECK(invalid.error().code == Code::INVALID_VALUE);
+  }
+  patchBag->fastScroll = 5;
+  patchBag->fastKeyModifier = static_cast<key::Modifier>(99);
+  REQUIRE_FALSE(controls.resolve("DocumentView", patch));
+  ControlContext ordinary;
+  take(ui::detail::ControlContextAccess::installScrollSchema(ordinary, "ScrollArea"));
+  CHECK_FALSE(ordinary.resolve("ScrollArea", defaults));
+}

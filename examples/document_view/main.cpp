@@ -11,13 +11,13 @@ int main() {
 
   // clang-format off
   return ui::scene(ui::vbox(
-    ui::label("Documents | arrows / PgUp / PgDn / wheel | F10 closes"),
+    ui::label("Documents | Ctrl+arrows / Alt+wheel: fast | PgUp/PgDn | F10"),
     ui::hbox(
       ui::button("README").onClick([=] { reader.model(readme); }),
       ui::button("Release notes").onClick([=] { reader.model(releases); }),
       ui::button("Refresh").onClick([=] { reader.reload(); }),
-      ui::button("Top").onClick([=] { reader.byte(0); })),
-    ui::viewer(reader, readme).lineNumbers().framed("rounded", "Document")))
+      ui::button("Top").onClick([=] { reader.home(); })),
+    ui::viewer(reader, readme).fastScroll().lineNumbers().framed("rounded", "Document")))
     | ui::theme(nordTheme())
     | ui::onKey("F10 | Ctrl+C", ui::quit)
     | ui::runApp();

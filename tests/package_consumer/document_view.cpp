@@ -15,8 +15,12 @@ int main() {
   ui::Ref<DocumentView> reader;
   auto first = ui::document(std::make_shared<const std::string>("first\nsecond"));
   auto second = ui::document(std::make_shared<const std::string>("another document"));
-  auto mounted = ui::mount(**scene, ui::viewer(reader, first).lineNumbers().framed("rounded", "Document"));
-  if (!mounted || !first.byteSource() || !reader.seekByte(3)) {
+  auto mounted = ui::mount(
+    **scene,
+    ui::viewer(reader, first).fastScroll().scrollStep(1).pageOverlap(1).lineNumbers().framed("rounded", "Document"));
+  if (!mounted || !first.byteSource() || !reader.scrollRows(0) || !reader.scrollPages(0) || !reader.goHome() ||
+      !reader.goEnd() || !reader.home() || !reader.end() || !reader.scroll(0) || !reader.page(0) ||
+      !reader.seekByte(3)) {
     return 3;
   }
   auto before = reader.status();

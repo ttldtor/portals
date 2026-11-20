@@ -7,6 +7,7 @@
 #include <portals/ui_key_info.hpp>
 
 #include <cmath>
+#include <limits>
 
 namespace portals::ui {
 /** @tparam Child Consuming Description type, including layouts and final custom widgets.
@@ -91,6 +92,40 @@ public:
     });
   }
 
+  /** @param step Positive absolute visual-row step, at most INT64_MAX.
+   * @param keyboard Exact Up/Down modifier. @param wheel Exact wheel modifier.
+   * @return Consuming Viewer recipe enabling fast navigation; invalid values fail atomically at mount.
+   */
+  Description &&fastScroll(std::uint64_t step = 8, key::Modifier keyboard = key::CTRL,
+                           key::Modifier wheel = key::ALT) &&
+    requires std::same_as<T, DocumentView>
+  {
+    ControlSettings patch;
+    auto document = std::make_shared<ControlDocumentSettings>();
+    document->fastScroll = step;
+    document->fastKeyModifier = keyboard;
+    document->fastWheelModifier = wheel;
+    patch.document = std::move(document);
+
+    return std::move(*this).scalarSettings(std::move(patch));
+  }
+
+  /** @param rows Positive visual rows per ordinary arrow/wheel unit, at most INT64_MAX.
+   * @return Consuming Viewer recipe setting the existing key/wheel properties together.
+   */
+  Description &&scrollStep(std::uint64_t rows) &&
+    requires std::same_as<T, DocumentView>
+  {
+    return std::move(*this)
+      .scalarSettings({.wheelStep = static_cast<double>(rows), .keyStep = rows})
+      .setup([rows](ManagedScene &, Node<T> node) -> std::expected<void, ManagedError> {
+        if (rows > static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max())) {
+          return std::unexpected(detail::error(node, TreeError::INVALID_ARGUMENT));
+        }
+        return {};
+      });
+  }
+
   /** @param enabled Wrap complete ordinary graphemes. @return Consuming text viewer recipe. */
   Description &&wrap(bool enabled = true) &&
     requires std::same_as<T, DocumentView>
@@ -108,6 +143,7 @@ public:
       return setDocumentEncoding(scene, node, value);
     });
   }
+
   /** @return Consuming checkbox recipe selecting THREE_STATE without changing its model type.
    * Explicit bool models reject this setting at mount with INVALID_ARGUMENT.
    */
@@ -263,10 +299,10 @@ public:
   }
 
   /** @param cells Exact 64-bit overlap between pages; zero and values above viewport are supported.
-   * @return Consuming native area/bar recipe with a sparse overlap setting.
+   * @return Consuming area/bar/Viewer recipe with a sparse overlap setting.
    */
   Description &&pageOverlap(std::uint64_t cells) &&
-    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar>)
+    requires(std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> || std::same_as<T, DocumentView>)
   {
     return std::move(*this).scalarSettings({.pageOverlap = cells});
   }

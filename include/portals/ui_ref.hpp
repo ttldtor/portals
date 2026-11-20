@@ -15,7 +15,9 @@
 
 #include <typeinfo>
 
-namespace portals { class PopupMenu; }
+namespace portals {
+class PopupMenu;
+}
 
 namespace portals::ui {
 class LogSource;
@@ -74,15 +76,22 @@ std::expected<void, ManagedError> setDocumentModel(const std::shared_ptr<RefTarg
                                                    const DocumentSource &, std::source_location);
 std::expected<void, ManagedError> seekDocument(const std::shared_ptr<RefTarget> &, Node<DocumentView>, std::uint64_t,
                                                bool, std::source_location);
+std::expected<void, ManagedError> navigateDocument(const std::shared_ptr<RefTarget> &,
+                                                   std::shared_ptr<const Node<DocumentView>>,
+                                                   portals::detail::DocumentNavigation, std::int64_t,
+                                                   std::source_location);
 std::expected<DocumentViewStatus, ManagedError> documentStatus(const std::shared_ptr<RefTarget> &, Node<DocumentView>);
 std::expected<void, ManagedError> documentLineNumbers(const std::shared_ptr<RefTarget> &,
                                                       std::shared_ptr<const Node<DocumentView>>, std::optional<bool>,
                                                       std::source_location);
 struct RefAccess;
-std::expected<bool, ManagedError> checkedValue(std::shared_ptr<RefTarget> target, std::shared_ptr<const Node<Switch>> node);
+std::expected<bool, ManagedError> checkedValue(std::shared_ptr<RefTarget> target,
+                                               std::shared_ptr<const Node<Switch>> node);
 std::expected<PropertyUpdate<bool>, ManagedError> setChecked(std::shared_ptr<RefTarget> target,
-  std::shared_ptr<const Node<Switch>> node, bool value, std::source_location origin);
-std::expected<PropertyUpdate<bool>, ManagedError> failedChecked(std::shared_ptr<RefTarget> target, ManagedError failure, std::source_location origin);
+                                                             std::shared_ptr<const Node<Switch>> node, bool value,
+                                                             std::source_location origin);
+std::expected<PropertyUpdate<bool>, ManagedError> failedChecked(std::shared_ptr<RefTarget> target, ManagedError failure,
+                                                                std::source_location origin);
 using DeliveryCallback = std::function<std::expected<void, TreeError>(std::shared_ptr<const void>)>;
 std::expected<Publisher<portals::detail::UiDeliveryEnvelope>, ManagedError>
 connectDelivery(const std::shared_ptr<RefTarget> &target, DeliveryCallback callback, std::source_location origin);
@@ -96,9 +105,9 @@ std::expected<void, ManagedError> gaugeValue(std::shared_ptr<RefTarget> target, 
                                              double value, bool relative, std::source_location origin);
 std::expected<double, ManagedError> numericValue(const std::shared_ptr<RefTarget> &,
                                                  const std::shared_ptr<const Node<Slider>> &);
-std::expected<PropertyUpdate<NumericValue>, ManagedError>
-numericValue(const std::shared_ptr<RefTarget> &, const std::shared_ptr<const Node<Slider>> &, double,
-              std::source_location);
+std::expected<PropertyUpdate<NumericValue>, ManagedError> numericValue(const std::shared_ptr<RefTarget> &,
+                                                                       const std::shared_ptr<const Node<Slider>> &,
+                                                                       double, std::source_location);
 std::expected<double, ManagedError> spinBoxValue(const std::shared_ptr<RefTarget> &,
                                                  const std::shared_ptr<const Node<SpinBox>> &);
 std::expected<SpinBoxResult, ManagedError> spinBoxValue(const std::shared_ptr<RefTarget> &,
@@ -227,8 +236,8 @@ void reportFocusError(const std::shared_ptr<RefTarget> &target, const ManagedErr
  * @return Checked result; dead/foreign owners are never reported through a collector.
  */
 DialogCommandResult dialogCommand(const std::shared_ptr<RefTarget> &target, bool opening, std::source_location origin);
-DialogCommandResult popupCommand(const std::shared_ptr<RefTarget> &target,
-                                 const std::shared_ptr<RefTarget> &anchor, bool opening, std::source_location origin);
+DialogCommandResult popupCommand(const std::shared_ptr<RefTarget> &target, const std::shared_ptr<RefTarget> &anchor,
+                                 bool opening, std::source_location origin);
 std::expected<bool, ManagedError> popupOpened(const std::shared_ptr<RefTarget> &target);
 
 } // namespace detail
@@ -872,6 +881,7 @@ public:
     auto node = this->slot_ ? std::shared_ptr<const Node<SpinBox>>(this->slot_, &this->slot_->node) : nullptr;
     return detail::spinBoxEditor(target(), std::move(node));
   }
+
   /** @param delta Finite amount added to the current value; nonfinite/out-of-range results reject without mutation.
    * @param origin Public command site retained on failure.
    * @return Checked programmatic change, automatically collected on failure; unchanged results request no redraw.
@@ -1214,6 +1224,125 @@ public:
     return result.has_value();
   }
 
+  /** @param rows Signed visual rows; zero is a no-op.
+   * @param origin Command site. @return Checked atomic admission without I/O or automatic reporting.
+   */
+  std::expected<void, ManagedError> scrollRows(std::int64_t rows,
+                                               std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return detail::navigateDocument(target(), std::move(node), portals::detail::DocumentNavigation::ROWS, rows, origin);
+  }
+
+  /** @param rows Signed visual rows; zero is a no-op.
+   * @param origin Command site. @return Admission success; one rejection enters the existing collector once.
+   */
+  bool scroll(std::int64_t rows, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    const auto result =
+      detail::navigateDocument(observation, std::move(node), portals::detail::DocumentNavigation::ROWS, rows, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @param pages Signed pages resolved from current arranged body; zero is a no-op.
+   * @param origin Command site. @return Checked atomic admission without I/O or automatic reporting.
+   */
+  std::expected<void, ManagedError> scrollPages(std::int64_t pages,
+                                                std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return detail::navigateDocument(target(), std::move(node), portals::detail::DocumentNavigation::PAGES, pages,
+                                    origin);
+  }
+
+  /** @param pages Signed pages resolved from current arranged body; zero is a no-op.
+   * @param origin Command site. @return Admission success; one rejection enters the existing collector once.
+   */
+  bool page(std::int64_t pages, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    const auto result =
+      detail::navigateDocument(observation, std::move(node), portals::detail::DocumentNavigation::PAGES, pages, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @brief Admit a one-shot boundary navigation command.
+   * @param origin Command site. @return Checked atomic admission without I/O or automatic reporting.
+   */
+  std::expected<void, ManagedError> goHome(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return detail::navigateDocument(target(), std::move(node), portals::detail::DocumentNavigation::HOME, 0, origin);
+  }
+
+  /** @brief Admit a one-shot boundary navigation command.
+   * @param origin Command site. @return Admission success; one rejection enters the existing collector once.
+   */
+  bool home(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    const auto result =
+      detail::navigateDocument(observation, std::move(node), portals::detail::DocumentNavigation::HOME, 0, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @brief Admit a one-shot boundary navigation command.
+   * @param origin Command site. @return Checked atomic admission without I/O or automatic reporting.
+   */
+  std::expected<void, ManagedError> goEnd(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+
+    return detail::navigateDocument(target(), std::move(node), portals::detail::DocumentNavigation::END, 0, origin);
+  }
+
+  /** @brief Admit a one-shot boundary navigation command.
+   * @param origin Command site. @return Admission success; one rejection enters the existing collector once.
+   */
+  bool end(std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    auto node = this->slot_ ? std::shared_ptr<const Node<T>>(this->slot_, &this->slot_->node) : nullptr;
+    const auto result =
+      detail::navigateDocument(observation, std::move(node), portals::detail::DocumentNavigation::END, 0, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
   /** @param enabled Show proven logical line numbers; defaults remain off.
    * @param origin Original command site.
    * @return Checked deferred reflow, preserving byte anchor and pending relative input; no source I/O.
@@ -1281,6 +1410,7 @@ public:
     }
     return *result;
   }
+
   /** @param metrics Exact standalone extent and viewport.
    * @param origin Command site retained by the scene collector.
    * @return Checked metrics command; an area projection is not a metrics writer.
@@ -1426,7 +1556,7 @@ public:
    * @return Checked dismissal; a closed layer is a no-op and admitted callbacks never replay.
    */
   DialogCommandResult dismiss(std::source_location origin = std::source_location::current()) const
-    requires (std::same_as<T, Dialog> || std::same_as<T, PopupMenu>)
+    requires(std::same_as<T, Dialog> || std::same_as<T, PopupMenu>)
   {
     if constexpr (std::same_as<T, PopupMenu>) {
       return detail::popupCommand(target(), {}, false, origin);
@@ -1449,7 +1579,7 @@ public:
 
   /** @return Effective activation, or exact affinity/lifetime/identity failure without reporting. */
   std::expected<bool, ManagedError> opened() const
-    requires (std::same_as<T, Dialog> || std::same_as<T, PopupMenu>)
+    requires(std::same_as<T, Dialog> || std::same_as<T, PopupMenu>)
   {
     if constexpr (std::same_as<T, PopupMenu>) {
       return detail::popupOpened(target());
