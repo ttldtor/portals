@@ -807,8 +807,12 @@ private:
         if (credit) {
           auto text = GraphemeText::from(CAPTION, state->width, {CAPTION.size(), 1, CAPTION.size(), CAPTION.size()});
           if (text) {
-            state->errorCaption = std::make_unique<DocumentErrorCaption>(
-              DocumentErrorCaption{std::move(*credit), std::move(budget), std::move(*text)});
+            auto caption = std::make_unique<DocumentErrorCaption>(
+              DocumentErrorCaption{{}, std::move(budget), std::move(*text)});
+
+            // Keep the reservation local until all throwing text moves have completed.
+            caption->credit = std::move(*credit);
+            state->errorCaption = std::move(caption);
           }
         }
       } catch (...) {
