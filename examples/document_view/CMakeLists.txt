@@ -12,3 +12,12 @@ portals_enable_warnings(portals_document_files_example)
 if(MSVC)
   target_sources(portals_document_files_example PRIVATE windows-utf8.manifest)
 endif()
+
+add_executable(portals_document_highlight_example highlight.cpp)
+target_link_libraries(portals_document_highlight_example PRIVATE portals::core)
+portals_enable_warnings(portals_document_highlight_example)
+add_custom_command(TARGET portals_document_highlight_example POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    "${CMAKE_CURRENT_SOURCE_DIR}/orders.sql" "${CMAKE_CURRENT_SOURCE_DIR}/notes.md"
+    "$<TARGET_FILE_DIR:portals_document_highlight_example>"
+  VERBATIM)

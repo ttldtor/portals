@@ -114,6 +114,29 @@ public:
     return std::move(*this).scalarSettings(std::move(patch));
   }
 
+  /** @param value Lexical profile, prepared on workers without blocking the first plain frame.
+   * @return Consuming viewer recipe; PLAIN disables syntax roles.
+   */
+  Description &&language(DocumentLanguage value) &&
+    requires std::same_as<T, DocumentView>
+  {
+    ControlSettings patch;
+    auto document = std::make_shared<ControlDocumentSettings>();
+    document->language = value;
+    patch.document = std::move(document);
+
+    return std::move(*this).scalarSettings(std::move(patch));
+  }
+
+  /** @param name Case-insensitive SQL/PostgreSQL, MySQL, Markdown/MD or plain profile name.
+   * @return Consuming viewer recipe; unknown names select plain text.
+   */
+  Description &&language(std::string_view name) &&
+    requires std::same_as<T, DocumentView>
+  {
+    return std::move(*this).language(documentLanguageFromName(name));
+  }
+
   /** @param enabled Show proven logical line numbers. @return Consuming text viewer recipe. */
   Description &&lineNumbers(bool enabled = true) &&
     requires std::same_as<T, DocumentView>

@@ -4,6 +4,7 @@
 
 #include <portals/document_encoding.hpp>
 #include <portals/document_hex.hpp>
+#include <portals/document_highlight_types.hpp>
 #include <portals/document_source.hpp>
 #include <portals/input.hpp>
 #include <portals/scroll_controls.hpp>
@@ -59,6 +60,8 @@ struct DocumentViewConfig {
   DocumentHexOptions hex{};                      ///< Raw-byte row options, used only by HEX.
   bool lineNumbers{};                            ///< Show proven logical line numbers in a fixed gutter.
   std::optional<DocumentFastScroll> fastScroll;  ///< Absent keeps modified scrolling disabled.
+  DocumentLanguage language{
+    DocumentLanguage::PLAIN}; ///< Optional source highlighting; plain allocates no lexical cache.
 };
 
 /** @brief Owning scalar observation; no source I/O or preparation is performed by status commands. */
@@ -77,6 +80,9 @@ struct DocumentViewStatus {
   bool waiting{};            ///< Provider returned no bytes without definitive EOF; explicit refresh resumes it.
   bool finalEnd{};           ///< Latest worker reached definitive EOF.
   bool fragmentedCluster{};  ///< Grapheme continuation used when a cluster or bounded context cannot be proven locally.
+  DocumentLanguage language{DocumentLanguage::PLAIN}; ///< Active lexical profile retained across HEX projection.
+  DocumentSyntaxState highlighting{DocumentSyntaxState::DISABLED}; ///< Proven state of displayed syntax roles.
+  std::optional<std::uint64_t> highlightErrorOffset; ///< Original byte offset of a lexical limitation, if reported.
 };
 
 /** @brief Read-only retained document viewport; source I/O, decoding and layout run on application workers.
@@ -125,6 +131,7 @@ std::expected<void, ManagedError> setDocumentMode(ManagedScene &, Node<DocumentV
 std::expected<void, ManagedError> setDocumentHexOptions(ManagedScene &, Node<DocumentView>, DocumentHexOptions);
 std::expected<void, ManagedError> setDocumentLineNumbers(ManagedScene &, Node<DocumentView>, bool);
 std::expected<void, ManagedError> setDocumentWrap(ManagedScene &, Node<DocumentView>, bool);
+std::expected<void, ManagedError> setDocumentLanguage(ManagedScene &, Node<DocumentView>, DocumentLanguage);
 std::expected<void, ManagedError> setDocumentEncoding(ManagedScene &, Node<DocumentView>, DocumentEncoding);
 /// @endcond
 } // namespace portals

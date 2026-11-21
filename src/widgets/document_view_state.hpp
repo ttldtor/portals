@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
+#include "document_view_highlight.hpp"
 #include "scroll_controls_state.hpp"
 #include <array>
 #include <limits>
@@ -49,12 +50,19 @@ inline std::expected<HexRowOptions, HexError> documentHexRowOptions(const Docume
   return selected;
 }
 
-// One checked allowance is shared by job/frame admission and peak overlap.
+struct DocumentPreparationStorage {
+  std::size_t hexRows{};
+  std::size_t textMaps{};
+  std::size_t replayBytes{};
+  bool frame{};
+};
+
+// One calculator keeps job/frame admission and peak overlap consistent.
 // Separate gutter text has its own vector/object/cluster capacity even when
 // only a narrow clipped prefix is visible in the actual viewport.
-inline std::expected<std::size_t, SourceError> documentPreparationBytes(CellSize viewport,
-                                                                        const DocumentViewConfig &config,
-                                                                        std::size_t retainedHexRows = 0) noexcept {
+inline std::expected<std::size_t, SourceError>
+documentPreparationBytes(CellSize viewport, const DocumentViewConfig &config,
+                         DocumentPreparationStorage storage = {}) noexcept {
   constexpr auto MAX = std::numeric_limits<std::size_t>::max();
   if (viewport.width <= 0 || viewport.height <= 0) {
     return std::unexpected(SourceError::PAGE_TOO_LARGE);
@@ -86,7 +94,7 @@ inline std::expected<std::size_t, SourceError> documentPreparationBytes(CellSize
     if (!include(*columns, 2) || !include(options->bytesPerRow, sizeof(HexByteCell) + sizeof(std::byte)) ||
         !include(height, options->bytesPerRow + DOCUMENT_HEX_RAW_ROW_BYTES) ||
         !include(height, sizeof(std::shared_ptr<const void>)) ||
-        !include(retainedHexRows, sizeof(std::shared_ptr<const void>)) ||
+        !include(storage.hexRows, sizeof(std::shared_ptr<const void>)) ||
         !include(preparedCells, DOCUMENT_PREPARED_CELL_BYTES)) {
       return std::unexpected(SourceError::PAGE_TOO_LARGE);
     }
@@ -97,6 +105,22 @@ inline std::expected<std::size_t, SourceError> documentPreparationBytes(CellSize
       !include(height, sizeof(std::uint64_t) * 2) ||
       (config.mode == DocumentViewMode::TEXT && config.lineNumbers && !include(height, GUTTER_ROW_BYTES))) {
     return std::unexpected(SourceError::PAGE_TOO_LARGE);
+  }
+  if (config.mode == DocumentViewMode::TEXT && (config.language != DocumentLanguage::PLAIN || storage.replayBytes)) {
+    if (storage.frame) {
+      if (config.language != DocumentLanguage::PLAIN && (!include(preparedCells, sizeof(DocumentTextRun)) ||
+                                                         !include(height, sizeof(std::vector<DocumentTextRun>)))) {
+        return std::unexpected(SourceError::PAGE_TOO_LARGE);
+      }
+    } else {
+      if (height == MAX || width > MAX / (height + 1) || !include(1, sizeof(DocumentHighlightScan)) ||
+          !include(std::max(storage.textMaps, width * (height + 1)), sizeof(DocumentTextMap)) ||
+          (storage.replayBytes &&
+           (!include(std::max(storage.textMaps, width * (height + 1)), sizeof(DocumentTextMap)) ||
+            !include(storage.replayBytes, 2)))) {
+        return std::unexpected(SourceError::PAGE_TOO_LARGE);
+      }
+    }
   }
   return bytes;
 }
@@ -192,6 +216,7 @@ struct DocumentScan {
   std::shared_ptr<const SourceCredit> reservation; // Outlives every copied/published scanner allocation.
   DocumentMetadata metadata;
   std::shared_ptr<DocumentHexScan> hex;
+  std::shared_ptr<DocumentHighlightScan> highlight;
   DocumentDecoderOptions decoderOptions;
   std::int32_t layoutWidth{};
   std::uint64_t requestedAnchor{};
@@ -251,6 +276,7 @@ struct DocumentPreparedFrame {
   std::optional<std::vector<GraphemeText>> gutters;
   std::int32_t gutterCells{};
   std::unique_ptr<DocumentHexFrame> hex;
+  std::unique_ptr<const DocumentTextFrame> text;
   std::vector<std::uint64_t> anchors = std::vector<std::uint64_t>(0);
   std::unique_ptr<GraphemeText> footer;
   CellSize viewport;
@@ -321,6 +347,11 @@ struct DocumentViewAccess {
   }
 };
 
+enum class DocumentPreparationKind {
+  LAYOUT,
+  HIGHLIGHT
+};
+
 struct DocumentPrepareIntent {
   DocumentViewConfig config;
   WidthPolicy width;
@@ -332,6 +363,9 @@ struct DocumentPrepareIntent {
   bool resume{};
   std::optional<DocumentLayoutCheckpoint> seed;
   std::size_t retainedHexRows{};
+  std::size_t replayBytes{};
+  std::size_t retainedTextMaps{};
+  DocumentPreparationKind kind{DocumentPreparationKind::LAYOUT};
 };
 
 struct DocumentPreparation {
@@ -342,6 +376,10 @@ struct DocumentPreparation {
   std::uint64_t generation{};
   bool continueWork{};
   bool providerWaiting{};
+  DocumentPreparationKind kind{DocumentPreparationKind::LAYOUT};
+  DocumentSyntaxState syntax{DocumentSyntaxState::DISABLED};
+  std::optional<std::uint64_t> syntaxErrorOffset;
+  std::shared_ptr<const DocumentPreparedFrame> baseFrame;
 };
 
 ScrollAreaOptions documentScrollOptions();
@@ -350,6 +388,12 @@ std::shared_ptr<const DocumentPreparation> prepareHexDocument(std::shared_ptr<By
                                                               std::shared_ptr<const DocumentScan> previous,
                                                               std::uint64_t generation, SourceCredit credit,
                                                               std::stop_token stop);
+
+std::shared_ptr<const DocumentPreparation> prepareDocumentHighlight(std::shared_ptr<ByteDocumentSource> source,
+                                                                    const DocumentPrepareIntent &intent,
+                                                                    std::shared_ptr<const DocumentScan> previous,
+                                                                    std::uint64_t generation, SourceCredit credit,
+                                                                    std::stop_token stop);
 
 // Run only on a worker. All capacity is precharged by the job before calling.
 std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteDocumentSource> source,

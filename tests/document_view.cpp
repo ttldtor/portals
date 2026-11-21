@@ -90,7 +90,13 @@ struct Fixture {
   std::shared_ptr<const detail::DocumentPreparation> run(std::shared_ptr<const detail::DocumentScan> previous = {},
                                                          std::stop_token stop = {}) {
     intent.retainedHexRows = previous && previous->hex ? previous->hex->rawRows.size() : 0;
-    const auto amount = take(detail::documentPreparationBytes(intent.viewport, intent.config, intent.retainedHexRows));
+    intent.retainedTextMaps = previous && previous->highlight ? previous->highlight->maxMaps : 0;
+    intent.replayBytes = !provider->seekable && intent.config.language != DocumentLanguage::PLAIN
+                           ? 8 * intent.config.maxFrameBytes + std::min(source->maxPageBytes(), intent.config.workBytes)
+                           : 0;
+    const auto amount = take(detail::documentPreparationBytes(
+      intent.viewport, intent.config,
+      {.hexRows = intent.retainedHexRows, .textMaps = intent.retainedTextMaps, .replayBytes = intent.replayBytes}));
     auto credit = take(budget->reserve({amount, 0, 1, 0}));
     std::shared_ptr<const detail::DocumentPreparation> result;
     std::thread worker([&] {
@@ -113,6 +119,10 @@ struct Fixture {
         return result;
       }
       previous = result->scan;
+      if (result->frame && result->frame->status.highlighting == DocumentSyntaxState::PENDING && previous->highlight &&
+          !previous->highlight->sequential) {
+        intent.kind = detail::DocumentPreparationKind::HIGHLIGHT;
+      }
     }
     FAIL("bounded test turn limit reached");
     return result;
@@ -1293,7 +1303,8 @@ TEST_CASE("HEX accounting charges only bounded prepared columns and preserves su
   REQUIRE_FALSE(tooManyCells);
   CHECK(tooManyCells.error() == SourceError::PAGE_TOO_LARGE);
   config.maxFrameCells = 16384;
-  const auto overflow = detail::documentPreparationBytes({190, 50}, config, std::numeric_limits<std::size_t>::max());
+  const auto overflow =
+    detail::documentPreparationBytes({190, 50}, config, {.hexRows = std::numeric_limits<std::size_t>::max()});
   REQUIRE_FALSE(overflow);
   CHECK(overflow.error() == SourceError::PAGE_TOO_LARGE);
   config.hex = {.bytesPerRow = MAX_HEX_ROW_BYTES, .autoFit = true};
@@ -1346,4 +1357,76 @@ TEST_CASE("HEX horizontal and auto-fit maps and run capacities follow prepared r
   const auto payload = f.finish();
   REQUIRE(payload->error);
   CHECK(payload->error->code == SourceError::PAGE_TOO_LARGE);
+}
+
+TEST_CASE("SQL syntax follows a plain first frame and preserves multiline context on cold seek") {
+  Fixture f("/* opening\ninside comment\nclosing */\nSELECT 42, 'value';\n", 7);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.viewport = {40, 2};
+  f.intent.anchor = 11;
+  std::shared_ptr<const detail::DocumentScan> scan;
+  std::shared_ptr<const detail::DocumentPreparedFrame> plain;
+  for (std::size_t turn = 0; turn < 100 && !plain; ++turn) {
+    f.intent.resume = scan != nullptr;
+    const auto result = f.run(scan);
+    REQUIRE_FALSE(result->error);
+    scan = result->scan;
+    plain = result->frame;
+  }
+  REQUIRE(plain);
+  CHECK_FALSE(plain->text);
+  CHECK(plain->status.highlighting == DocumentSyntaxState::PENDING);
+  f.intent.kind = detail::DocumentPreparationKind::HIGHLIGHT;
+  const auto colored = f.finish(100, scan);
+  REQUIRE_FALSE(colored->error);
+  REQUIRE(colored->frame);
+  REQUIRE(colored->frame->text);
+  CHECK(colored->frame->status.highlighting == DocumentSyntaxState::READY);
+  REQUIRE_FALSE(colored->frame->text->rows[0].empty());
+  CHECK(colored->frame->text->rows[0][0].role == SemanticRole::COMMENT);
+  CHECK(colored->frame->rows[0].bytes() == plain->rows[0].bytes());
+}
+
+TEST_CASE("Markdown syntax includes headings and SQL fenced source") {
+  Fixture f("# Guide\n\n```sql\nSELECT 42;\n```\n", 1);
+  f.intent.config.language = DocumentLanguage::MARKDOWN_SOURCE;
+  f.intent.viewport = {40, 8};
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->text);
+  CHECK(result->frame->status.highlighting == DocumentSyntaxState::READY);
+  REQUIRE_FALSE(result->frame->text->rows[0].empty());
+  CHECK(result->frame->text->rows[0][0].role == SemanticRole::HEADING);
+  REQUIRE_FALSE(result->frame->text->rows[3].empty());
+  CHECK(result->frame->text->rows[3][0].role == SemanticRole::KEYWORD);
+}
+
+TEST_CASE("UTF16 syntax maps original bytes to a combining grapheme and escaped control") {
+  std::string text("\xff\xfe", 2);
+  for (const auto scalar : std::u16string_view(u"SELECT 'a\u0301\x001b';\n")) {
+    text.push_back(static_cast<char>(scalar & 255));
+    text.push_back(static_cast<char>(scalar >> 8));
+  }
+  Fixture f(text, 1);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.config.decoder.explicitEncoding = DocumentEncoding::UTF16LE;
+  f.intent.viewport = {40, 4};
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->text);
+  CHECK(result->frame->status.highlighting == DocumentSyntaxState::READY);
+  const auto &row = result->frame->rows[0];
+  const auto &runs = result->frame->text->rows[0];
+  REQUIRE_FALSE(runs.empty());
+  CHECK(runs[0].role == SemanticRole::KEYWORD);
+  CHECK(row.bytes().find("a\xcc\x81") != std::string_view::npos);
+  CHECK(row.bytes().find('\x1b') == std::string_view::npos);
+  bool stringFound{};
+  for (const auto &run : runs) {
+    stringFound = stringFound || run.role == SemanticRole::STRING;
+    CHECK(run.first + run.count <= row.graphemes().size());
+  }
+  CHECK(stringFound);
 }

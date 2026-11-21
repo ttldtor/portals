@@ -355,7 +355,8 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"hex.groupSize", Kind::UNSIGNED_INTEGER, 2, {}},
    {"hex.uppercase", Kind::BOOLEAN, 2, {}},
    {"hex.showAscii", Kind::BOOLEAN, 2, {}},
-   {"hex.autoFit", Kind::BOOLEAN, 2, {}}}};
+   {"hex.autoFit", Kind::BOOLEAN, 2, {}},
+   {"language", Kind::LITERAL_STRING, 1, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -388,7 +389,7 @@ constexpr Mask SCROLL_COMMON_MASK =
   SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48, 231, 232, 233);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
 constexpr Mask DOCUMENT_VIEW_MASK =
-  SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276);
+  SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
 constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 225, 226, 227, 228, 229);
 constexpr Mask OVERLAY_MASK = SIZE_MASK | propertyMask(22, 23, 24, 25, 56, 57);
@@ -485,9 +486,10 @@ constexpr auto SCROLL_AREA_SCHEMA = withFrame(
                  PROPERTIES[241], PROPERTIES[242], PROPERTIES[243], PROPERTIES[244], PROPERTIES[245], PROPERTIES[246],
                  PROPERTIES[247], PROPERTIES[248]}));
 constexpr auto DOCUMENT_VIEW_SCHEMA = [] {
-  std::array<ControlPropertyDescriptor, SCROLL_AREA_SCHEMA.size() + 13> schema{};
+  constexpr auto DOCUMENT_PROPERTIES = PROPERTIES.size() - 264;
+  std::array<ControlPropertyDescriptor, SCROLL_AREA_SCHEMA.size() + DOCUMENT_PROPERTIES> schema{};
   std::ranges::copy(SCROLL_AREA_SCHEMA, schema.begin());
-  for (std::size_t index = 0; index < 13; ++index) {
+  for (std::size_t index = 0; index < DOCUMENT_PROPERTIES; ++index) {
     schema[SCROLL_AREA_SCHEMA.size() + index] = PROPERTIES[264 + index];
   }
   return schema;
@@ -1102,7 +1104,8 @@ ControlContextError exceptionError() noexcept {
   X(documentSettings().hexGroupSize, 273)                                                                              \
   X(documentSettings().hexUppercase, 274)                                                                              \
   X(documentSettings().hexShowAscii, 275)                                                                              \
-  X(documentSettings().hexAutoFit, 276)
+  X(documentSettings().hexAutoFit, 276)                                                                                \
+  X(documentSettings().language, 277)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES =
@@ -1223,6 +1226,7 @@ void merge(ControlSettings &target, const ControlSettings &patch) {
     assign(document->lineNumbers, source.lineNumbers, 265);
     assign(document->wrap, source.wrap, 266);
     assign(document->encoding, source.encoding, 267);
+    assign(document->language, source.language, 277);
     assign(document->fastScroll, source.fastScroll, 268);
     assign(document->fastKeyModifier, source.fastKeyModifier, 269);
     assign(document->fastWheelModifier, source.fastWheelModifier, 270);
@@ -1504,6 +1508,7 @@ void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &
     apply(document->lineNumbers, source.lineNumbers);
     apply(document->wrap, source.wrap);
     apply(document->encoding, source.encoding);
+    apply(document->language, source.language);
     apply(document->fastScroll, source.fastScroll);
     apply(document->fastKeyModifier, source.fastKeyModifier);
     apply(document->fastWheelModifier, source.fastWheelModifier);
@@ -1538,6 +1543,7 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
     patch.origins = previous.origins;
 
     const std::array fields{
+      std::pair<std::string_view, bool>{"language", patch.documentSettings().language.has_value()},
       std::pair<std::string_view, bool>{"file", patch.documentSettings().file.has_value()},
       std::pair<std::string_view, bool>{"lineNumbers", patch.documentSettings().lineNumbers.has_value()},
       std::pair<std::string_view, bool>{"wrap", patch.documentSettings().wrap.has_value()},

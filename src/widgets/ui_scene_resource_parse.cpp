@@ -624,7 +624,11 @@ private:
       if (!parsed) {
         return std::unexpected(withProperty(parsed.error(), type, path));
       }
-      if (path == "file") {
+      if (path == "language") {
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        document->language = documentLanguageFromName(value);
+        settings.document = std::move(document);
+      } else if (path == "file") {
         auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
         document->file = std::move(value);
         settings.document = std::move(document);

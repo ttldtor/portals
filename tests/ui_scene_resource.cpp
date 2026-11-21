@@ -7238,3 +7238,33 @@ TEST_CASE("HEX native group respects caller child names and explicit group assig
   CHECK(factories == 0);
   REQUIRE(owner.close());
 }
+
+TEST_CASE("loaded document language supports defaults aliases and plain fallback without source IO") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto owner = ui::scene(R"scene(
+    defaults { DocumentView { language="SQL" } }
+    definitions { Reader=DocumentView { language="md" } }
+    scene { VBox {
+      Reader#markdown { file="missing-not-opened.md" }
+      DocumentView#mysql { file="missing-not-opened.sql" language="MySQL" }
+      DocumentView#plain { file="missing-not-opened.txt" language="unregistered-profile" }
+    } }
+  )scene",
+                         options);
+  const auto markdown = owner.get<DocumentView>("markdown");
+  const auto mysql = owner.get<DocumentView>("mysql");
+  const auto plain = owner.get<DocumentView>("plain");
+  REQUIRE(owner.prepareChecked());
+  auto &app = ui::detail::SceneAccess::application(owner.managed()->get());
+  REQUIRE(app.tree().read(markdown.node(), [](const DocumentView &widget) {
+    CHECK(detail::DocumentViewAccess::state(widget).config.language == DocumentLanguage::MARKDOWN_SOURCE);
+  }));
+  REQUIRE(app.tree().read(mysql.node(), [](const DocumentView &widget) {
+    CHECK(detail::DocumentViewAccess::state(widget).config.language == DocumentLanguage::MYSQL_LEXICAL);
+  }));
+  REQUIRE(app.tree().read(plain.node(), [](const DocumentView &widget) {
+    CHECK(detail::DocumentViewAccess::state(widget).config.language == DocumentLanguage::PLAIN);
+  }));
+  REQUIRE(owner.close());
+}

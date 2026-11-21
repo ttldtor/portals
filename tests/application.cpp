@@ -95,6 +95,49 @@ public:
   }
 };
 
+class RangedTextProbe final : public Widget {
+public:
+  RangedTextProbe() : text_(example::text("prefixTARGETsuffix")) {
+  }
+
+  std::expected<CellSize, TreeError> measure(CellSize available) override {
+    return available;
+  }
+
+  std::expected<void, TreeError> arrange(CellRect area) override {
+    bounds_ = *CellRect::from({0, 0}, area.size());
+    return {};
+  }
+
+  std::expected<void, TreeError> paint(PaintContext &context) override {
+    CellStyle selected;
+    selected.bold = true;
+    const RenderCommand command = TextCommand{{2, 1}, text_, bounds_, selected, 0, 6, 6};
+
+    return context.submit(std::span(&command, 1));
+  }
+
+private:
+  GraphemeText text_;
+  CellRect bounds_ = *CellRect::from({0, 0}, {0, 0});
+};
+
+void rangedTextThroughApplication() {
+  example::ReplayTerminal terminal({}, 5000);
+  auto app = take(Application::create({}, terminal.clock()));
+  take(app->tree().emplace<RangedTextProbe>(app->root()));
+  ApplicationScene scene;
+  const auto result = take(app->run(scene, terminal));
+  check(result.frames == 1);
+
+  test_support::VtOracle oracle(80, 24);
+  oracle.feed(terminal.output);
+  const auto pixels = oracle.snapshot();
+  constexpr std::size_t FIRST = 80 + 2;
+  check(pixels.cells[FIRST].glyph == "T" && pixels.cells[FIRST + 5].glyph == "T");
+  check(pixels.cells[FIRST].style.bold && pixels.cells[FIRST + 6].glyph == " ");
+}
+
 void idleAndUnchanged() {
   example::ReplayTerminal idle({}, 5000);
 
@@ -1018,6 +1061,7 @@ void readyCaptureBridge() {
 int main() {
   try {
     std::cerr << "idleAndUnchanged\n";
+    rangedTextThroughApplication();
     idleAndUnchanged();
     std::cerr << "queueAndDecoder\n";
     queueAndDecoder();

@@ -7,6 +7,16 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Text rendering can borrow a selected grapheme range without copying a whole
+  row for each syntax span. TextCommand and RenderCommand have a changed binary
+  layout; rebuild consumers together with the library.
+
+- DocumentView adds worker-prepared SQL/MySQL and Markdown source highlighting,
+  compact language selection in descriptions, references and loaded scenes, and
+  theme-controlled semantic roles. Cold seeks remain readable while exact lexical
+  context is restored. Syntax caches are optional and bounded; forward-only sources
+  retain accepted bytes within explicit history limits.
+
 - A new document example opens a path from a field or the command line, switches
   between text and hexadecimal modes, and provides help without opening a terminal.
   Native Unicode and extended Windows paths use the example's process manifest.

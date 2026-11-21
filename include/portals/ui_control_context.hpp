@@ -367,6 +367,7 @@ struct ControlRadioInitialSettings {
 
 /** @brief Sparse file-backed document presentation; shared snapshots are immutable. */
 struct ControlDocumentSettings {
+  std::optional<DocumentLanguage> language{};  ///< Lexical profile; plain disables syntax roles.
   std::optional<DocumentViewMode> mode{};      ///< Projection without changing the source.
   std::optional<std::size_t> hexBytesPerRow{}; ///< Raw-byte slots, from 1 through MAX_HEX_ROW_BYTES.
   std::optional<std::size_t> hexGroupSize{};   ///< Group size, from 1 through MAX_HEX_ROW_BYTES.

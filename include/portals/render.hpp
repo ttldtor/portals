@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <span>
 #include <variant>
 
@@ -31,6 +32,10 @@ struct TextCommand {
   CellStyle style{};
   /** @brief Ascending paint order; equal values preserve command input order. */
   std::int32_t z{};
+  /** @brief First selected grapheme; origin places this grapheme, not the complete text. */
+  std::size_t firstGrapheme{};
+  /** @brief Selected count; SIZE_MAX selects the remaining suffix. Invalid ranges reject the frame. */
+  std::size_t graphemeCount{std::numeric_limits<std::size_t>::max()};
 };
 
 /** @brief Fill an owning half-open area with styled one-cell ASCII spaces. */
@@ -73,7 +78,9 @@ enum class RenderErrorKind {
   /** @brief Buffer creation or placement failed; RenderError::buffer_error describes it. */
   BUFFER_ERROR,
   /** @brief Temporary renderer storage could not be allocated or represented. */
-  ALLOCATION_FAILURE
+  ALLOCATION_FAILURE,
+  /** @brief A selected text range exceeds its borrowed grapheme sequence. */
+  INVALID_TEXT_RANGE
 };
 
 /** @brief Owning renderer error, independent of the scene lifetime. */

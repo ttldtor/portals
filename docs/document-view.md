@@ -16,6 +16,66 @@ Build `portals_document_view_example` with `PORTALS_BUILD_EXAMPLES=ON` and run i
 
 `ui::viewer("README.md")` is the shortest file-backed form. Keep a `ui::Ref<DocumentView>` when handlers need to replace its source or change its reading position. `ui::documentFile(path)` owns the UTF-8 path and performs no file I/O during recipe construction. Keep the same descriptor when switching back to its remembered position.
 
+## SQL and Markdown source colors {#document-view-syntax}
+
+Build `portals_document_highlight_example` with `PORTALS_BUILD_EXAMPLES=ON` and run it from its executable directory. The build copies `orders.sql` and `notes.md` beside the executable. Both panes use the ordinary Viewer: Tab changes focus, wheel and PgUp/PgDn navigate, and F10 or Ctrl+C closes the application.
+
+[Complete source](../examples/document_view/highlight.cpp)
+
+\include document_view/highlight.cpp
+
+\htmlonly
+<details><summary>Bundled SQL and Markdown inputs</summary>
+\endhtmlonly
+
+\verbinclude document_view/orders.sql
+
+\verbinclude document_view/notes.md
+
+\htmlonly
+</details>
+\endhtmlonly
+
+@image html document-view-highlight.gif "SQL and Markdown source colors with independent document navigation."
+
+`.language("mysql")`, `.language("sql")` and `.language("markdown")` select bounded lexical profiles. Names are case-insensitive: `postgres`, `postgresql` and `sql` select PostgreSQL lexical rules; `md` aliases `markdown`. An unknown name selects plain text. The typed form accepts `DocumentLanguage`; `.language(DocumentLanguage::PLAIN)` disables syntax colors. HEX remains a raw-byte projection.
+
+The Markdown profile colors source headings, punctuation, code spans and fenced regions, including SQL fences. It does not render Markdown as formatted HTML. The SQL profiles recognize lexical structure, not database schemas or query semantics. MySQL support includes bounded delimiter and SQL-mode handling; unsupported constructs and exhausted lexical policies leave readable text with an explicit syntax status.
+
+Reading, decoding and lexical work run on workers. A cold seek first publishes plain text, then adds exact colors after restoring lexical context from a qualified checkpoint or the source origin. Distant exact highlighting can require substantial cumulative reading. Scrolling can supersede this optional replay. Source size does not determine resident memory: the view retains bounded windows and a fixed checkpoint cache, without a complete line or token index.
+
+### Customize syntax roles
+
+Built-in themes supply foreground colors for syntax roles. `DocumentView` retains its normal background when focused. Override individual roles through PSS; changing a palette repaints existing ranges without reading or lexing the source again.
+
+```css
+DocumentView {
+  role-keyword-foreground: #88c0d0;
+  role-keyword-bold: true;
+  role-string-foreground: #ebcb8b;
+  role-comment-foreground: #81a1c1;
+}
+```
+
+| Role | Source meaning | Built-in theme value |
+| --- | --- | --- |
+| `keyword` | SQL keyword | Accent, bold |
+| `number` | SQL number | Heading color |
+| `string` | SQL literal or Markdown code | Accent |
+| `comment` | SQL comment | Muted |
+| `identifier` | SQL identifier | Foreground |
+| `operator` | SQL punctuation/operator | Foreground |
+| `heading` | Markdown ATX heading | Heading color, bold |
+| `markup` | Markdown delimiters/MySQL client directive | Accent |
+
+Each `role-<name>-` prefix supports `foreground`, `background`, `bold`, `italic` and `underline`. Background overrides are optional. Ordinary text inherits `body`; `gutter` and `position` retain their existing meanings. Disabled syntax uses the theme's muted foreground without adding italic text.
+
+`document.language("md")` collects a rejected command in the scene; `document.setLanguage("md")` returns a checked result. Loaded configuration scenes accept `DocumentView { file="notes.md" language="markdown" }`.
+
+`document.status()` reports `language`, `highlighting` and optional `highlightErrorOffset`. `PENDING` means the displayed text awaits proven lexical context; `READY` means all displayed clusters are classified. `UNSUPPORTED_PROFILE`, `RESOURCE_LIMIT`, `REPLAY_UNAVAILABLE` and `UNAVAILABLE` distinguish syntax limitations from the document's source error. The plain frame remains available when optional syntax preparation fails.
+
+For a forward-only source, select the initial language in the description before mounting. Changing to another non-plain profile after attachment returns a checked unsupported-operation error. Disabling colors preserves accepted buffered bytes. History is bounded: reflow that needs bytes outside retained history is not an arbitrary rewind. A source span exceeding the retained-window budget can return `PAGE_TOO_LARGE` before the next unsafe read; this does not roll back earlier reads of that worker turn or promise automatic recovery of an irreversible source.
+
 ## Choose a file {#document-view-files}
 
 Build `portals_document_files_example` with `PORTALS_BUILD_EXAMPLES=ON`. Enter a path in the field and choose **Open**, or press Ctrl+O. F2 selects text, F3 selects hexadecimal bytes, and F5 refreshes the current source. F10 or Ctrl+C closes the application. Opening a source starts background preparation; the UI stays available.
@@ -150,7 +210,7 @@ The default UTF-8 hint applies after an explicit encoding or a recognized BOM. S
 
 Replacement decoding is the default. Low-level `DocumentViewConfig::decoder` also supports strict decoding; a strict failure reports a typed preparation error. A local seek or fast EOF checks the selected decoded region, including the origin needed to determine its encoding; it does not certify an omitted prefix. Terminal control characters are rendered as visible escapes. Ordinary multi-scalar grapheme clusters, including those crossing page boundaries, are preserved. Local restart uses up to 4 KiB of grapheme precontext, in addition to independent decoder lookbehind. An oversized cluster or unprovable bounded grapheme context (for example, a regional-indicator run longer than 4 KiB) is shown as a visible dotted-circle continuation and sets `fragmentedCluster`. For a leading regional-indicator run, parity remains unproven until a non-regional-indicator resets it, including after a cached near seek. This bounded local projection does not limit logical line length.
 
-The native resource type is `DocumentView`. In the CONFIGURATION grammar its viewer-specific properties are `file` (a literal UTF-8 path), `lineNumbers`, `wrap` and `encoding`, plus `fastScroll`, `fastKeyModifier` and `fastWheelModifier`. A positive `fastScroll` enables the absolute fast step; modifier names `CTRL`, `ALT` and `SHIFT` are case-insensitive. Existing `keyStep` and `wheelStep` together express the `scrollStep` shorthand, and `pageOverlap` sets page overlap. The ordinary size, frame and scrollbar properties use the same semantics as their C++ modifiers. They are not accepted as viewer properties on unrelated controls.
+The native resource type is `DocumentView`. In the CONFIGURATION grammar its viewer-specific properties are `file` (a literal UTF-8 path), `lineNumbers`, `wrap`, `encoding` and `language`, plus `fastScroll`, `fastKeyModifier` and `fastWheelModifier`. A positive `fastScroll` enables the absolute fast step; modifier names `CTRL`, `ALT` and `SHIFT` are case-insensitive. Existing `keyStep` and `wheelStep` together express the `scrollStep` shorthand, and `pageOverlap` sets page overlap. The ordinary size, frame and scrollbar properties use the same semantics as their C++ modifiers. They are not accepted as viewer properties on unrelated controls.
 
 
 [Complete resource program](examples/guide_document_view_resource.cpp)
@@ -163,7 +223,7 @@ The type selector is `DocumentView`. Text, fill and footer use the normal, `:foc
 
 Frame patterns, title decoration, arrows, tracks and individual thumb parts use the complete [frame and scrollbar styling reference](scroll-controls.md#scrollbar-styling-reference). `.framed("rounded", "Document")` supplies a title; the one-argument `.framed("rounded")` selects a pattern, as for other controls.
 
-DocumentView registers three semantic paint parts: `body` for document text,
+DocumentView registers three base paint parts: `body` for document text,
 `gutter` for line numbers, and `position` for the footer. The gutter is visible
 when `.lineNumbers()` is enabled. Their five PSS properties are
 `role-<part>-foreground`, `role-<part>-background`, `role-<part>-bold`,

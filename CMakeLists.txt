@@ -142,8 +142,9 @@ endif()
 target_link_libraries(portals_core PRIVATE portals_utf8proc)
 target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 target_compile_definitions(portals_core PRIVATE UTF8PROC_STATIC)
-target_sources(portals_core PRIVATE src/models/document_source.cpp src/text/document_encoding.cpp src/text/document_hex.cpp
-  src/widgets/document_view.cpp src/widgets/document_view_preparation.cpp src/widgets/document_view_hex.cpp src/widgets/ui_document_view.cpp)
+target_sources(portals_core PRIVATE src/models/document_source.cpp src/text/document_encoding.cpp src/text/document_hex.cpp src/text/document_highlight.cpp
+  src/widgets/document_view.cpp src/widgets/document_view_preparation.cpp src/widgets/document_view_hex.cpp
+  src/widgets/document_view_highlight.cpp src/widgets/ui_document_view.cpp)
 target_sources(portals_core PRIVATE src/models/source_budget.cpp src/models/window_source.cpp
   src/models/log_file.cpp src/models/model_position.cpp src/widgets/external_log_view.cpp
   src/widgets/managed_navigation.cpp)
@@ -1598,6 +1599,13 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_document_encoding)
   add_test(NAME portals.document-encoding COMMAND portals_document_encoding)
   set_tests_properties(portals.document-encoding PROPERTIES TIMEOUT 30)
+
+  add_executable(portals_document_highlight tests/document_highlight.cpp)
+  target_include_directories(portals_document_highlight SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_document_highlight PRIVATE portals::core)
+  portals_enable_warnings(portals_document_highlight)
+  add_test(NAME portals.document-highlight COMMAND portals_document_highlight)
+  set_tests_properties(portals.document-highlight PROPERTIES TIMEOUT 30)
 
   add_executable(portals_document_source tests/document_source.cpp)
   target_include_directories(portals_document_source SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")

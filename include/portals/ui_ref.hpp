@@ -83,6 +83,8 @@ std::expected<void, ManagedError> navigateDocument(const std::shared_ptr<RefTarg
 std::expected<DocumentViewStatus, ManagedError> documentStatus(const std::shared_ptr<RefTarget> &, Node<DocumentView>);
 std::expected<void, ManagedError> documentMode(const std::shared_ptr<RefTarget> &, Node<DocumentView>, DocumentViewMode,
                                                std::source_location);
+std::expected<void, ManagedError> documentLanguage(const std::shared_ptr<RefTarget> &, Node<DocumentView>,
+                                                   DocumentLanguage, std::source_location);
 std::expected<void, ManagedError> documentHexOptions(const std::shared_ptr<RefTarget> &, Node<DocumentView>,
                                                      DocumentHexOptions, std::source_location);
 std::expected<void, ManagedError> documentLineNumbers(const std::shared_ptr<RefTarget> &,
@@ -1397,6 +1399,52 @@ public:
       detail::reportEventError(observation, result.error(), origin);
     }
     return result.has_value();
+  }
+
+  /** @param value New lexical profile. @param origin Command site.
+   * @return Checked deferred change, preserving the current view on rejection.
+   * A consumed forward-only source cannot enable a different lexical profile without replay.
+   */
+  std::expected<void, ManagedError> setLanguage(DocumentLanguage value,
+                                                std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return detail::documentLanguage(target(), this->node(), value, origin);
+  }
+
+  /** @param name Case-insensitive profile name; unknown names select plain. @param origin Command site.
+   * @return Checked deferred profile change, without automatic error collection.
+   */
+  std::expected<void, ManagedError> setLanguage(std::string_view name,
+                                                std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return setLanguage(documentLanguageFromName(name), origin);
+  }
+
+  /** @param value New lexical profile. @param origin Command site.
+   * @return Admission result; rejection is collected once by the scene.
+   */
+  bool language(DocumentLanguage value, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    const auto result = detail::documentLanguage(observation, this->node(), value, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @param name Case-insensitive profile name; unknown names select plain. @param origin Command site.
+   * @return Admission result, collecting one error on rejection.
+   */
+  bool language(std::string_view name, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return language(documentLanguageFromName(name), origin);
   }
 
   /** @param enabled Show proven logical line numbers; defaults remain off.

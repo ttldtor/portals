@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "key_help_state.hpp"
 #include "ui_scene_resource_internal.hpp"
-#include <portals/ui_switch.hpp>
 #include <portals/ui_combo_box.hpp>
-#include <portals/ui_log_view.hpp>
 #include <portals/ui_document_view.hpp>
+#include <portals/ui_log_view.hpp>
 #include <portals/ui_radio_group.hpp>
+#include <portals/ui_switch.hpp>
 
 #include <algorithm>
 #include <array>
@@ -100,9 +100,12 @@ SceneResourceRegistry::SceneResourceRegistry() {
   entries_.back().text = false;
   entries_.back().gap = true;
 
-  (void)add<StatusBar>("StatusBar", [](SceneResourceArguments arguments) {
-    return statusBar(detail::controlLinearOptions(arguments.settings, LinearOptions{.gap = arguments.gap}));
-  }, true);
+  (void)add<StatusBar>(
+    "StatusBar",
+    [](SceneResourceArguments arguments) {
+      return statusBar(detail::controlLinearOptions(arguments.settings, LinearOptions{.gap = arguments.gap}));
+    },
+    true);
   entries_.back().text = false;
   entries_.back().gap = true;
 
@@ -271,6 +274,7 @@ std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneRes
       const auto added = registry.add<DocumentView>(name, [](SceneResourceArguments arguments) {
         const auto &document = arguments.settings.documentSettings();
         DocumentViewConfig config;
+        config.language = document.language.value_or(config.language);
         config.lineNumbers = document.lineNumbers.value_or(config.lineNumbers);
         config.wrap = document.wrap.value_or(config.wrap);
         config.decoder.explicitEncoding = document.encoding.value_or(config.decoder.explicitEncoding);

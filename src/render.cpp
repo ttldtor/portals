@@ -4,6 +4,7 @@
 #include <portals/render.hpp>
 
 #include <algorithm>
+#include <limits>
 #include <new>
 #include <numeric>
 #include <stdexcept>
@@ -26,6 +27,18 @@ CellRect fillArea(const FillCommand &command, CellRect surface) noexcept {
   return command.area.intersection(command.clip).intersection(surface);
 }
 
+// Resolve index-only ranges before any allocation or grapheme access.
+bool textRange(const TextCommand &command, std::size_t &count) noexcept {
+  const auto size = command.text.graphemes().size();
+  if (command.firstGrapheme > size) {
+    return false;
+  }
+  const auto available = size - command.firstGrapheme;
+  count = command.graphemeCount == std::numeric_limits<std::size_t>::max() ? available : command.graphemeCount;
+
+  return count <= available;
+}
+
 // Validate the entire scene before allocation or painting. Offscreen text still
 // participates in policy/byte/work limits; clipping is not a way around resource caps.
 std::expected<void, RenderError> preflight(std::span<const RenderCommand> commands, CellRect surface,
@@ -43,11 +56,18 @@ std::expected<void, RenderError> preflight(std::span<const RenderCommand> comman
         return std::unexpected(RenderError{RenderErrorKind::POLICY_MISMATCH});
       }
 
-      if (!consume(run->text.bytes().size(), limits.max_text_bytes, text_bytes)) {
+      std::size_t count{};
+      if (!textRange(*run, count)) {
+        return std::unexpected(RenderError{RenderErrorKind::INVALID_TEXT_RANGE});
+      }
+      const auto selected = run->text.graphemes().subspan(run->firstGrapheme, count);
+      const auto bytes = selected.empty() ? 0 : selected.back().byte_end - selected.front().byte_begin;
+
+      if (!consume(bytes, limits.max_text_bytes, text_bytes)) {
         return std::unexpected(RenderError{RenderErrorKind::TEXT_BYTE_LIMIT});
       }
 
-      if (!consume(run->text.graphemes().size(), limits.max_work, work)) {
+      if (!consume(count, limits.max_work, work)) {
         return std::unexpected(RenderError{RenderErrorKind::WORK_LIMIT});
       }
     } else {
@@ -85,7 +105,12 @@ std::expected<void, CellBufferError> paintText(CellBuffer &buffer, const TextCom
   std::int64_t x = command.origin.x;
   const auto graphemes = command.text.graphemes();
 
-  for (std::size_t i = 0; i < graphemes.size(); ++i) {
+  const auto count = command.graphemeCount == std::numeric_limits<std::size_t>::max()
+                       ? graphemes.size() - command.firstGrapheme
+                       : command.graphemeCount;
+  const auto last = command.firstGrapheme + count;
+
+  for (auto i = command.firstGrapheme; i < last; ++i) {
     if (x >= clip.right()) {
       break;
     }
