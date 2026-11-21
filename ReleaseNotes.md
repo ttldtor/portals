@@ -7,6 +7,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- A new document example opens a path from a field or the command line, switches
+  between text and hexadecimal modes, and provides help without opening a terminal.
+  Native Unicode and extended Windows paths use the example's process manifest.
+  DocumentView shows recoverable source read errors inside its frame; the caption
+  keeps bounded, optional storage and preserves the original typed diagnostic.
+
 - DocumentView End prepares long wrapped ASCII spans faster and continues bounded
   intermediate work without waiting for another layout or paint. The final page,
   Unicode boundaries, cancellation and shared memory limits are preserved; very

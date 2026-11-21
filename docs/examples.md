@@ -34,6 +34,7 @@ The categories describe the learning path; the source directories remain stable.
 | Basics | [bounded log](log-view.md), `portals_log_view_example` | Complete in-memory text batches, bounded newest-record retention, grapheme wrapping and follow-tail pause/resume. No file or worker integration. |
 | Basics | [file-backed log](log-view.md#log-view-file), `portals_file_log_example` | Open `application.log`, prepare a bounded window on workers and follow appended records. |
 | Basics | [document viewer](document-view.md), `portals_document_view_example` | Read and switch text sources with bounded background windows, line numbers and explicit refresh. |
+| Basics | [Choose a document](document-view.md#document-view-files), `portals_document_files_example` | A path field, Open, a positional CLI path, text/hex modes and recovery from read errors. |
 | Basics | [hex document viewer](document-view.md#document-view-hex), `portals_document_hex_example` | Switch the same byte source between text and hexadecimal views, with bounded worker preparation and styled byte classes. |
 | Basics | [resource form](scene-loading-guide.md#a-complete-form), `portals_scene_resource` | Runtime scene text, named references and existing managed actions; see [scene loading](scene-loading-guide.md). |
 | Basics | [literal search](find-bar.md), `portals_find_bar_example` | A bounded in-memory document, exact case-sensitive grapheme-aligned matches and wrapping navigation; [resource version](find-bar.md#find-bar-resource). No file access or persistence. |
