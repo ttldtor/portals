@@ -229,6 +229,8 @@ public:
     CellPoint origin;
     CellRect clip;
     CellStyle style;
+    std::size_t first{};
+    std::size_t count{};
   };
 
   std::vector<Text> texts;
@@ -236,7 +238,8 @@ public:
   std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
     for (const auto &command : commands) {
       if (const auto *text = std::get_if<TextCommand>(&command)) {
-        texts.push_back({std::string(text->text.bytes()), text->origin, text->clip, text->style});
+        texts.push_back({std::string(text->text.bytes()), text->origin, text->clip, text->style, text->firstGrapheme,
+                         text->graphemeCount});
       }
     }
     return {};
@@ -3072,4 +3075,277 @@ TEST_CASE("failed error caption admission preserves the original source error") 
   f.settle();
   CHECK_FALSE(take(f.reference.status()).error);
   REQUIRE(f.frame());
+}
+
+TEST_CASE("syntax uses workers and can be disabled without losing an accepted stream page") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  for (unsigned row = 0; row < 80; ++row) {
+    provider->text += "SELECT 42; -- note\n";
+  }
+  Fixture f(ui::document(provider), {.language = DocumentLanguage::POSTGRESQL_LEXICAL});
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK_FALSE(provider->uiOperation.load());
+  CHECK(f.frame()->status.highlighting == DocumentSyntaxState::READY);
+  const auto first = std::string(f.frame()->rows[0].bytes());
+  const auto bytes = provider->bytesRead.load();
+  take(f.reference.setLanguage(DocumentLanguage::PLAIN));
+  f.settle();
+  REQUIRE(f.frame());
+  const auto status = take(f.reference.status());
+  CHECK_FALSE(status.error);
+  CHECK(status.highlighting == DocumentSyntaxState::DISABLED);
+  CHECK(f.frame()->rows[0].bytes() == first);
+  CHECK(provider->bytesRead.load() == bytes);
+  CHECK_FALSE(f.reference.setLanguage(DocumentLanguage::MYSQL_LEXICAL));
+}
+
+TEST_CASE("syntax stream reflow retains UTF32 original bytes rather than only rendered byte count") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  for (unsigned row = 0; row < 40; ++row) {
+    for (const auto ch : std::string_view("SELECT 42; -- note\n")) {
+      provider->text += ch;
+      provider->text.append(3, '\0');
+    }
+  }
+  auto descriptor = ui::document(provider, {}, {.maxPageBytes = 16});
+  DocumentViewConfig config;
+  config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  config.maxFrameBytes = 128;
+  config.workBytes = 16;
+  config.decoder.explicitEncoding = DocumentEncoding::UTF32LE;
+  Fixture f(descriptor, config);
+  f.size = {20, 5};
+  f.settle(120);
+  REQUIRE(f.frame());
+  REQUIRE_FALSE(take(f.reference.status()).error);
+  const auto first = std::string(f.frame()->rows[0].bytes());
+  f.size.width = 19;
+  f.settle(120);
+  REQUIRE_FALSE(take(f.reference.status()).error);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows[0].bytes().starts_with(first.substr(0, 15)));
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("plain first syntax publication does not block accepted wheel navigation") {
+  auto provider = std::make_shared<Provider>();
+  for (unsigned row = 0; row < 80; ++row) {
+    provider->text += "SELECT 42; -- note\n";
+  }
+  Fixture f(ui::document(provider), {.language = DocumentLanguage::POSTGRESQL_LEXICAL});
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->status.highlighting == DocumentSyntaxState::READY);
+  const auto before = f.frame()->status.byteOffset;
+  CHECK(f.input(InputKey::DOWN));
+  f.settle();
+  REQUIRE_FALSE(take(f.reference.status()).error);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->status.byteOffset > before);
+  CHECK(f.frame()->status.highlighting == DocumentSyntaxState::READY);
+  take(f.reference.setLanguage("md"));
+  f.settle();
+  CHECK(take(f.reference.status()).language == DocumentLanguage::MARKDOWN_SOURCE);
+}
+
+TEST_CASE("syntax ranges use live theme roles and theme changes do not read source") {
+  Fixture f(source("SELECT 42; -- comment\n"), {.language = DocumentLanguage::POSTGRESQL_LEXICAL});
+  take(f.scene->theme(take(parsePss("DocumentView{role-keyword-foreground:#AABBCC;}"))));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->status.highlighting == DocumentSyntaxState::READY);
+  const auto reads = f.executor.submissions;
+  const auto hasKeyword = [](const PartSink &sink, RgbColor color) {
+    return std::ranges::any_of(sink.texts, [&](const PartSink::Text &text) {
+      return text.first == 0 && text.count == 6 && text.style.foreground == color;
+    });
+  };
+  CHECK(hasKeyword(paint(f), {0xAA, 0xBB, 0xCC}));
+  take(f.scene->theme(take(parsePss("DocumentView{role-keyword-foreground:#112233;}"))));
+  f.settle();
+  CHECK(hasKeyword(paint(f), {0x11, 0x22, 0x33}));
+  CHECK(f.executor.submissions == reads);
+}
+
+TEST_CASE("syntax disable drains an already accepted forward-only job before reflow") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  provider->text = "SELECT 1;\nSELECT 2;\nSELECT 3;\nSELECT 4;\n";
+  Fixture f(ui::document(provider), {.language = DocumentLanguage::POSTGRESQL_LEXICAL});
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne(); // The provider has accepted bytes; UI has not consumed its completion.
+  REQUIRE(provider->bytesRead.load() > 0);
+  take(f.reference.setLanguage(DocumentLanguage::PLAIN));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK_FALSE(take(f.reference.status()).error);
+  CHECK(f.frame()->rows[0].bytes() == "SELECT 1;");
+  CHECK(take(f.reference.status()).highlighting == DocumentSyntaxState::DISABLED);
+}
+
+TEST_CASE("syntax forward navigation can skip a line longer than retained replay history") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  provider->text = "SELECT " + std::string(1600, ' ') + "\nSELECT 42;\nSELECT 43;\nSELECT 44;\nSELECT 45;\n";
+  DocumentViewConfig config;
+  config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  config.wrap = false;
+  config.maxFrameBytes = 64;
+  config.workBytes = 16;
+  Fixture f(ui::document(provider, {}, {.maxPageBytes = 16}), config);
+  f.size = {20, 3};
+  f.settle(60);
+  REQUIRE(f.frame());
+  REQUIRE_FALSE(take(f.reference.status()).error);
+  take(f.reference.scrollRows(1));
+  f.settle(250);
+  REQUIRE_FALSE(take(f.reference.status()).error);
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows[0].bytes() == "SELECT 42;");
+}
+
+TEST_CASE("hex retains the selected language without doing lexical work until text mode") {
+  Fixture f(source("SELECT 42;\n"), {.mode = DocumentViewMode::HEX, .language = DocumentLanguage::POSTGRESQL_LEXICAL});
+  CHECK(take(f.reference.status()).language == DocumentLanguage::POSTGRESQL_LEXICAL);
+  f.settle();
+  CHECK(take(f.reference.status()).highlighting == DocumentSyntaxState::DISABLED);
+  CHECK(take(f.reference.status()).language == DocumentLanguage::POSTGRESQL_LEXICAL);
+  const auto submitted = f.executor.submissions;
+  take(f.reference.setLanguage("markdown"));
+  f.settle();
+  CHECK(f.executor.submissions == submitted);
+  CHECK(take(f.reference.status()).language == DocumentLanguage::MARKDOWN_SOURCE);
+  take(f.reference.setMode(DocumentViewMode::TEXT));
+  f.settle();
+  CHECK(take(f.reference.status()).language == DocumentLanguage::MARKDOWN_SOURCE);
+  CHECK(take(f.reference.status()).highlighting == DocumentSyntaxState::READY);
+}
+
+TEST_CASE("optional syntax admission failure preserves the readable plain frame") {
+  constexpr std::size_t TIGHT_MEMORY_BUDGET = 1280 * 1024;
+  auto budget = take(SourceBudget::create({.maxBytes = TIGHT_MEMORY_BUDGET}));
+  auto text = std::make_shared<const std::string>("SELECT 42;\n");
+  Fixture f(ui::document(text, budget), {.language = DocumentLanguage::POSTGRESQL_LEXICAL});
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows[0].bytes() == "SELECT 42;");
+  const auto status = take(f.reference.status());
+  CHECK_FALSE(status.error);
+  CHECK(status.highlighting == DocumentSyntaxState::RESOURCE_LIMIT);
+  CHECK_FALSE(status.preparing);
+}
+
+TEST_CASE("language changes preserve already accepted relative navigation") {
+  auto provider = std::make_shared<Provider>();
+  for (unsigned row = 0; row < 40; ++row) {
+    provider->text += "SELECT 42;\n";
+  }
+  Fixture f(ui::document(provider), {.language = DocumentLanguage::POSTGRESQL_LEXICAL});
+  f.settle();
+  const auto before = take(f.reference.status()).byteOffset;
+  take(f.reference.scrollRows(2));
+  take(f.reference.setLanguage("markdown"));
+  f.settle();
+  const auto status = take(f.reference.status());
+  CHECK_FALSE(status.error);
+  CHECK(status.byteOffset > before);
+  CHECK(status.language == DocumentLanguage::MARKDOWN_SOURCE);
+  CHECK(status.highlighting == DocumentSyntaxState::READY);
+}
+
+TEST_CASE("syntax policy commands preserve queued navigation and reject invalid policies") {
+  auto provider = std::make_shared<Provider>();
+  for (unsigned row = 0; row < 40; ++row) {
+    provider->text += "SELECT 42;\n";
+  }
+  Fixture f(ui::document(provider), {.language = DocumentLanguage::MYSQL_LEXICAL});
+  f.settle();
+  CHECK(take(f.reference.status()).syntax == syntax::AUTO);
+  const auto submitted = f.executor.submissions;
+  take(f.reference.setSyntax(syntax::AUTO));
+  f.settle();
+  CHECK(f.executor.submissions == submitted);
+  const auto before = take(f.reference.status()).byteOffset;
+  take(f.reference.scrollRows(2));
+  CHECK(f.reference.syntax(syntax::EXACT));
+  f.settle();
+  const auto status = take(f.reference.status());
+  CHECK(status.byteOffset > before);
+  CHECK(status.syntax == syntax::EXACT);
+  CHECK(status.syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+  CHECK_FALSE(status.error);
+  const auto invalid = f.reference.setSyntax(static_cast<DocumentSyntaxPolicy>(99));
+  CHECK_FALSE(invalid);
+  CHECK(take(f.reference.status()).syntax == syntax::EXACT);
+}
+
+TEST_CASE("syntax policy changes drain an accepted forward-only turn without losing bytes") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  provider->text = "SELECT 1;\nSELECT 2;\nSELECT 3;\nSELECT 4;\n";
+  Fixture f(ui::document(provider), {.language = DocumentLanguage::MYSQL_LEXICAL});
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+  REQUIRE(provider->bytesRead.load() > 0);
+  take(f.reference.setSyntax(syntax::EXACT));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows[0].bytes() == "SELECT 1;");
+  const auto status = take(f.reference.status());
+  CHECK_FALSE(status.error);
+  CHECK(status.syntax == syntax::EXACT);
+  CHECK(status.syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+}
+
+TEST_CASE("AUTO preview survives paint and policy races without stale exact publication") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = "/*" + std::string(2 * 1024 * 1024, 'a') + "*/\nSELECT 42;\n";
+  DocumentViewConfig config;
+  config.language = DocumentLanguage::MYSQL_LEXICAL;
+  config.maxAutoHighlightBytes = 17;
+  Fixture f(ui::document(provider), config);
+  f.settle();
+  take(f.reference.seekByte(1024 * 1024));
+  f.settle();
+  REQUIRE(f.frame());
+  auto preview = f.frame();
+  REQUIRE(preview->text);
+  CHECK(take(f.reference.status()).syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(take(f.reference.status()).highlighting == DocumentSyntaxState::PREVIEW);
+  CHECK(preview->footer->bytes().find('~') != std::string_view::npos);
+  const auto anchors = preview->anchors;
+  const auto submissions = f.executor.submissions;
+  const auto bytesRead = provider->bytesRead.load();
+  take(f.scene->theme(take(parsePss("DocumentView{role-keyword-foreground:#AABBCC;}"))));
+  f.settle();
+  CHECK(f.executor.submissions == submissions);
+  CHECK(provider->bytesRead.load() == bytesRead);
+  take(f.reference.setSyntax(syntax::EXACT));
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+  take(f.reference.setSyntax(syntax::PREVIEW));
+  f.settle();
+  CHECK(take(f.reference.status()).syntax == syntax::PREVIEW);
+  CHECK(take(f.reference.status()).syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(f.frame()->anchors == anchors);
+  CHECK(preview->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  take(f.reference.setSyntax(syntax::EXACT));
+  f.settle(100);
+  REQUIRE(f.frame()->text);
+  REQUIRE_FALSE(f.frame()->text->rows[0].empty());
+  CHECK(f.frame()->text->rows[0][0].role == SemanticRole::COMMENT);
+  CHECK(take(f.reference.status()).syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+  CHECK(f.frame()->anchors == anchors);
+  CHECK(f.frame()->footer->bytes().find('~') == std::string_view::npos);
 }

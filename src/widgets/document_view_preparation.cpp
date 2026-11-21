@@ -53,6 +53,9 @@ void saveCheckpoint(DocumentScan &scan, const DocumentLayoutCheckpoint &point) {
 void discardFirst(DocumentScan &scan) {
   scan.payload -= scan.rows.front().bytes.size();
   scan.rows.erase(scan.rows.begin());
+  if (scan.highlight) {
+    trimDocumentHighlightMaps(*scan.highlight, scan.rows.empty() ? scan.rowOffset : scan.rows.front().offset);
+  }
 }
 
 bool enoughRows(const DocumentScan &scan, const DocumentPrepareIntent &intent) {
@@ -150,6 +153,9 @@ void finishRow(DocumentScan &scan, const DocumentPrepareIntent &intent, std::uin
   scan.column = 0;
   scan.rowOffset = end;
   scan.rowEnd = end;
+  if (scan.highlight) {
+    trimDocumentHighlightMaps(*scan.highlight, scan.rows.empty() ? end : scan.rows.front().offset);
+  }
 }
 
 void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
@@ -184,6 +190,9 @@ void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
     scan.payload = 0;
     scan.row.clear();
     scan.rowOffset = scan.clusterOffset;
+    if (scan.highlight) {
+      trimDocumentHighlightMaps(*scan.highlight, scan.rowOffset);
+    }
     scan.column = 0;
     scan.rowTouched = false;
     scan.reached = true;
@@ -214,10 +223,16 @@ void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
 
   if (scan.column >= horizontal && (endColumn <= horizontal + width || (intent.config.wrap && !scan.rowTouched))) {
     checkPayload(scan, intent, scan.row.size(), bytes.size());
+    if (scan.highlight && intent.config.language != DocumentLanguage::PLAIN) {
+      mapDocumentCluster(*scan.highlight, scan.rowOffset, scan.row.size(), scan.clusterOffset);
+    }
     scan.row.append(bytes);
     scan.rowEnd = scan.clusterEnd;
   } else if (scan.column < horizontal && endColumn > horizontal) {
     // Preserve alignment when a horizontal window starts inside a wide cluster.
+    if (scan.highlight && intent.config.language != DocumentLanguage::PLAIN) {
+      mapDocumentCluster(*scan.highlight, scan.rowOffset, scan.row.size(), scan.clusterOffset);
+    }
     scan.row.append(static_cast<std::size_t>(endColumn - horizontal), ' ');
     scan.rowEnd = scan.clusterEnd;
   }
@@ -270,6 +285,9 @@ void addScalar(DocumentScan &scan, const DocumentPrepareIntent &intent, const De
     scan.anchorLine = scan.lineKnown ? std::optional(scan.line) : std::nullopt;
     scan.rows.clear();
     scan.payload = 0;
+    if (scan.highlight) {
+      trimDocumentHighlightMaps(*scan.highlight, scan.rowOffset);
+    }
   }
   std::string safe(0, '\0');
   if (scalar < 0x20 || (scalar >= 0x7f && scalar <= 0x9f)) {
@@ -293,6 +311,22 @@ void addScalar(DocumentScan &scan, const DocumentPrepareIntent &intent, const De
 
   if (!scan.clusterBytes) {
     scan.clusterOffset = decoded.byteOffset;
+    if (scan.highlight) {
+      scan.highlight->clusterOffset = decoded.byteOffset;
+      scan.highlight->clusterClassified = false;
+      if (scan.highlight->previewLayout && scan.highlight->preview) {
+        auto &preview = *scan.highlight->preview;
+        preview.clusterOffset = decoded.byteOffset;
+        preview.clusterClassified = false;
+        if (preview.lastRun && decoded.byteOffset >= preview.lastRun->byteOffset &&
+            decoded.byteOffset - preview.lastRun->byteOffset < preview.lastRun->byteLength) {
+          // Immediate roles arrive before this cluster exists. Keep its first
+          // scalar role until the next grapheme boundary creates its map.
+          preview.clusterRole = preview.lastRun->role;
+          preview.clusterClassified = true;
+        }
+      }
+    }
     scan.clusterCheckpoint = before;
     scan.clusterCheckpoint.line = scan.line;
     scan.clusterCheckpoint.afterCR = scan.afterCR;
@@ -331,8 +365,8 @@ bool asciiTailEligible(const DocumentScan &scan, const DocumentPrepareIntent &in
     (intent.width.emoji == EmojiWidth::ONE || intent.width.emoji == EmojiWidth::TWO);
   const bool pendingAscii = scan.previousScalar >= 0x20 && scan.previousScalar <= 0x7e;
 
-  return intent.tail && intent.config.wrap && asciiEncoding && validWidth && scan.origin && !scan.resumeContinuation &&
-         !scan.regionalContextUnknown && !scan.localStart &&
+  return !(scan.highlight && scan.highlight->sequential) && intent.tail && intent.config.wrap && asciiEncoding &&
+         validWidth && scan.origin && !scan.resumeContinuation && !scan.regionalContextUnknown && !scan.localStart &&
          (!scan.clusterBytes || (scan.havePrevious && pendingAscii)) && scan.decoder.checkpoint().has_value();
 }
 
@@ -358,6 +392,15 @@ std::size_t consumeAsciiTail(DocumentScan &scan, const DocumentPrepareIntent &in
   // proven printable ASCII successor, so its grapheme boundary and width are exact.
   const auto count = printable - 1;
   const auto offset = scan.offset;
+  // maxMaps covers at least (height + 1) complete content rows. A following
+  // printable ASCII suffix of that length evicts every earlier cluster from
+  // the tail window, even when this run starts in a partially occupied row.
+  // Discard that prefix's maps as well as its optional lexical work.
+  auto mappedBegin = scan.highlight && count > scan.highlight->maxMaps ? count - scan.highlight->maxMaps : 0;
+  if (scan.highlight && scan.highlight->previewOriginalByteCutoff > offset) {
+    mappedBegin = std::max(mappedBegin, static_cast<std::size_t>(std::min<std::uint64_t>(
+                                          count, scan.highlight->previewOriginalByteCutoff - offset)));
+  }
   const auto checkpoint = [&](std::size_t index) {
     const auto proof =
       DocumentDecoder::localCheckpoint(*scan.origin, input.subspan(index, 1), offset + index, offset + index);
@@ -394,6 +437,14 @@ std::size_t consumeAsciiTail(DocumentScan &scan, const DocumentPrepareIntent &in
     const auto chunk = static_cast<std::size_t>(std::min<std::uint64_t>(count - consumed, width - scan.column));
 
     checkPayload(scan, intent, scan.row.size(), chunk);
+    if (scan.highlight && intent.config.language != DocumentLanguage::PLAIN) {
+      for (auto position = std::max(consumed, mappedBegin); position < consumed + chunk; ++position) {
+        const DecodedScalar scalar{static_cast<char32_t>(std::to_integer<unsigned char>(input[position])),
+                                   offset + position, 1, false};
+        feedDocumentPreview(*scan.highlight, std::span(&scalar, 1));
+        mapDocumentCluster(*scan.highlight, scan.rowOffset, scan.row.size() + (position - consumed), offset + position);
+      }
+    }
     scan.row.append(reinterpret_cast<const char *>(input.data() + consumed), chunk);
     consumed += chunk;
     scan.column += chunk;
@@ -412,7 +463,9 @@ std::size_t consumeAsciiTail(DocumentScan &scan, const DocumentPrepareIntent &in
 }
 
 std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, DocumentMetadata metadata,
-                                          const std::shared_ptr<const DocumentScan> &previous) {
+                                          const std::shared_ptr<const DocumentScan> &previous,
+                                          std::shared_ptr<DocumentHighlightScan> highlight,
+                                          std::optional<DocumentDecoderCheckpoint> origin) {
   // The caller qualifies the complete navigation intent before requesting resume.
   // Matching only anchor/horizontal would retain a different rowDelta's skip state.
   const bool resume =
@@ -424,6 +477,8 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
   }
 
   scan->metadata = metadata;
+  scan->highlight = std::move(highlight);
+  scan->origin = std::move(origin);
   scan->decoderOptions = intent.config.decoder;
   scan->layoutWidth = contentWidth(intent);
   scan->requestedAnchor = intent.anchor;
@@ -472,7 +527,9 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
     const DocumentLayoutCheckpoint *selected{};
     for (std::size_t index = 0; index < scan->checkpointCount; ++index) {
       const auto &candidate = scan->checkpoints[index];
-      if (candidate.revision == metadata.revision && candidate.offset < target && candidate.decoder &&
+      const bool retained =
+        !scan->highlight || !scan->highlight->replay || candidate.offset >= scan->highlight->replay->begin;
+      if (retained && candidate.revision == metadata.revision && candidate.offset < target && candidate.decoder &&
           (!selected || candidate.offset > selected->offset)) {
         selected = &candidate;
       }
@@ -490,8 +547,10 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
     }
   }
   const auto target = std::min(intent.anchor, metadata.byteExtent.value_or(intent.anchor));
-  scan->localPending = metadata.capabilities.seekable && !intent.tail && !intent.rowDelta && target > scan->offset &&
-                       target - scan->offset > LOCAL_PRECONTEXT_BYTES;
+  const bool buffered = scan->highlight && scan->highlight->replay && target >= scan->highlight->replay->begin &&
+                        target <= scan->highlight->replay->end;
+  scan->localPending = (metadata.capabilities.seekable || buffered) && !intent.tail && !intent.rowDelta &&
+                       target > scan->offset && target - scan->offset > LOCAL_PRECONTEXT_BYTES;
 
   return scan;
 }
@@ -516,7 +575,8 @@ bool readLocalProbe(DocumentScan &scan, ByteDocumentSource &source, const Docume
       return false;
     }
 
-    auto page = source.read({scan.metadata.revision, base + scan.localProbeSize, count, generation}, stop);
+    auto page = readDocumentInput(source, {scan.metadata.revision, base + scan.localProbeSize, count, generation},
+                                  scan.highlight.get(), stop);
 
     if (!page) {
       if (page.error().code == SourceError::NO_PROGRESS) {
@@ -599,7 +659,8 @@ bool findTailBoundary(DocumentScan &scan, ByteDocumentSource &source, const Docu
 
     const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(
       std::min({source.maxPageBytes(), tail.readLimit, intent.config.workBytes - work}), tail.cursor));
-    auto page = source.read({scan.metadata.revision, tail.cursor - count, count, generation}, stop);
+    auto page = readDocumentInput(source, {scan.metadata.revision, tail.cursor - count, count, generation},
+                                  scan.highlight.get(), stop);
 
     if (!page) {
       if (page.error().code == SourceError::NO_PROGRESS) {
@@ -781,7 +842,7 @@ bool prepareLocalStart(DocumentScan &scan, ByteDocumentSource &source, const Doc
 
 std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocumentSource> source,
                                                        const DocumentPrepareIntent &intent, const DocumentScan &scan) {
-  const auto amount = documentPreparationBytes(intent.viewport, intent.config);
+  const auto amount = documentPreparationBytes(intent.viewport, intent.config, {.frame = true});
   if (!amount) {
     fail(amount.error());
   }
@@ -877,6 +938,51 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
     frame->visibleByteEnd = std::max(row.offset, row.end);
   }
 
+  frame->status.language = intent.config.language;
+  frame->status.syntax = intent.config.syntax;
+  if (scan.highlight && intent.config.language != DocumentLanguage::PLAIN) {
+    try {
+      bool ready{};
+      if (scan.highlight->started) {
+        frame->text = projectDocumentHighlight(*frame, *scan.highlight, ready);
+      }
+      if (ready) {
+        frame->status.syntaxAccuracy = DocumentSyntaxAccuracy::EXACT;
+      } else if (scan.highlight->preview) {
+        frame->text.reset();
+        bool provisional{};
+        auto projected = projectDocumentHighlight(*frame, *scan.highlight, provisional, true);
+        if (provisional) {
+          frame->text = std::move(projected);
+          frame->status.syntaxAccuracy = DocumentSyntaxAccuracy::PREVIEW;
+        } else {
+          frame->text.reset();
+        }
+      } else {
+        frame->text.reset();
+      }
+      frame->status.highlighting = ready ? DocumentSyntaxState::READY : scan.highlight->status;
+      if (!ready && intent.config.syntax == DocumentSyntaxPolicy::PREVIEW && scan.highlight->preview &&
+          scan.highlight->preview->failed) {
+        frame->status.highlighting = DocumentSyntaxState::RESOURCE_LIMIT;
+      }
+      if (!ready &&
+          (intent.config.syntax == DocumentSyntaxPolicy::PREVIEW ||
+           (scan.highlight->attempt && scan.highlight->attempt->exhausted)) &&
+          frame->status.highlighting == DocumentSyntaxState::PENDING) {
+        frame->status.highlighting = DocumentSyntaxState::PREVIEW;
+      }
+      if (scan.highlight->failure) {
+        frame->status.highlightErrorOffset = scan.highlight->failure->errorOffset;
+      }
+    } catch (const std::bad_alloc &) {
+      // Syntax projection is optional; the already prepared text stays usable.
+      frame->text.reset();
+      frame->status.syntaxAccuracy = DocumentSyntaxAccuracy::NONE;
+      frame->status.highlighting = DocumentSyntaxState::RESOURCE_LIMIT;
+    }
+  }
+
   std::array<char, 192> footer{};
   std::array<char, 32> progress{};
 
@@ -888,8 +994,9 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
     std::snprintf(progress.data(), progress.size(), "progress unknown");
   }
 
-  std::snprintf(footer.data(), footer.size(), "%s%s%s", progress.data(), scan.waiting ? " | waiting" : "",
-                scan.fragmented ? " | cluster continuation" : "");
+  std::snprintf(footer.data(), footer.size(), "%s%s%s%s", progress.data(), scan.waiting ? " | waiting" : "",
+                scan.fragmented ? " | cluster continuation" : "",
+                frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW ? " ~" : "");
   auto caption = GraphemeText::from(footer.data(), intent.width);
   if (!caption) {
     fail(SourceError::INVALID_ARGUMENT);
@@ -904,6 +1011,10 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
                                                            std::shared_ptr<const DocumentScan> previous,
                                                            std::uint64_t generation, SourceCredit credit,
                                                            std::stop_token stop) {
+  if (intent.kind == DocumentPreparationKind::HIGHLIGHT) {
+    return prepareDocumentHighlight(std::move(source), intent, std::move(previous), generation, std::move(credit),
+                                    stop);
+  }
   if (intent.config.mode == DocumentViewMode::HEX) {
     return prepareHexDocument(std::move(source), intent, std::move(previous), generation, std::move(credit), stop);
   }
@@ -920,6 +1031,23 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
     if (!metadata) {
       throw PreparationFailure{metadata.error()};
     }
+    // Pin the old reservation before retaining any payload independently of its
+    // geometry snapshot. Both stay alive until staging has completed or unwound.
+    auto retainedReservation = previous ? previous->reservation : nullptr;
+    auto origin = previous ? previous->origin : std::nullopt;
+    auto highlight = previous ? previous->highlight : nullptr;
+    if (highlight && (highlight->revision != metadata->revision ||
+                      !sameDocumentDecoderOptions(highlight->decoderOptions, intent.config.decoder))) {
+      highlight.reset();
+      origin.reset();
+    }
+    if (previous && (previous->metadata.revision != metadata->revision ||
+                     !sameDocumentDecoderOptions(previous->decoderOptions, intent.config.decoder))) {
+      origin.reset();
+    }
+    if (intent.config.language == DocumentLanguage::PLAIN && metadata->capabilities.seekable) {
+      highlight.reset();
+    }
     if (previous && (previous->metadata.revision != metadata->revision ||
                      previous->layoutWidth != contentWidth(intent) || previous->wrap != intent.config.wrap ||
                      previous->decoderOptions.explicitEncoding != intent.config.decoder.explicitEncoding ||
@@ -934,7 +1062,13 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
       fail(reserved.error());
     }
     auto reservation = std::make_shared<SourceCredit>(std::move(*reserved));
-    scan = initialScan(intent, *metadata, previous);
+    scan = initialScan(intent, *metadata, previous, std::move(highlight), std::move(origin));
+    if (intent.config.language != DocumentLanguage::PLAIN ||
+        (scan->highlight && scan->highlight->sequential && scan->highlight->replay)) {
+      scan->highlight = stageDocumentHighlight(*scan, intent);
+    } else {
+      scan->highlight.reset();
+    }
     scan->reservation = std::move(reservation);
     previous.reset();
     std::size_t work{};
@@ -953,7 +1087,8 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
       if (!requested) {
         fail(SourceError::POSITION_EXHAUSTED);
       }
-      auto page = source->read({scan->metadata.revision, scan->offset, requested, generation}, stop);
+      auto page = readDocumentInput(*source, {scan->metadata.revision, scan->offset, requested, generation},
+                                    scan->highlight.get(), stop, !scan->skipRows);
       if (!page) {
         if (page.error().code == SourceError::NO_PROGRESS) {
           // Source222 classifies an empty non-final read as NO_PROGRESS.
@@ -991,7 +1126,14 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
           fail(SourceError::INVALID_REPLY);
         }
         if (decoded.outputProduced) {
+          if (scan->highlight && output[0].byteOffset >= scan->highlight->previewOriginalByteCutoff) {
+            feedDocumentPreview(*scan->highlight, std::span(output).first(decoded.outputProduced));
+          }
           addScalar(*scan, intent, output[0], before);
+          if (scan->highlight && scan->highlight->sequential) {
+            scan->highlight->offset = scan->offset;
+            feedDocumentHighlight(*scan->highlight, std::span(output).first(decoded.outputProduced));
+          }
           if (auto checkpoint = scan->decoder.checkpoint()) {
             if (!scan->origin) {
               scan->origin = checkpoint;
@@ -1006,6 +1148,10 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
         }
         if (decoded.status == DocumentDecodeStatus::DONE) {
           flushCluster(*scan, intent);
+          if (scan->highlight && scan->highlight->sequential) {
+            scan->highlight->offset = scan->offset;
+            feedDocumentHighlight(*scan->highlight, {}, true);
+          }
           scan->totalLines = scan->lineKnown ? std::optional(scan->line) : std::nullopt;
           // A terminal separator ends the last row; it does not create a
           // new display row in a read-only viewer. Keep the empty document.
@@ -1036,7 +1182,17 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
     result->continueWork = !scan->done && !scan->waiting &&
                            (!enoughRows(*scan, intent) || needsCrLfLookahead(*scan, intent)) && !horizontalReady;
     if (!result->continueWork) {
+      if (scan->highlight) {
+        feedDocumentPreview(*scan->highlight, {}, true);
+      }
       result->frame = makeFrame(source, intent, *scan);
+      result->syntax = result->frame->status.highlighting;
+      result->syntaxAccuracy = result->frame->status.syntaxAccuracy;
+      if (scan->highlight && !scan->highlight->sequential && intent.config.language != DocumentLanguage::PLAIN) {
+        scan->highlight->plain = result->frame;
+        scan->highlight->pending = false;
+        result->continueWork = result->frame->status.highlighting == DocumentSyntaxState::PENDING;
+      }
     }
   } catch (const PreparationFailure &failure) {
     if (failure.error.code == SourceError::WOULD_BLOCK && !failure.error.budgetDemand) {
@@ -1052,6 +1208,10 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
     result->error = DocumentError{SourceError::NO_MEMORY, {}, {}};
   } catch (...) {
     result->error = DocumentError{SourceError::CALLBACK_FAILED, {}, {}};
+  }
+  if (!result->scan && scan) {
+    // Keep accepted sequential input alive even when later projection allocation fails.
+    result->scan = std::move(scan);
   }
   return result;
 }

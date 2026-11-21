@@ -26,6 +26,7 @@ public:
   bool unknown{};
   bool finalUnknown{};
   bool temporaryEmpty{};
+  bool failRead{};
   std::atomic<std::size_t> reads{};
   std::atomic<std::size_t> admittedBytes{};
   std::atomic<std::uint64_t> firstReadOffset{};
@@ -50,6 +51,9 @@ public:
     }
     if (command.dataRevision != revision) {
       return std::unexpected(DocumentError{SourceError::INVALID_CURSOR, {}, {}});
+    }
+    if (failRead) {
+      return std::unexpected(DocumentError{SourceError::IO_ERROR, {}, {}});
     }
     if (temporaryEmpty) {
       return ByteReadResult{};
@@ -90,7 +94,17 @@ struct Fixture {
   std::shared_ptr<const detail::DocumentPreparation> run(std::shared_ptr<const detail::DocumentScan> previous = {},
                                                          std::stop_token stop = {}) {
     intent.retainedHexRows = previous && previous->hex ? previous->hex->rawRows.size() : 0;
-    const auto amount = take(detail::documentPreparationBytes(intent.viewport, intent.config, intent.retainedHexRows));
+    intent.retainedTextMaps = previous && previous->highlight ? previous->highlight->maxMaps : 0;
+    intent.retainPreview = previous && previous->highlight && previous->highlight->preview;
+    intent.replayBytes = !provider->seekable && intent.config.language != DocumentLanguage::PLAIN
+                           ? 8 * intent.config.maxFrameBytes + std::min(source->maxPageBytes(), intent.config.workBytes)
+                           : 0;
+    const auto amount = take(detail::documentPreparationBytes(intent.viewport, intent.config,
+                                                              {.hexRows = intent.retainedHexRows,
+                                                               .textMaps = intent.retainedTextMaps,
+                                                               .replayBytes = intent.replayBytes,
+                                                               .preview = intent.retainPreview,
+                                                               .suppressPreview = intent.suppressPreview}));
     auto credit = take(budget->reserve({amount, 0, 1, 0}));
     std::shared_ptr<const detail::DocumentPreparation> result;
     std::thread worker([&] {
@@ -113,9 +127,27 @@ struct Fixture {
         return result;
       }
       previous = result->scan;
+      if (result->frame && result->frame->status.highlighting == DocumentSyntaxState::PENDING && previous->highlight &&
+          !previous->highlight->sequential) {
+        intent.kind = detail::DocumentPreparationKind::HIGHLIGHT;
+      }
     }
     FAIL("bounded test turn limit reached");
     return result;
+  }
+
+  std::shared_ptr<const detail::DocumentPreparation> layout(std::shared_ptr<const detail::DocumentScan> previous = {}) {
+    intent.kind = detail::DocumentPreparationKind::LAYOUT;
+    for (std::size_t turn = 0; turn < 1000; ++turn) {
+      const auto result = run(previous);
+      if (result->error || result->frame || !result->continueWork) {
+        return result;
+      }
+      previous = result->scan;
+      intent.resume = true;
+    }
+    FAIL("bounded layout test turn limit reached");
+    return {};
   }
 };
 } // namespace
@@ -1293,7 +1325,8 @@ TEST_CASE("HEX accounting charges only bounded prepared columns and preserves su
   REQUIRE_FALSE(tooManyCells);
   CHECK(tooManyCells.error() == SourceError::PAGE_TOO_LARGE);
   config.maxFrameCells = 16384;
-  const auto overflow = detail::documentPreparationBytes({190, 50}, config, std::numeric_limits<std::size_t>::max());
+  const auto overflow =
+    detail::documentPreparationBytes({190, 50}, config, {.hexRows = std::numeric_limits<std::size_t>::max()});
   REQUIRE_FALSE(overflow);
   CHECK(overflow.error() == SourceError::PAGE_TOO_LARGE);
   config.hex = {.bytesPerRow = MAX_HEX_ROW_BYTES, .autoFit = true};
@@ -1346,4 +1379,489 @@ TEST_CASE("HEX horizontal and auto-fit maps and run capacities follow prepared r
   const auto payload = f.finish();
   REQUIRE(payload->error);
   CHECK(payload->error->code == SourceError::PAGE_TOO_LARGE);
+}
+
+TEST_CASE("SQL syntax follows a plain first frame and preserves multiline context on cold seek") {
+  Fixture f("/* opening\ninside comment\nclosing */\nSELECT 42, 'value';\n", 7);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.config.syntax = DocumentSyntaxPolicy::EXACT;
+  f.intent.viewport = {40, 2};
+  f.intent.anchor = 11;
+  std::shared_ptr<const detail::DocumentScan> scan;
+  std::shared_ptr<const detail::DocumentPreparedFrame> plain;
+  for (std::size_t turn = 0; turn < 100 && !plain; ++turn) {
+    f.intent.resume = scan != nullptr;
+    const auto result = f.run(scan);
+    REQUIRE_FALSE(result->error);
+    scan = result->scan;
+    plain = result->frame;
+  }
+  REQUIRE(plain);
+  CHECK_FALSE(plain->text);
+  CHECK(plain->status.highlighting == DocumentSyntaxState::PENDING);
+  f.intent.kind = detail::DocumentPreparationKind::HIGHLIGHT;
+  const auto colored = f.finish(100, scan);
+  REQUIRE_FALSE(colored->error);
+  REQUIRE(colored->frame);
+  REQUIRE(colored->frame->text);
+  CHECK(colored->frame->status.highlighting == DocumentSyntaxState::READY);
+  REQUIRE_FALSE(colored->frame->text->rows[0].empty());
+  CHECK(colored->frame->text->rows[0][0].role == SemanticRole::COMMENT);
+  CHECK(colored->frame->rows[0].bytes() == plain->rows[0].bytes());
+}
+
+TEST_CASE("Markdown syntax includes headings and SQL fenced source") {
+  Fixture f("# Guide\n\n```sql\nSELECT 42;\n```\n", 1);
+  f.intent.config.language = DocumentLanguage::MARKDOWN_SOURCE;
+  f.intent.viewport = {40, 8};
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->text);
+  CHECK(result->frame->status.highlighting == DocumentSyntaxState::READY);
+  REQUIRE_FALSE(result->frame->text->rows[0].empty());
+  CHECK(result->frame->text->rows[0][0].role == SemanticRole::HEADING);
+  REQUIRE_FALSE(result->frame->text->rows[3].empty());
+  CHECK(result->frame->text->rows[3][0].role == SemanticRole::KEYWORD);
+}
+
+TEST_CASE("UTF16 syntax maps original bytes to a combining grapheme and escaped control") {
+  std::string text("\xff\xfe", 2);
+  for (const auto scalar : std::u16string_view(u"SELECT 'a\u0301\x001b';\n")) {
+    text.push_back(static_cast<char>(scalar & 255));
+    text.push_back(static_cast<char>(scalar >> 8));
+  }
+  Fixture f(text, 1);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.config.decoder.explicitEncoding = DocumentEncoding::UTF16LE;
+  f.intent.viewport = {40, 4};
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->text);
+  CHECK(result->frame->status.highlighting == DocumentSyntaxState::READY);
+  const auto &row = result->frame->rows[0];
+  const auto &runs = result->frame->text->rows[0];
+  REQUIRE_FALSE(runs.empty());
+  CHECK(runs[0].role == SemanticRole::KEYWORD);
+  CHECK(row.bytes().find("a\xcc\x81") != std::string_view::npos);
+  CHECK(row.bytes().find('\x1b') == std::string_view::npos);
+  bool stringFound{};
+  for (const auto &run : runs) {
+    stringFound = stringFound || run.role == SemanticRole::STRING;
+    CHECK(run.first + run.count <= row.graphemes().size());
+  }
+  CHECK(stringFound);
+}
+
+TEST_CASE("AUTO cold fragments stay provisional until explicit exact context replaces them") {
+  std::string opening;
+  std::string closing;
+  auto language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  auto expected = SemanticRole::COMMENT;
+
+  SUBCASE("SQL comment") {
+    opening = "/*\n";
+    closing = "*/\n";
+  }
+  SUBCASE("SQL string") {
+    opening = "'";
+    closing = "';\n";
+    expected = SemanticRole::STRING;
+  }
+  SUBCASE("Markdown SQL fence") {
+    opening = "```sql\n";
+    closing = "```\n";
+    language = DocumentLanguage::MARKDOWN_SOURCE;
+    expected = SemanticRole::KEYWORD;
+  }
+
+  const auto prefix = opening + std::string(12 * 1024, 'x') + "\n";
+  Fixture f(prefix + "SELECT 42;\n" + closing, 127);
+  f.intent.config.language = language;
+  f.intent.config.maxAutoHighlightBytes = 31;
+  f.intent.anchor = prefix.size();
+  f.intent.viewport = {40, 1};
+  const auto provisional = f.layout();
+  REQUIRE_FALSE(provisional->error);
+  REQUIRE(provisional->frame);
+  REQUIRE(provisional->frame->text);
+  CHECK(provisional->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(provisional->frame->status.highlighting == DocumentSyntaxState::PENDING);
+  REQUIRE(provisional->frame->footer);
+  CHECK(provisional->frame->footer->bytes().ends_with(" ~"));
+  REQUIRE(provisional->scan->highlight->preview);
+  const auto &highlight = *provisional->scan->highlight;
+  CHECK(highlight.checkpointCount == 0);
+  CHECK_FALSE(highlight.started);
+  CHECK_FALSE(highlight.replay);
+  for (const auto &map : highlight.maps) {
+    CHECK_FALSE(map.classified);
+  }
+
+  const auto admitted = f.provider->admittedBytes.load();
+  f.intent.kind = detail::DocumentPreparationKind::HIGHLIGHT;
+  f.intent.resume = true;
+  auto stopped = f.run(provisional->scan);
+  REQUIRE_FALSE(stopped->error);
+  CHECK_FALSE(stopped->continueWork);
+  CHECK(stopped->syntax == DocumentSyntaxState::PREVIEW);
+  CHECK(stopped->syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(f.provider->admittedBytes.load() == admitted);
+  CHECK(stopped->scan->highlight->preview != provisional->scan->highlight->preview);
+
+  f.intent.config.syntax = DocumentSyntaxPolicy::EXACT;
+  f.intent.resume = false;
+  const auto retained = f.layout(stopped->scan);
+  REQUIRE_FALSE(retained->error);
+  REQUIRE(retained->frame);
+  CHECK(retained->frame->status.syntax == DocumentSyntaxPolicy::EXACT);
+  CHECK(retained->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(retained->frame->rows[0].bytes() == provisional->frame->rows[0].bytes());
+
+  // The UI releases delivered preparation envelopes; frames and scans retain
+  // their own independent credits. Do not pin an obsolete work slot here.
+  stopped.reset();
+
+  f.intent.kind = detail::DocumentPreparationKind::HIGHLIGHT;
+  const auto exact = f.finish(1000, retained->scan);
+  if (exact->error) {
+    INFO("exact source error code=" << static_cast<int>(exact->error->code));
+    REQUIRE_FALSE(exact->error);
+  }
+  REQUIRE_FALSE(exact->error);
+  REQUIRE(exact->frame);
+  REQUIRE(exact->frame->text);
+  CHECK(exact->frame->status.highlighting == DocumentSyntaxState::READY);
+  CHECK(exact->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+  REQUIRE_FALSE(exact->frame->text->rows[0].empty());
+  CHECK(exact->frame->text->rows[0][0].role == expected);
+  CHECK(exact->frame->rows[0].bytes() == provisional->frame->rows[0].bytes());
+  CHECK(exact->frame->anchors == provisional->frame->anchors);
+  REQUIRE(exact->frame->footer);
+  CHECK_FALSE(exact->frame->footer->bytes().ends_with(" ~"));
+  CHECK(provisional->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+}
+
+TEST_CASE("AUTO admission caps the final request and survives repeated same-window staging") {
+  std::size_t page = 4;
+  SUBCASE("budget smaller than a page") {
+    page = 64;
+  }
+  SUBCASE("budget not divisible by page") {
+    page = 4;
+  }
+
+  Fixture f("SELECTxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx;\n", page);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.config.maxAutoHighlightBytes = 5;
+  f.intent.viewport = {4, 1};
+  const auto provisional = f.layout();
+  REQUIRE_FALSE(provisional->error);
+  REQUIRE(provisional->frame);
+  CHECK(provisional->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  const auto admitted = f.provider->admittedBytes.load();
+  f.intent.kind = detail::DocumentPreparationKind::HIGHLIGHT;
+  f.intent.resume = true;
+  auto stopped = f.run(provisional->scan);
+  REQUIRE_FALSE(stopped->error);
+  CHECK_FALSE(stopped->continueWork);
+  CHECK(stopped->syntax == DocumentSyntaxState::PREVIEW);
+  CHECK(f.provider->admittedBytes.load() - admitted == 5);
+  REQUIRE(stopped->scan->highlight->attempt);
+  CHECK(stopped->scan->highlight->attempt->remaining == 0);
+  CHECK(provisional->scan->highlight->attempt->remaining == 5);
+
+  for (std::size_t retry = 0; retry < 3; ++retry) {
+    stopped = f.run(stopped->scan);
+    REQUIRE_FALSE(stopped->error);
+    CHECK_FALSE(stopped->continueWork);
+    CHECK(stopped->syntax == DocumentSyntaxState::PREVIEW);
+    CHECK(f.provider->admittedBytes.load() - admitted == 5);
+  }
+
+  f.intent.anchor = 1;
+  f.intent.resume = false;
+  const auto navigated = f.layout(stopped->scan);
+  REQUIRE_FALSE(navigated->error);
+  REQUIRE(navigated->scan->highlight->attempt);
+  CHECK(navigated->scan->highlight->attempt->remaining == 5);
+}
+
+TEST_CASE("PREVIEW maps original UTF32 scalars before escaped display expansion") {
+  std::string text("\xff\xfe\0\0", 4);
+  for (const auto scalar : std::u32string_view(U"SELECT 'a\u0301\x001b';\n")) {
+    for (unsigned shift = 0; shift < 32; shift += 8) {
+      text.push_back(static_cast<char>((scalar >> shift) & 255));
+    }
+  }
+  Fixture f(text, 7);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.config.syntax = DocumentSyntaxPolicy::PREVIEW;
+  f.intent.config.decoder.explicitEncoding = DocumentEncoding::UTF32LE;
+  f.intent.viewport = {40, 2};
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->text);
+  CHECK(result->frame->status.highlighting == DocumentSyntaxState::PREVIEW);
+  CHECK(result->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  REQUIRE_FALSE(result->frame->text->rows[0].empty());
+  CHECK(result->frame->text->rows[0][0].role == SemanticRole::KEYWORD);
+  CHECK(result->frame->rows[0].bytes().find("a\xcc\x81") != std::string_view::npos);
+  CHECK(result->frame->rows[0].bytes().find("\\u001B") != std::string_view::npos);
+  bool stringFound{};
+  for (const auto &run : result->frame->text->rows[0]) {
+    stringFound = stringFound || run.role == SemanticRole::STRING;
+    CHECK(run.first + run.count <= result->frame->rows[0].graphemes().size());
+  }
+  CHECK(stringFound);
+  for (const auto &point : result->scan->highlight->preview->maps) {
+    CHECK(point.sourceOffset % 4 == 0);
+  }
+}
+
+TEST_CASE("PREVIEW tail ASCII shortcut retains a bounded classified suffix") {
+  Fixture f(std::string(32 * 1024, 'x') + " SELECT 42;", 4096);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.config.syntax = DocumentSyntaxPolicy::PREVIEW;
+  f.intent.tail = true;
+  f.intent.viewport = {20, 2};
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->text);
+  CHECK(result->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  REQUIRE(result->scan->highlight->preview);
+  const auto &highlight = *result->scan->highlight;
+  CHECK(highlight.preview->maps.size() <= highlight.maxMaps);
+  CHECK(highlight.preview->maps.capacity() <= highlight.maxMaps);
+  CHECK(highlight.checkpointCount == 0);
+  bool keyword{};
+  for (const auto &row : result->frame->text->rows) {
+    for (const auto &run : row) {
+      keyword = keyword || run.role == SemanticRole::KEYWORD;
+    }
+  }
+  CHECK(keyword);
+}
+
+TEST_CASE("bounded tail preview matches exact text anchors and grapheme roles across pages") {
+  constexpr std::size_t PAGE_BOUNDARY = 1024 * 1024;
+  std::string text;
+  bool cutoffInsideCluster{};
+
+  SUBCASE("printable ASCII with an extender across a page seam") {
+    const std::string suffix = " SELECT 'a";
+    // The final ASCII scalar of this page joins a UTF-8 extender on the next.
+    text = std::string(PAGE_BOUNDARY - suffix.size(), 'x') + suffix + "\xcc\x81';";
+  }
+  SUBCASE("short ASCII runs with a cutoff inside a multi-scalar grapheme") {
+    for (std::size_t cluster = 0; cluster < PAGE_BOUNDARY / 3; ++cluster) {
+      text += "a\xcc\x81";
+    }
+    text += " SELECT 'a\xcc\x81';";
+    cutoffInsideCluster = true;
+  }
+
+  Fixture automatic(text, 4096);
+  automatic.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  automatic.intent.config.maxFrameBytes = 4096;
+  automatic.intent.config.workBytes = 4 * PAGE_BOUNDARY;
+  automatic.intent.config.maxAutoHighlightBytes = 1;
+  automatic.intent.tail = true;
+  automatic.intent.viewport = {20, 3};
+  const auto preview = automatic.layout();
+  REQUIRE_FALSE(preview->error);
+  REQUIRE(preview->frame);
+  REQUIRE(preview->frame->text);
+  CHECK(preview->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(preview->frame->status.finalEnd);
+  CHECK(preview->frame->finalEndVisible);
+  CHECK(preview->frame->visibleByteEnd == text.size());
+  REQUIRE(preview->scan->highlight->preview);
+  const auto &highlight = *preview->scan->highlight;
+  REQUIRE(highlight.previewOriginalByteCutoff > 0);
+  CHECK(highlight.preview->fragmentBase >= highlight.previewOriginalByteCutoff);
+  CHECK(highlight.preview->lexer.nextByteOffset() <= text.size() - highlight.previewOriginalByteCutoff);
+  for (const auto &map : highlight.maps) {
+    CHECK(map.sourceOffset >= highlight.previewOriginalByteCutoff);
+  }
+  if (cutoffInsideCluster) {
+    CHECK(highlight.previewOriginalByteCutoff % 3 == 1);
+    CHECK(static_cast<unsigned char>(text[highlight.previewOriginalByteCutoff]) == 0xcc);
+  }
+  CHECK(highlight.maps.size() <= highlight.maxMaps);
+  CHECK(highlight.preview->maps.size() <= highlight.maxMaps);
+  CHECK(highlight.preview->maps.capacity() <= highlight.maxMaps);
+
+  Fixture explicitExact(text, 4096);
+  explicitExact.intent = automatic.intent;
+  explicitExact.intent.config.syntax = DocumentSyntaxPolicy::EXACT;
+  explicitExact.intent.resume = false;
+  const auto layout = explicitExact.layout();
+  REQUIRE_FALSE(layout->error);
+  REQUIRE(layout->frame);
+  CHECK_FALSE(layout->scan->highlight->preview);
+  CHECK(layout->scan->highlight->previewOriginalByteCutoff == 0);
+  explicitExact.intent.kind = detail::DocumentPreparationKind::HIGHLIGHT;
+  const auto exact = explicitExact.finish(1000, layout->scan);
+  REQUIRE_FALSE(exact->error);
+  REQUIRE(exact->frame);
+  REQUIRE(exact->frame->text);
+  CHECK(exact->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+  CHECK(exact->frame->status.finalEnd);
+  CHECK(exact->frame->finalEndVisible);
+  CHECK(exact->frame->visibleByteEnd == preview->frame->visibleByteEnd);
+  CHECK(exact->frame->anchors == preview->frame->anchors);
+  REQUIRE(exact->frame->rows.size() == preview->frame->rows.size());
+
+  const auto roleAt = [](const detail::DocumentTextFrame &projection, std::size_t row, std::size_t cluster) {
+    for (const auto &run : projection.rows[row]) {
+      if (cluster >= run.first && cluster - run.first < run.count) {
+        return run.role;
+      }
+    }
+    return SemanticRole::NORMAL;
+  };
+
+  for (std::size_t row = 0; row < exact->frame->rows.size(); ++row) {
+    CHECK(exact->frame->rows[row].bytes() == preview->frame->rows[row].bytes());
+    for (std::size_t cluster = 0; cluster < exact->frame->rows[row].graphemes().size(); ++cluster) {
+      CHECK(roleAt(*exact->frame->text, row, cluster) == roleAt(*preview->frame->text, row, cluster));
+    }
+  }
+  CHECK(preview->frame->rows.back().bytes().find("a\xcc\x81") != std::string_view::npos);
+}
+
+TEST_CASE("forward-only known-origin syntax remains exact with no automatic reread budget") {
+  Fixture f("/* comment\nSELECT hidden;\n*/\nSELECT 42;\n", 7, false);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.config.maxAutoHighlightBytes = 1;
+  f.intent.viewport = {40, 4};
+  const auto result = f.finish();
+  REQUIRE_FALSE(result->error);
+  REQUIRE(result->frame);
+  REQUIRE(result->frame->text);
+  CHECK(result->frame->status.highlighting == DocumentSyntaxState::READY);
+  CHECK(result->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+  CHECK_FALSE(result->scan->highlight->preview);
+  CHECK(f.provider->admittedBytes.load() == f.provider->text.size());
+}
+
+TEST_CASE("optional exact source failure preserves the immutable preview frame and accuracy") {
+  Fixture f("SELECT 42;\n", 7);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  const auto provisional = f.layout();
+  REQUIRE_FALSE(provisional->error);
+  REQUIRE(provisional->frame);
+  REQUIRE(provisional->frame->text);
+  f.provider->failRead = true;
+  f.intent.kind = detail::DocumentPreparationKind::HIGHLIGHT;
+  f.intent.resume = true;
+  const auto failed = f.run(provisional->scan);
+  REQUIRE(failed->error);
+  CHECK(failed->error->code == SourceError::IO_ERROR);
+  CHECK(failed->baseFrame == provisional->frame);
+  CHECK(failed->syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  REQUIRE(failed->scan);
+  CHECK(failed->scan->highlight->plain == provisional->frame);
+  CHECK(provisional->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(provisional->frame->rows[0].bytes() == "SELECT 42;");
+}
+
+TEST_CASE("optional preview admission can be suppressed without changing syntax policy") {
+  Fixture f("SELECT 42;\n", 7);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.config.syntax = DocumentSyntaxPolicy::PREVIEW;
+  const auto normal = take(detail::documentPreparationBytes(f.intent.viewport, f.intent.config));
+  const auto suppressed = take(
+    detail::documentPreparationBytes(f.intent.viewport, f.intent.config, {.preview = true, .suppressPreview = true}));
+  CHECK(suppressed < normal);
+  f.intent.suppressPreview = true;
+  const auto plain = f.finish();
+  REQUIRE_FALSE(plain->error);
+  REQUIRE(plain->frame);
+  CHECK(plain->frame->rows[0].bytes() == "SELECT 42;");
+  CHECK_FALSE(plain->frame->text);
+  CHECK_FALSE(plain->scan->highlight->preview);
+  CHECK(plain->frame->status.syntax == DocumentSyntaxPolicy::PREVIEW);
+  CHECK(plain->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::NONE);
+  CHECK(plain->frame->status.highlighting == DocumentSyntaxState::RESOURCE_LIMIT);
+  CHECK_FALSE(plain->continueWork);
+}
+
+TEST_CASE("retained preview roles require the current horizontal source mappings") {
+  Fixture f("SELECT 42, 'value';\n", 7);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.config.wrap = false;
+  f.intent.viewport = {6, 1};
+  const auto provisional = f.layout();
+  REQUIRE_FALSE(provisional->error);
+  REQUIRE(provisional->frame);
+  CHECK(provisional->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  f.intent.config.syntax = DocumentSyntaxPolicy::EXACT;
+  f.intent.horizontal = 11;
+  f.intent.resume = false;
+  const auto moved = f.layout(provisional->scan);
+  REQUIRE_FALSE(moved->error);
+  REQUIRE(moved->frame);
+  CHECK(moved->frame->rows[0].bytes() == "'value");
+  CHECK(moved->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::NONE);
+  CHECK_FALSE(moved->frame->text);
+  REQUIRE(moved->scan->highlight->preview);
+  CHECK(moved->scan->highlight->preview == provisional->scan->highlight->preview);
+}
+
+TEST_CASE("ordinary seekable scrolling preserves proven exact roles in viewport overlap") {
+  const auto prefix = std::string("/*\n") + std::string(12 * 1024, 'x') + "\n";
+  std::string text = prefix;
+  for (std::size_t row = 0; row < 20; ++row) {
+    text += "SELECT 42;\n";
+  }
+  text += "*/\n";
+  Fixture f(text, 127);
+  f.intent.config.language = DocumentLanguage::POSTGRESQL_LEXICAL;
+  f.intent.anchor = prefix.size();
+  f.intent.viewport = {20, 3};
+  const auto exact = f.finish();
+  REQUIRE_FALSE(exact->error);
+  REQUIRE(exact->frame);
+  REQUIRE(exact->frame->text);
+  CHECK(exact->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+  CHECK(exact->frame->text->rows[0][0].role == SemanticRole::COMMENT);
+
+  // Rebuilding the same projection needs no new lexical recovery, even when
+  // the remaining automatic budget cannot restore this distant comment.
+  f.intent.resume = false;
+  f.intent.config.maxAutoHighlightBytes = 1;
+  const auto reused = f.layout(exact->scan);
+  REQUIRE_FALSE(reused->error);
+  REQUIRE(reused->frame);
+  CHECK_FALSE(reused->continueWork);
+  CHECK(reused->frame->status.highlighting == DocumentSyntaxState::READY);
+  CHECK(reused->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+
+  f.intent.resume = false;
+  f.intent.anchor = exact->frame->anchors[1];
+  const auto scrolled = f.layout(reused->scan);
+  REQUIRE_FALSE(scrolled->error);
+  REQUIRE(scrolled->frame);
+  REQUIRE(scrolled->frame->text);
+  REQUIRE(scrolled->frame->text->rows.size() == 3);
+  CHECK(scrolled->frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(scrolled->frame->status.highlighting == DocumentSyntaxState::PENDING);
+  for (std::size_t row = 0; row < 2; ++row) {
+    CHECK(scrolled->frame->rows[row].bytes() == exact->frame->rows[row + 1].bytes());
+    REQUIRE_FALSE(scrolled->frame->text->rows[row].empty());
+    CHECK(scrolled->frame->text->rows[row][0].role == SemanticRole::COMMENT);
+  }
+  REQUIRE_FALSE(scrolled->frame->text->rows[2].empty());
+  CHECK(scrolled->frame->text->rows[2][0].role == SemanticRole::KEYWORD);
+  CHECK(exact->frame->text->rows[0][0].role == SemanticRole::COMMENT);
+  bool unresolved{};
+  for (const auto &point : scrolled->scan->highlight->maps) {
+    unresolved = unresolved || !point.classified;
+  }
+  CHECK(unresolved);
 }

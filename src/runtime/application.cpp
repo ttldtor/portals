@@ -80,8 +80,11 @@ public:
               return std::unexpected(TreeError::INVALID_GEOMETRY);
             }
 
-            commands_.emplace_back(
-              TextCommand{*origin, value.text, clip->intersection(geometry_.clip), value.style, value.z});
+            auto translatedText = value;
+
+            translatedText.origin = *origin;
+            translatedText.clip = clip->intersection(geometry_.clip);
+            commands_.emplace_back(translatedText);
           } else {
             auto area = value.area.translated(geometry_.surface.origin());
 

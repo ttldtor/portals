@@ -80,9 +80,13 @@ std::expected<void, ManagedError> navigateDocument(const std::shared_ptr<RefTarg
                                                    std::shared_ptr<const Node<DocumentView>>,
                                                    portals::detail::DocumentNavigation, std::int64_t,
                                                    std::source_location);
+std::expected<void, ManagedError> documentSyntax(const std::shared_ptr<RefTarget> &, Node<DocumentView>,
+                                                 DocumentSyntaxPolicy, std::source_location);
 std::expected<DocumentViewStatus, ManagedError> documentStatus(const std::shared_ptr<RefTarget> &, Node<DocumentView>);
 std::expected<void, ManagedError> documentMode(const std::shared_ptr<RefTarget> &, Node<DocumentView>, DocumentViewMode,
                                                std::source_location);
+std::expected<void, ManagedError> documentLanguage(const std::shared_ptr<RefTarget> &, Node<DocumentView>,
+                                                   DocumentLanguage, std::source_location);
 std::expected<void, ManagedError> documentHexOptions(const std::shared_ptr<RefTarget> &, Node<DocumentView>,
                                                      DocumentHexOptions, std::source_location);
 std::expected<void, ManagedError> documentLineNumbers(const std::shared_ptr<RefTarget> &,
@@ -1393,6 +1397,76 @@ public:
     const auto observation = target();
     const auto result = detail::documentHexOptions(observation, this->node(), options, origin);
 
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return result.has_value();
+  }
+
+  /** @param value New lexical profile. @param origin Command site.
+   * @return Checked deferred change, preserving the current view on rejection.
+   * A consumed forward-only source cannot enable a different lexical profile without replay.
+   */
+  std::expected<void, ManagedError> setLanguage(DocumentLanguage value,
+                                                std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return detail::documentLanguage(target(), this->node(), value, origin);
+  }
+
+  /** @param name Case-insensitive profile name; unknown names select plain. @param origin Command site.
+   * @return Checked deferred profile change, without automatic error collection.
+   */
+  std::expected<void, ManagedError> setLanguage(std::string_view name,
+                                                std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return setLanguage(documentLanguageFromName(name), origin);
+  }
+
+  /** @param value New lexical profile. @param origin Command site.
+   * @return Admission result; rejection is collected once by the scene.
+   */
+  bool language(DocumentLanguage value, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    const auto result = detail::documentLanguage(observation, this->node(), value, origin);
+
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @param name Case-insensitive profile name; unknown names select plain. @param origin Command site.
+   * @return Admission result, collecting one error on rejection.
+   */
+  bool language(std::string_view name, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return language(documentLanguageFromName(name), origin);
+  }
+
+  /** @param policy Automatic, local preview or explicit exact recovery. @param origin Command site.
+   * @return Checked deferred policy change without automatically collecting errors.
+   */
+  std::expected<void, ManagedError> setSyntax(DocumentSyntaxPolicy policy,
+                                              std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    return detail::documentSyntax(target(), this->node(), policy, origin);
+  }
+
+  /** @param policy Recovery policy. @param origin Command site.
+   * @return Admission result; a rejected command is collected once by the scene.
+   */
+  bool syntax(DocumentSyntaxPolicy policy, std::source_location origin = std::source_location::current()) const
+    requires std::same_as<T, DocumentView>
+  {
+    const auto observation = target();
+    const auto result = detail::documentSyntax(observation, this->node(), policy, origin);
     if (!result) {
       detail::reportEventError(observation, result.error(), origin);
     }

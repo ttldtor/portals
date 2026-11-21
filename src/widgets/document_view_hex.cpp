@@ -108,7 +108,8 @@ void appendHexRow(DocumentScan &scan, const DocumentPrepareIntent &intent, std::
 
 std::shared_ptr<const DocumentPreparedFrame> hexFrame(ByteDocumentSource &source, const DocumentPrepareIntent &intent,
                                                       const DocumentScan &scan) {
-  const auto amount = documentPreparationBytes(intent.viewport, intent.config, scan.hex->rawRows.size());
+  const auto amount =
+    documentPreparationBytes(intent.viewport, intent.config, {.hexRows = scan.hex->rawRows.size(), .frame = true});
   if (!amount) {
     failHex(amount.error());
   }
@@ -122,6 +123,7 @@ std::shared_ptr<const DocumentPreparedFrame> hexFrame(ByteDocumentSource &source
   frame->credit = std::move(*credit);
   frame->viewport = intent.viewport;
   frame->status.mode = DocumentViewMode::HEX;
+  frame->status.language = intent.config.language;
   frame->status.revision = scan.metadata.revision;
   frame->status.byteOffset = intent.anchor;
   frame->status.byteExtent = scan.metadata.byteExtent;

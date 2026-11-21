@@ -593,6 +593,29 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
   documentSurface.declarations.bold = false;
   sheet.rules.push_back(std::move(documentSurface));
 
+  StyleRule syntax;
+  syntax.selector.type = "DocumentView";
+  syntax.roles = std::make_shared<const std::vector<StyleRolePatch>>(
+    std::initializer_list<StyleRolePatch>{{"keyword", {.foreground = tokens.accent, .bold = true}},
+                                          {"number", {.foreground = tokens.heading}},
+                                          {"string", {.foreground = tokens.accent}},
+                                          {"comment", {.foreground = tokens.muted}},
+                                          {"identifier", {.foreground = tokens.foreground}},
+                                          {"operator", {.foreground = tokens.foreground}},
+                                          {"heading", {.foreground = tokens.heading, .bold = true}},
+                                          {"markup", {.foreground = tokens.accent}}});
+  sheet.rules.push_back(std::move(syntax));
+
+  StyleRule syntaxDisabled;
+  syntaxDisabled.selector.type = "DocumentView";
+  syntaxDisabled.selector.state = StyleState::DISABLED;
+  auto disabledRoles = std::make_shared<std::vector<StyleRolePatch>>(0);
+  for (const auto name : {"keyword", "number", "string", "comment", "identifier", "operator", "heading", "markup"}) {
+    disabledRoles->push_back({name, {.foreground = tokens.muted, .bold = false}});
+  }
+  syntaxDisabled.roles = std::move(disabledRoles);
+  sheet.rules.push_back(std::move(syntaxDisabled));
+
   StyleRule selectedMarker;
   selectedMarker.selector.type = "RadioGroup";
   selectedMarker.selector.state = StyleState::SELECTED;

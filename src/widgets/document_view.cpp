@@ -42,6 +42,11 @@ DocumentView::DocumentView(WidthPolicy width, DocumentViewConfig config, Control
   document_->width = width;
   document_->config = config;
   document_->status.mode = config.mode;
+  document_->status.language = config.language;
+  document_->status.syntax = config.syntax;
+  document_->status.highlighting = config.mode == DocumentViewMode::TEXT && config.language != DocumentLanguage::PLAIN
+                                     ? DocumentSyntaxState::PENDING
+                                     : DocumentSyntaxState::DISABLED;
   if (!scroll) {
     document_->textHorizontalPolicy = ScrollBarPolicy::NEVER;
     if (config.mode == DocumentViewMode::HEX) {
@@ -154,6 +159,29 @@ std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
       painted = context.submit(std::span(&command, 1));
       if (!painted) {
         return painted;
+      }
+    }
+    if (frame->text && row < frame->text->rows.size()) {
+      for (const auto &run : frame->text->rows[row]) {
+        const auto name = run.role == SemanticRole::KEYWORD      ? "keyword"
+                          : run.role == SemanticRole::NUMBER     ? "number"
+                          : run.role == SemanticRole::STRING     ? "string"
+                          : run.role == SemanticRole::COMMENT    ? "comment"
+                          : run.role == SemanticRole::IDENTIFIER ? "identifier"
+                          : run.role == SemanticRole::OPERATOR   ? "operator"
+                          : run.role == SemanticRole::HEADING    ? "heading"
+                                                                 : "markup";
+        const RenderCommand command = TextCommand{{bodyArea->origin().x + run.column, y},
+                                                  frame->rows[row],
+                                                  *bodyArea,
+                                                  roleStyle(name),
+                                                  0,
+                                                  run.first,
+                                                  run.count};
+        painted = context.submit(std::span(&command, 1));
+        if (!painted) {
+          return painted;
+        }
       }
     }
     if (frame->hex && row < frame->hex->rows.size()) {

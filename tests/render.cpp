@@ -368,6 +368,35 @@ void boundsAndPolicy() {
   cell(untouched, {1, 0}, " ", CellKind::BLANK);
 }
 
+void selectedTextRanges() {
+  const auto value = text("a\xE7\x95\x8C"
+                          "e\xCC\x81"
+                          "z");
+  CellStyle bold;
+  bold.bold = true;
+  const auto clip = rect(0, 0, 5, 1);
+  std::array<RenderCommand, 2> commands{TextCommand{{0, 0}, value, clip, bold, 0, 1, 1},
+                                        TextCommand{{2, 0}, value, clip, {}, 0, 2, 1}};
+  const auto frame = render({5, 1}, commands);
+  cell(frame, {0, 0}, "\xE7\x95\x8C", CellKind::LEAD, 2, bold);
+  cell(frame, {2, 0}, "e\xCC\x81");
+  cell(frame, {3, 0}, " ", CellKind::BLANK);
+
+  auto cap = limits();
+  cap.max_text_bytes = 6;
+  cap.max_work = 2;
+  check(renderFullFrame({5, 1}, commands, {}, cap).has_value(), "selected bytes and graphemes charged once");
+
+  commands[0].emplace<TextCommand>(TextCommand{{0, 0}, value, clip, {}, 0, 5, 0});
+  errorKind(renderFullFrame({5, 1}, commands), RenderErrorKind::INVALID_TEXT_RANGE, "first range index checked");
+  commands[0].emplace<TextCommand>(TextCommand{{0, 0}, value, clip, {}, 0, 3, 2});
+  errorKind(renderFullFrame({5, 1}, commands), RenderErrorKind::INVALID_TEXT_RANGE, "range count checked");
+  commands[0].emplace<TextCommand>(TextCommand{{0, 0}, value, clip, {}, 0, 4, 0});
+  check(renderFullFrame({5, 1}, commands).has_value(), "empty range at end is valid");
+  commands[0].emplace<TextCommand>(TextCommand{{0, 0}, value, clip, {}, 0, 3});
+  cell(render({5, 1}, commands), {0, 0}, "z");
+}
+
 void temporaryAllocationFailure() {
   const auto value = text("x");
   const std::array<RenderCommand, 1> commands{TextCommand{{0, 0}, value, rect(0, 0, 1, 1)}};
@@ -427,6 +456,7 @@ int main() {
   fillControlsAndOwnership();
   matchingWidthPolicies();
   boundsAndPolicy();
+  selectedTextRanges();
   temporaryAllocationFailure();
   asciiOracleProperty();
 
