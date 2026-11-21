@@ -797,6 +797,25 @@ private:
     if (latest_) {
       latest_->cancel();
     }
+    if (!state->errorCaption && state->source) {
+      try {
+        constexpr std::string_view CAPTION = "Unable to read document. Check the source and try again.";
+        constexpr std::size_t CAPTION_BYTES =
+          sizeof(DocumentErrorCaption) + CAPTION.size() * DOCUMENT_PREPARED_CELL_BYTES;
+        auto budget = state->source->budget();
+        auto credit = budget->reserve({CAPTION_BYTES, 0, 0, 0});
+        if (credit) {
+          auto text = GraphemeText::from(CAPTION, state->width, {CAPTION.size(), 1, CAPTION.size(), CAPTION.size()});
+          if (text) {
+            state->errorCaption = std::make_unique<DocumentErrorCaption>(
+              DocumentErrorCaption{std::move(*credit), std::move(budget), std::move(*text)});
+          }
+        }
+      } catch (...) {
+        // Preserve the original typed error if the optional caption cannot be prepared.
+      }
+    }
+    (void)app_.tree().invalidate(node_, Invalidation::PAINT);
     // reportError may synchronously destroy this scene or remove this node.
     (void)scene_.reportError(documentFailure(node_, error));
   }
@@ -1114,7 +1133,9 @@ private:
     }
     // These private retained owners cannot disappear while this view is waiting.
     // Reject impossible overlap instead of promising a capacity event that cannot occur.
-    if (!includeOwned(SourceBudget::ROOT_METADATA_BYTES + SourceBudget::CAPACITY_OBSERVER_BYTES) ||
+    if ((state.errorCaption && state.errorCaption->ownerBudget == state.source->budget() &&
+         !includeOwned(state.errorCaption->credit.usage().bytes)) ||
+        !includeOwned(SourceBudget::ROOT_METADATA_BYTES + SourceBudget::CAPACITY_OBSERVER_BYTES) ||
         !includeOwned(envelope) || (state.frame && !includeOwned(state.frame->credit.usage().bytes)) ||
         (scan_ && !includeOwned(scan_->reservation->usage().bytes)) ||
         peak.bytes > options.maxBytes - std::min(owned, options.maxBytes) ||

@@ -4,6 +4,8 @@
 #include "../src/widgets/document_view_state.hpp"
 #include <atomic>
 #include <doctest.h>
+#include <functional>
+#include <portals/render.hpp>
 #include <portals/style_pss.hpp>
 #include <portals/ui.hpp>
 #include <portals/ui_style.hpp>
@@ -2921,4 +2923,153 @@ TEST_CASE("native sized HEX actual wheel and End input remain within default sou
   CHECK(end.byteOffset == EXTENT - 50 * 16);
   CHECK(f.frame()->visibleByteEnd == EXTENT);
   CHECK(f.frame()->finalEndVisible);
+}
+
+TEST_CASE("document error caption survives deferred rendering and reentrant sinks") {
+  auto provider = std::make_shared<Provider>();
+  provider->failRead = true;
+  Fixture f(ui::document(provider));
+  f.size = {80, 8};
+  f.settle();
+  REQUIRE(take(f.reference.status()).error);
+
+  class DeferredSink final : public PaintContext {
+  public:
+    std::vector<RenderCommand> commands;
+    std::function<void()> action;
+    bool acted{};
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> incoming) override {
+      for (const auto &command : incoming) {
+        commands.push_back(command);
+        if (const auto *text = std::get_if<TextCommand>(&command);
+            text && text->text.bytes().starts_with("Unable to read document.") && !acted) {
+          acted = true;
+          action();
+        }
+      }
+      return {};
+    }
+  } sink;
+
+  SUBCASE("switch source") {
+    sink.action = [&] {
+      take(f.reference.setModel(source("replacement")));
+    };
+  }
+  SUBCASE("remove target") {
+    sink.action = [&] {
+      const auto removed = f.app->tree().remove(f.node);
+      CHECK_FALSE(removed);
+      if (!removed) {
+        CHECK(removed.error() == TreeError::WOULD_BLOCK);
+      }
+    };
+  }
+
+  take(f.app->tree().frame([&] {
+    take(f.app->tree().paint(f.node, sink));
+    REQUIRE(sink.acted);
+    auto cells = take(renderFullFrame(f.size, sink.commands));
+    std::string row;
+    for (int column = 0; column < f.size.width; ++column) {
+      row += take(cells.at({column, 1})).glyph;
+    }
+    CHECK(row.find("Unable to read document.") != std::string::npos);
+  }));
+}
+
+TEST_CASE("document error caption counts only against its owning source budget") {
+  DocumentViewConfig config;
+  CellSize viewport{};
+  auto probeProvider = std::make_shared<Provider>();
+  probeProvider->failRead = true;
+  auto probeBudget = take(SourceBudget::create());
+  auto probe = std::make_unique<Fixture>(ui::document(probeProvider, probeBudget));
+  probe->settle();
+  std::size_t envelope{};
+  std::size_t page{};
+  std::size_t metadataUsage{};
+  std::size_t captionBytes{};
+  take(probe->app->tree().read(probe->node, [&](const DocumentView &widget) {
+    const auto &state = detail::DocumentViewAccess::state(widget);
+    viewport = detail::ScrollWidgetAccess::state(widget).geometry.viewport;
+    envelope = state.source->envelopeBytes();
+    REQUIRE(state.errorCaption);
+    captionBytes = state.errorCaption->credit.usage().bytes;
+    metadataUsage = state.source->budget()->usage().bytes - captionBytes;
+    page = state.source->maxPageBytes() + SourceArena::METADATA_BYTES;
+  }));
+  probe.reset();
+  const auto work = take(detail::documentPreparationBytes(viewport, config));
+  REQUIRE(work >= envelope + page);
+  const auto minimum = 2 * work + metadataUsage;
+  // One byte below the overlap needed while retaining the error caption.
+  const auto limit = minimum + captionBytes - 1;
+  auto firstBudget = take(SourceBudget::create({.maxBytes = limit}));
+  auto secondBudget = take(SourceBudget::create({.maxBytes = limit}));
+  auto provider = std::make_shared<Provider>();
+  provider->failRead = true;
+  auto descriptor = ui::document(provider, firstBudget);
+  auto f = std::make_unique<Fixture>(descriptor);
+  f->settle();
+  const auto initialStatus = take(f->reference.status());
+  INFO("limit=", limit, " work=", work, " envelope=", envelope, " preparing=", initialStatus.preparing,
+       " blocked=", initialStatus.backpressured, " submissions=", f->executor.submissions,
+       " reads=", provider->reads.load(), " usage=", firstBudget->usage().bytes);
+  const auto initialError = initialStatus.error;
+  REQUIRE(initialError);
+  CHECK(initialError->code == SourceError::IO_ERROR);
+  take(f->app->tree().read(f->node, [&](const DocumentView &widget) {
+    REQUIRE(detail::DocumentViewAccess::state(widget).errorCaption);
+  }));
+
+  provider->failRead = false;
+  take(f->reference.refresh());
+  f->settle();
+  const auto rejected = take(f->reference.status());
+  REQUIRE(rejected.error);
+  CHECK(rejected.error->code == SourceError::PAGE_TOO_LARGE);
+  CHECK_FALSE(rejected.backpressured);
+
+  take(f->reference.setModel(ui::document(std::make_shared<const std::string>("other budget"), secondBudget)));
+  f->settle();
+  CHECK_FALSE(take(f->reference.status()).error);
+  REQUIRE(f->frame());
+  CHECK(f->frame()->rows.front().bytes() == "other budget");
+  take(f->reference.setModel(descriptor));
+  f->settle();
+  const auto returned = take(f->reference.status());
+  REQUIRE(returned.error);
+  CHECK(returned.error->code == SourceError::PAGE_TOO_LARGE);
+  CHECK_FALSE(returned.backpressured);
+  const auto retained = firstBudget->usage().bytes;
+  f.reset();
+  CHECK(firstBudget->usage().bytes <= retained - captionBytes);
+  CHECK(secondBudget->usage().work == 0);
+  CHECK(secondBudget->usage().consumers == 0);
+}
+
+TEST_CASE("failed error caption admission preserves the original source error") {
+  auto budget = take(SourceBudget::create());
+  auto provider = std::make_shared<Provider>();
+  provider->failRead = true;
+  Fixture f(ui::document(provider, budget));
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+  auto pressure = take(budget->reserve({budget->options().maxBytes - budget->usage().bytes, 0, 0, 0}));
+  f.pump();
+  const auto error = take(f.reference.status()).error;
+  REQUIRE(error);
+  CHECK(error->code == SourceError::IO_ERROR);
+  take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+    CHECK_FALSE(detail::DocumentViewAccess::state(widget).errorCaption);
+  }));
+  pressure = {};
+  provider->failRead = false;
+  take(f.reference.refresh());
+  f.settle();
+  CHECK_FALSE(take(f.reference.status()).error);
+  REQUIRE(f.frame());
 }
