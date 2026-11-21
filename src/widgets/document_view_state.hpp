@@ -282,11 +282,19 @@ inline std::uint64_t documentScrollByteRange(const DocumentPreparedFrame &frame)
   return extent - (last - first);
 }
 
+struct DocumentErrorCaption {
+  SourceCredit credit; // Declared first: text is destroyed before its reservation.
+  std::shared_ptr<SourceBudget> ownerBudget;
+  GraphemeText text;
+};
+
 struct DocumentViewState {
   WidthPolicy width;
   DocumentViewConfig config;
   std::shared_ptr<const DocumentPreparedFrame> frame;
   std::shared_ptr<ui::detail::SceneActivity> activity;
+  // Once published, keep the borrowed caption alive across source replacement.
+  std::unique_ptr<DocumentErrorCaption> errorCaption;
   std::shared_ptr<ByteDocumentSource> source;
   StyleRoleRegistration roles;
   DocumentViewStatus status;

@@ -80,6 +80,8 @@ std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
   const bool arranged = scroll.arranged;
   const auto frame = document_->frame;
   const auto palette = document_->roles.snapshot();
+  const bool statusError = document_->status.error.has_value();
+  const auto *errorCaption = statusError ? document_->errorCaption.get() : nullptr;
   std::optional<ComputedStyle> manual;
   const auto computed = computedStyle();
   if (!computed) {
@@ -97,7 +99,7 @@ std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
   const auto *options = detail::scrollFrameOptions(scroll);
   std::optional<CellRect> footer;
   const bool currentPosition =
-    frame && frame->footer && !document_->status.error && (!document_->status.waiting || frame->status.waiting);
+    frame && frame->footer && !statusError && (!document_->status.waiting || frame->status.waiting);
   if (currentPosition && options && options->sides.bottom && scroll.allocation.width > 2 &&
       scroll.allocation.height > 1) {
     auto area = CellRect::from({1, scroll.allocation.height - 1}, {scroll.allocation.width - 2, 1});
@@ -131,7 +133,17 @@ std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
     return painted;
   }
   painted = fillPart(*gutterArea, gutter);
-  if (!painted || !frame) {
+  if (!painted) {
+    return painted;
+  }
+  if (statusError) {
+    if (errorCaption && !bodyArea->empty()) {
+      const RenderCommand command = TextCommand{bodyArea->origin(), errorCaption->text, *bodyArea, body};
+      return context.submit(std::span(&command, 1));
+    }
+    return {};
+  }
+  if (!frame) {
     return painted;
   }
   const auto count = std::min<std::size_t>(frame->rows.size(), static_cast<std::size_t>(viewport->size().height));

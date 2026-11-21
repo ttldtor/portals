@@ -16,6 +16,31 @@ Build `portals_document_view_example` with `PORTALS_BUILD_EXAMPLES=ON` and run i
 
 `ui::viewer("README.md")` is the shortest file-backed form. Keep a `ui::Ref<DocumentView>` when handlers need to replace its source or change its reading position. `ui::documentFile(path)` owns the UTF-8 path and performs no file I/O during recipe construction. Keep the same descriptor when switching back to its remembered position.
 
+## Choose a file {#document-view-files}
+
+Build `portals_document_files_example` with `PORTALS_BUILD_EXAMPLES=ON`. Enter a path in the field and choose **Open**, or press Ctrl+O. F2 selects text, F3 selects hexadecimal bytes, and F5 refreshes the current source. F10 or Ctrl+C closes the application. Opening a source starts background preparation; the UI stays available.
+
+@image html document-view-files.gif "Open README, show a missing-file error, then open release notes. The ring marks an injected mouse click."
+
+[Complete source](../examples/document_view/files.cpp) · [Build target](../examples/document_view/CMakeLists.txt) · [Windows manifest](../examples/document_view/windows-utf8.manifest)
+
+\include document_view/files.cpp
+
+The first positional argument supplies the initial path. Without it, the example uses `README.md` in the current working directory. From the executable directory on Windows, replace the following path with your document:
+
+```powershell
+./portals_document_files_example.exe --help
+./portals_document_files_example.exe "C:\logs\session.txt"
+```
+
+On Linux, use the executable name without `.exe` and a native filesystem path. Help prints the purpose and options without opening the terminal. Exit status is 0 for an orderly exit or help, 2 for a command-line parse error, and 1 for an application failure. A path beginning with `-` can be a literal filename; a second positional path is a parse error.
+
+Relative paths use the application's working directory. The field accepts the path itself; shell quotes belong to command-line invocation. UTF-8 names, spaces and native absolute paths are supported. Windows extended paths are passed to the filesystem; network paths also depend on the share, permissions and availability. The example does not expand environment variables or `~`. Its Windows manifest enables UTF-8 process arguments and long-path support for this executable.
+
+Read failures appear inside the document frame and remain available in `DocumentViewStatus::error` through checked `reader.status()` access and the managed diagnostic channel. Correct the path and choose **Open** to try again. The caption uses the `body` style and does not become a document row, line number or progress value. Preparing the optional caption can fail under memory pressure; the original typed error still reaches diagnostics.
+
+Each **Open** creates a source descriptor. Keep a descriptor when returning to its saved reading position; the [previous example](#document-view-example) shows retained sources.
+
 ## Reading and navigation {#document-view-navigation}
 
 | Input | Result |
