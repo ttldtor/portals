@@ -577,6 +577,131 @@ TEST_CASE("cold tail reads a bounded suffix of a large seekable document") {
 }
 
 namespace {
+TEST_CASE("wrapped ASCII tail matches the scalar path through Unicode and source seams") {
+  const std::string ascii(173, 'a');
+  const std::array samples{
+    ascii + "\r\n" + ascii + "\n" + ascii + "\r\nlast",
+    ascii + "e\xCC\x81" + ascii + "\r\n" +
+      "\xD8\x80"
+      "A" +
+      ascii + "\nlast",
+    ascii + "\xF0\x9F\x91\xA9\xE2\x80\x8D\xF0\x9F\x92\xBB" + ascii + "\r\nlast",
+    ascii + "\t\x1b[31m" + ascii + "\r\n\r\nlast\r\n",
+    ascii + "\xE2\x82" + ascii + "\nlast",
+    std::string(70 * 1024, 'a') + "Z\r\nlast",
+  };
+
+  for (const auto &text : samples) {
+    for (const bool lineNumbers : {false, true}) {
+      Fixture reference(text, 1);
+      reference.intent.viewport = {31, 4};
+      reference.intent.config.workBytes = 4096;
+      reference.intent.config.lineNumbers = lineNumbers;
+      reference.intent.tail = true;
+      reference.intent.anchor = text.size();
+      const auto expected = reference.finish();
+
+      REQUIRE_FALSE(expected->error);
+      REQUIRE(expected->frame);
+      REQUIRE(expected->frame->finalEndVisible);
+
+      for (const std::size_t page : {2, 3, 7, 64, 64 * 1024}) {
+        CAPTURE(page);
+        CAPTURE(lineNumbers);
+        Fixture candidate(text, page);
+        candidate.intent = reference.intent;
+        const auto actual = candidate.finish();
+
+        REQUIRE_FALSE(actual->error);
+        REQUIRE(actual->frame);
+        REQUIRE(actual->scan);
+        REQUIRE(actual->scan->rows.size() == expected->scan->rows.size());
+        REQUIRE(actual->frame->rows.size() == expected->frame->rows.size());
+        CHECK(actual->frame->finalEndVisible);
+        CHECK(actual->frame->visibleByteEnd == expected->frame->visibleByteEnd);
+        CHECK(actual->frame->status.visibleByteOffset == expected->frame->status.visibleByteOffset);
+        CHECK(actual->frame->status.logicalLine == expected->frame->status.logicalLine);
+        CHECK(actual->frame->status.fragmentedCluster == expected->frame->status.fragmentedCluster);
+        CHECK(actual->frame->anchors == expected->frame->anchors);
+
+        for (std::size_t row = 0; row < actual->frame->rows.size(); ++row) {
+          CHECK(actual->frame->rows[row].bytes() == expected->frame->rows[row].bytes());
+          CHECK(actual->scan->rows[row].offset == expected->scan->rows[row].offset);
+          CHECK(actual->scan->rows[row].end == expected->scan->rows[row].end);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("ASCII tail checkpoints preserve small decoder work and narrow encoding seams") {
+  for (const auto encoding : {DocumentEncoding::UTF8, DocumentEncoding::WINDOWS1251, DocumentEncoding::WINDOWS1252}) {
+    const auto edge = encoding == DocumentEncoding::UTF8 ? "\xF0\x9F\x98\x80" : "\xE9";
+    const auto text = std::string(edge) + std::string(97, 'a') + edge + "\r\nlast";
+
+    for (const std::size_t workLimit : {1, 3}) {
+      for (const int width : {1, 2}) {
+        const auto prepare = [&](std::size_t page) {
+          Fixture f(text, page);
+          f.intent.viewport = {width, 4};
+          f.intent.config.decoder.explicitEncoding = encoding;
+          f.intent.config.decoder.workLimit = workLimit;
+          f.intent.tail = true;
+          f.intent.anchor = text.size();
+
+          return f.finish();
+        };
+        const auto expected = prepare(1);
+        const auto actual = prepare(64 * 1024);
+
+        CAPTURE(encoding);
+        CAPTURE(workLimit);
+        CAPTURE(width);
+        REQUIRE_FALSE(expected->error);
+        REQUIRE_FALSE(actual->error);
+        REQUIRE(actual->frame);
+        REQUIRE(expected->frame);
+        REQUIRE(actual->frame->rows.size() == expected->frame->rows.size());
+        CHECK(actual->frame->finalEndVisible);
+        CHECK(actual->frame->anchors == expected->frame->anchors);
+        CHECK(actual->frame->visibleByteEnd == expected->frame->visibleByteEnd);
+
+        for (std::size_t row = 0; row < actual->frame->rows.size(); ++row) {
+          CHECK(actual->frame->rows[row].bytes() == expected->frame->rows[row].bytes());
+          CHECK(actual->scan->rows[row].offset == expected->scan->rows[row].offset);
+          CHECK(actual->scan->rows[row].end == expected->scan->rows[row].end);
+        }
+      }
+    }
+  }
+}
+
+TEST_CASE("wrapped ASCII tail preserves strict malformed and invalid width failures") {
+  const auto check = [](WidthPolicy width, DocumentDecodePolicy policy) {
+    const std::string text = std::string(511, 'a') + "\xE2\x82";
+    std::optional<SourceError> expected;
+
+    for (const std::size_t page : {1, 64 * 1024}) {
+      Fixture f(text, page);
+      f.intent.viewport = {31, 4};
+      f.intent.width = width;
+      f.intent.config.decoder.policy = policy;
+      f.intent.tail = true;
+      f.intent.anchor = text.size();
+      const auto result = f.finish();
+
+      REQUIRE(result->error);
+      if (expected) {
+        CHECK(result->error->code == *expected);
+      }
+      expected = result->error->code;
+    }
+  };
+
+  check({}, DocumentDecodePolicy::STRICT_MODE);
+  check({.emoji = static_cast<EmojiWidth>(99)}, DocumentDecodePolicy::REPLACE);
+}
+
 std::string tailEncodedRows(DocumentEncoding encoding, std::string_view separator, bool bom, unsigned count = 6) {
   std::string bytes;
   const bool bigEndian = encoding == DocumentEncoding::UTF16BE || encoding == DocumentEncoding::UTF32BE;

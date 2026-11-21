@@ -313,6 +313,106 @@ TEST_CASE("standard managed preparation produces immutable visible rows and then
   CHECK(f.executor.submissions == submitted);
 }
 
+TEST_CASE("incomplete text End preparation continues after dispatch without another layout") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = std::string(10000, 'x');
+  Fixture f(ui::document(provider), {.workBytes = 16});
+  REQUIRE(f.reference.end());
+  f.pump();
+  REQUIRE(f.executor.job);
+  const auto submitted = f.executor.submissions;
+
+  for (unsigned turn = 0; turn < 3; ++turn) {
+    const auto beforeRender = take(f.app->tree().inspect(f.node));
+    const auto bounds = take(CellRect::from({}, f.size));
+    // Native buildFrame arranges again after captureLayout/prepareViews.
+    take(f.app->tree().frame([&] {
+      take(layoutTree(f.app->tree(), f.app->root(), bounds, bounds));
+    }));
+    const auto rendered = take(f.app->tree().inspect(f.node));
+
+    REQUIRE(rendered.geometryEpoch != beforeRender.geometryEpoch);
+    REQUIRE(rendered.geometry.surface == beforeRender.geometry.surface);
+    REQUIRE(rendered.geometry.clip == beforeRender.geometry.clip);
+    f.executor.runOne();
+    take(f.app->scheduler().dispatch());
+    take(f.scene->afterDispatch(*f.app));
+    REQUIRE(f.executor.job);
+  }
+
+  CHECK(f.executor.submissions == submitted + 3);
+  CHECK_FALSE(provider->uiOperation.load());
+  CHECK_FALSE(f.frame());
+}
+
+TEST_CASE("text End continuation defers stale geometry and superseded intent to layout") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = std::string(10000, 'x');
+  Fixture f(ui::document(provider), {.workBytes = 16});
+  REQUIRE(f.reference.end());
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+
+  SUBCASE("hidden view") {
+    take(f.app->tree().setVisible(f.node, false));
+  }
+  SUBCASE("terminal resize invalidates the old arrangement") {
+    f.size = {32, 10};
+    take(f.app->tree().invalidate(f.app->root(), Invalidation::LAYOUT));
+  }
+  SUBCASE("completed resized arrangement before view preparation") {
+    f.size = {32, 10};
+    const auto bounds = take(CellRect::from({}, f.size));
+    take(f.app->tree().frame([&] {
+      take(layoutTree(f.app->tree(), f.app->root(), bounds, bounds));
+    }));
+  }
+  SUBCASE("changed cumulative clip at the same outer size") {
+    const auto bounds = take(CellRect::from({}, f.size));
+    const auto clip = take(CellRect::from({}, {12, 8}));
+    take(f.app->tree().frame([&] {
+      take(layoutTree(f.app->tree(), f.app->root(), bounds, clip));
+    }));
+  }
+  SUBCASE("new absolute intent") {
+    REQUIRE(f.reference.home());
+  }
+  SUBCASE("new source") {
+    take(f.reference.setModel(source("replacement")));
+  }
+
+  take(f.app->scheduler().dispatch());
+  take(f.scene->afterDispatch(*f.app));
+  CHECK_FALSE(f.executor.job);
+  CHECK_FALSE(f.frame());
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("text End final frame still commits through the layout path") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = std::string(70, 'x');
+  Fixture f(ui::document(provider), {.workBytes = 16});
+  REQUIRE(f.reference.end());
+  f.pump();
+  unsigned turns{};
+
+  while (f.executor.job && turns < 32) {
+    ++turns;
+    f.executor.runOne();
+    take(f.app->scheduler().dispatch());
+    take(f.scene->afterDispatch(*f.app));
+  }
+
+  REQUIRE(turns > 1);
+  REQUIRE(turns < 32);
+  CHECK_FALSE(f.frame());
+  f.pump();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->finalEndVisible);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
 TEST_CASE("hide cancels demand without releasing running-job credits and show resumes") {
   auto budget = take(SourceBudget::create());
   auto provider = std::make_shared<Provider>();

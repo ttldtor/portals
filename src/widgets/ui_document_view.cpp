@@ -207,7 +207,9 @@ public:
           const auto result = std::static_pointer_cast<const DocumentPreparation>(envelope->payload);
           if (result && result->generation == activity->generation_) {
             activity->completion_ = result;
-            (void)activity->app_.tree().invalidate(activity->node_, Invalidation::LAYOUT);
+            if (!activity->isTailContinuation(*result)) {
+              (void)activity->app_.tree().invalidate(activity->node_, Invalidation::LAYOUT);
+            }
           }
         }
         envelope->complete({});
@@ -263,7 +265,15 @@ public:
       if (!result) {
         fail(
           {result.error() == BackgroundError::NO_MEMORY ? SourceError::NO_MEMORY : SourceError::CONTEXT_ERROR, {}, {}});
+        return;
       }
+    }
+    try {
+      continueTail();
+    } catch (const std::bad_alloc &) {
+      fail({SourceError::NO_MEMORY, {}, {}});
+    } catch (...) {
+      fail({SourceError::CALLBACK_FAILED, {}, {}});
     }
   }
 
@@ -602,6 +612,62 @@ public:
   }
 
 private:
+  bool isTailContinuation(const DocumentPreparation &result) const noexcept {
+    return intent_.tail && intent_.config.mode == DocumentViewMode::TEXT && result.continueWork && result.scan &&
+           !result.frame && !result.error && !result.providerWaiting;
+  }
+
+  bool matchesPreparedGeometry() const {
+    const auto current = app_.tree().inspect(node_);
+
+    // Arrangement epochs identify passes, not distinct rectangles: native
+    // buildFrame arranges the same geometry again after prepared views.
+    if (!current || !current->visible || !current->geometry.valid || !current->geometryEpoch ||
+        current->geometry.local != geometry_.local || current->geometry.surface != geometry_.surface ||
+        current->geometry.clip != geometry_.clip) {
+      return false;
+    }
+
+    bool matches{};
+    const auto read = app_.tree().read(node_, [&](const DocumentView &widget) {
+      const auto &scroll = ScrollWidgetAccess::state(widget);
+      matches =
+        scroll.arranged && scroll.geometry.viewport == viewport_ && scroll.geometry.viewportOrigin == viewportOrigin_;
+    });
+
+    return read && matches;
+  }
+
+  void continueTail() {
+    if (!completion_ || !isTailContinuation(*completion_)) {
+      return;
+    }
+
+    auto state = state_.lock();
+    const bool current = state && visible_ && !state->refresh && state->serial == serial_ &&
+                         completion_->generation == generation_ && !capacityBlocked_ && !state->status.error &&
+                         completion_->scan->metadata.revision.source == state->source->stamp() &&
+                         state->horizontal == intent_.horizontal && state->width == intent_.width &&
+                         matchesPreparedGeometry();
+
+    if (!current) {
+      // A new layout/intent must pass through ordinary preparation before any
+      // continuation can borrow its geometry. Never consume the stale result here.
+      (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
+      return;
+    }
+
+    // Intermediate work has no new frame to measure or paint. Admit one bounded
+    // successor after delivery, without waiting for the next rendering cadence.
+    auto completed = std::exchange(completion_, {});
+    scan_ = completed->scan;
+    busy_ = false;
+    continuation_ = true;
+    state->status.preparing = true;
+    completed.reset();
+    dispatch(state);
+  }
+
   std::expected<void, TreeError> queueRows(DocumentViewState &state, bool arranged, CellSize inputViewport,
                                            std::int64_t delta) {
     if (!state.source->capabilities().seekable && delta < 0) {
@@ -803,6 +869,8 @@ private:
       return;
     }
     visible_ = true;
+    geometry_ = layout->geometry;
+    viewportOrigin_ = area.placement.viewportOrigin;
 
     if (!state->roles.snapshot() && (!roleFailureSerial_ || *roleFailureSerial_ != state->serial)) {
       auto roles = state->config.mode == DocumentViewMode::HEX
@@ -1146,6 +1214,8 @@ private:
   bool capacityBlocked_{};
   SourceBudgetUsage waitingDemand_;
   CellSize viewport_;
+  NodeGeometry geometry_;
+  CellPoint viewportOrigin_;
   std::optional<std::uint64_t> roleFailureSerial_;
   std::uint64_t generation_{};
   std::uint64_t serial_{};
