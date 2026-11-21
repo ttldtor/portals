@@ -43,6 +43,7 @@ DocumentView::DocumentView(WidthPolicy width, DocumentViewConfig config, Control
   document_->config = config;
   document_->status.mode = config.mode;
   document_->status.language = config.language;
+  document_->status.syntax = config.syntax;
   document_->status.highlighting = config.mode == DocumentViewMode::TEXT && config.language != DocumentLanguage::PLAIN
                                      ? DocumentSyntaxState::PENDING
                                      : DocumentSyntaxState::DISABLED;

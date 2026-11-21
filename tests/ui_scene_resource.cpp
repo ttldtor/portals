@@ -7268,3 +7268,52 @@ TEST_CASE("loaded document language supports defaults aliases and plain fallback
   }));
   REQUIRE(owner.close());
 }
+
+TEST_CASE("loaded syntax policies retain defaults typed overrides and a bounded auto budget") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto owner = ui::scene(R"scene(
+    defaults { DocumentView { syntax="preview" maxAutoHighlightBytes=17 } }
+    scene { VBox {
+      DocumentView#local { file="not-opened.sql" language="mysql" }
+      DocumentView#exact { file="not-opened.md" language="markdown" syntax="EXACT" }
+      DocumentView#automatic { file="not-opened.sql" syntax=Auto maxAutoHighlightBytes=513 }
+    } }
+  )scene",
+                         options);
+  const auto local = owner.get<DocumentView>("local");
+  const auto exact = owner.get<DocumentView>("exact");
+  const auto automatic = owner.get<DocumentView>("automatic");
+  REQUIRE(owner.prepareChecked());
+  auto &app = ui::detail::SceneAccess::application(owner.managed()->get());
+  REQUIRE(app.tree().read(local.node(), [](const DocumentView &widget) {
+    const auto &config = detail::DocumentViewAccess::state(widget).config;
+    CHECK(config.syntax == syntax::PREVIEW);
+    CHECK(config.maxAutoHighlightBytes == 17);
+  }));
+  REQUIRE(app.tree().read(exact.node(), [](const DocumentView &widget) {
+    CHECK(detail::DocumentViewAccess::state(widget).config.syntax == syntax::EXACT);
+  }));
+  REQUIRE(app.tree().read(automatic.node(), [](const DocumentView &widget) {
+    const auto &config = detail::DocumentViewAccess::state(widget).config;
+    CHECK(config.syntax == syntax::AUTO);
+    CHECK(config.maxAutoHighlightBytes == 513);
+  }));
+  REQUIRE(owner.close());
+}
+
+TEST_CASE("syntax resources reject unknown policy zero budget and unrelated controls") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  for (const auto text :
+       {"scene{DocumentView{file=\"x\" syntax=fast}}", "scene{DocumentView{file=\"x\" maxAutoHighlightBytes=0}}"}) {
+    const auto error = rejected(text, options);
+    REQUIRE(error.sceneResource);
+    CHECK(error.sceneResource->code == Code::INVALID_VALUE);
+  }
+  for (const auto text : {"scene{Button{syntax=auto}}", "scene{Label{maxAutoHighlightBytes=17}}"}) {
+    const auto error = rejected(text, options);
+    REQUIRE(error.sceneResource);
+    CHECK(error.sceneResource->code == Code::UNKNOWN_PROPERTY);
+  }
+}

@@ -137,6 +137,20 @@ public:
     return std::move(*this).language(documentLanguageFromName(name));
   }
 
+  /** @param value Syntax recovery policy; EXACT explicitly permits long prefix reads.
+   * @return Consuming viewer recipe; language and byte anchor are preserved.
+   */
+  Description &&syntax(DocumentSyntaxPolicy value) &&
+    requires std::same_as<T, DocumentView>
+  {
+    ControlSettings patch;
+    auto document = std::make_shared<ControlDocumentSettings>();
+    document->syntax = value;
+    patch.document = std::move(document);
+
+    return std::move(*this).scalarSettings(std::move(patch));
+  }
+
   /** @param enabled Show proven logical line numbers. @return Consuming text viewer recipe. */
   Description &&lineNumbers(bool enabled = true) &&
     requires std::same_as<T, DocumentView>

@@ -18,7 +18,7 @@ Build `portals_document_view_example` with `PORTALS_BUILD_EXAMPLES=ON` and run i
 
 ## SQL and Markdown source colors {#document-view-syntax}
 
-Build `portals_document_highlight_example` with `PORTALS_BUILD_EXAMPLES=ON` and run it from its executable directory. The build copies `orders.sql` and `notes.md` beside the executable. Both panes use the ordinary Viewer: Tab changes focus, wheel and PgUp/PgDn navigate, and F10 or Ctrl+C closes the application.
+Build `portals_document_highlight_example` with `PORTALS_BUILD_EXAMPLES=ON` and run it from its executable directory. The build copies `orders.sql` and `notes.md` beside the executable. Both panes use the ordinary Viewer: Tab changes focus, wheel and PgUp/PgDn navigate, F6 requests exact colors, F7 returns to AUTO, and F10 or Ctrl+C closes the application.
 
 [Complete source](../examples/document_view/highlight.cpp)
 
@@ -42,7 +42,19 @@ Build `portals_document_highlight_example` with `PORTALS_BUILD_EXAMPLES=ON` and 
 
 The Markdown profile colors source headings, punctuation, code spans and fenced regions, including SQL fences. It does not render Markdown as formatted HTML. The SQL profiles recognize lexical structure, not database schemas or query semantics. MySQL support includes bounded delimiter and SQL-mode handling; unsupported constructs and exhausted lexical policies leave readable text with an explicit syntax status.
 
-Reading, decoding and lexical work run on workers. A cold seek first publishes plain text, then adds exact colors after restoring lexical context from a qualified checkpoint or the source origin. Distant exact highlighting can require substantial cumulative reading. Scrolling can supersede this optional replay. Source size does not determine resident memory: the view retains bounded windows and a fixed checkpoint cache, without a complete line or token index.
+Reading, decoding and lexical work run on workers. Choosing a language defaults to `syntax::AUTO`. The view shows a bounded local preview and uses proven exact context when it is available. A ` ~` suffix beside the position marks provisional colors. Exact replacement changes the colors together and removes the marker, preserving source text and byte anchors.
+
+| Policy | Behavior |
+| --- | --- |
+| `syntax::AUTO` | Quick local preview, then exact refinement within a bounded additional-read budget. |
+| `syntax::PREVIEW` | Local preview or already known exact colors; no long context scan. |
+| `syntax::EXACT` | Explicitly allow cancellable context computation from a qualified checkpoint or the source origin. |
+
+Use `.syntax(syntax::EXACT)` in a description or handler to request exact colors. `.syntax(syntax::AUTO)` restores the default policy. The initial AUTO cap is 512 KiB of additional source admission per displayed intent; `DocumentViewConfig.maxAutoHighlightBytes` changes that positive limit. It is a byte budget, not a wall-clock deadline. Painting or changing a palette does not renew an exhausted attempt.
+
+A preview can misclassify text when the window starts inside a long string, comment or Markdown fence. If the visible fragment lies entirely inside a long comment, the whole window can appear as normal text until exact refinement completes. It is never a proof of enclosing lexical context and never becomes a qualified source checkpoint. Exact means lexical accuracy within the selected profile, not SQL validation or a complete CommonMark renderer. A distant exact request can read a large prefix and take substantial time; navigation supersedes obsolete work. AUTO does not start an unbounded prefix scan.
+
+Source size does not determine resident memory: the view retains bounded windows, optional preview storage and a fixed exact-checkpoint cache, without a complete line or token index.
 
 ### Customize syntax roles
 
@@ -72,7 +84,7 @@ Each `role-<name>-` prefix supports `foreground`, `background`, `bold`, `italic`
 
 `document.language("md")` collects a rejected command in the scene; `document.setLanguage("md")` returns a checked result. Loaded configuration scenes accept `DocumentView { file="notes.md" language="markdown" }`.
 
-`document.status()` reports `language`, `highlighting` and optional `highlightErrorOffset`. `PENDING` means the displayed text awaits proven lexical context; `READY` means all displayed clusters are classified. `UNSUPPORTED_PROFILE`, `RESOURCE_LIMIT`, `REPLAY_UNAVAILABLE` and `UNAVAILABLE` distinguish syntax limitations from the document's source error. The plain frame remains available when optional syntax preparation fails.
+`document.status()` reports the requested `syntax` policy, displayed `syntaxAccuracy`, `highlighting` state and optional `highlightErrorOffset`. Accuracy is `NONE`, `PREVIEW` or `EXACT`. `PENDING` means exact context is not ready; terminal `PREVIEW` means bounded automatic refinement stopped with provisional colors; `READY` requires a fully proven exact projection. `UNSUPPORTED_PROFILE`, `RESOURCE_LIMIT`, `REPLAY_UNAVAILABLE` and `UNAVAILABLE` describe syntax limitations separately from source errors. Optional refinement failure preserves the readable frame and the accuracy of its actual colors. `document.setSyntax(policy)` returns a checked result; `document.syntax(policy)` collects a rejected command in the scene.
 
 For a forward-only source, select the initial language in the description before mounting. Changing to another non-plain profile after attachment returns a checked unsupported-operation error. Disabling colors preserves accepted buffered bytes. History is bounded: reflow that needs bytes outside retained history is not an arbitrary rewind. A source span exceeding the retained-window budget can return `PAGE_TOO_LARGE` before the next unsafe read; this does not roll back earlier reads of that worker turn or promise automatic recovery of an irreversible source.
 
@@ -210,7 +222,7 @@ The default UTF-8 hint applies after an explicit encoding or a recognized BOM. S
 
 Replacement decoding is the default. Low-level `DocumentViewConfig::decoder` also supports strict decoding; a strict failure reports a typed preparation error. A local seek or fast EOF checks the selected decoded region, including the origin needed to determine its encoding; it does not certify an omitted prefix. Terminal control characters are rendered as visible escapes. Ordinary multi-scalar grapheme clusters, including those crossing page boundaries, are preserved. Local restart uses up to 4 KiB of grapheme precontext, in addition to independent decoder lookbehind. An oversized cluster or unprovable bounded grapheme context (for example, a regional-indicator run longer than 4 KiB) is shown as a visible dotted-circle continuation and sets `fragmentedCluster`. For a leading regional-indicator run, parity remains unproven until a non-regional-indicator resets it, including after a cached near seek. This bounded local projection does not limit logical line length.
 
-The native resource type is `DocumentView`. In the CONFIGURATION grammar its viewer-specific properties are `file` (a literal UTF-8 path), `lineNumbers`, `wrap`, `encoding` and `language`, plus `fastScroll`, `fastKeyModifier` and `fastWheelModifier`. A positive `fastScroll` enables the absolute fast step; modifier names `CTRL`, `ALT` and `SHIFT` are case-insensitive. Existing `keyStep` and `wheelStep` together express the `scrollStep` shorthand, and `pageOverlap` sets page overlap. The ordinary size, frame and scrollbar properties use the same semantics as their C++ modifiers. They are not accepted as viewer properties on unrelated controls.
+The native resource type is `DocumentView`. In the CONFIGURATION grammar its viewer-specific properties are `file` (a literal UTF-8 path), `lineNumbers`, `wrap`, `encoding` and `language`, plus `syntax` and positive `maxAutoHighlightBytes`, followed by `fastScroll`, `fastKeyModifier` and `fastWheelModifier`. A positive `fastScroll` enables the absolute fast step; modifier names `CTRL`, `ALT` and `SHIFT` are case-insensitive. Existing `keyStep` and `wheelStep` together express the `scrollStep` shorthand, and `pageOverlap` sets page overlap. The ordinary size, frame and scrollbar properties use the same semantics as their C++ modifiers. They are not accepted as viewer properties on unrelated controls.
 
 
 [Complete resource program](examples/guide_document_view_resource.cpp)

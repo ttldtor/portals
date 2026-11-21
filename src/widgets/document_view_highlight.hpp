@@ -64,6 +64,36 @@ struct DocumentSourceReplay {
   bool final{};
 };
 
+// Synthetic fragment offsets never enter the qualified source lexer or replay.
+struct DocumentHighlightPreview {
+  DocumentHighlighter lexer;
+  std::vector<DocumentTextMap> maps = std::vector<DocumentTextMap>(0);
+  std::optional<TokenRun> lastRun;
+  std::uint64_t fragmentBase{};
+  std::uint64_t nextOffset{};
+  std::uint64_t clusterOffset{};
+  SemanticRole clusterRole{SemanticRole::NORMAL};
+  bool clusterClassified{};
+  bool started{};
+  bool final{};
+  bool failed{};
+};
+
+struct DocumentHighlightAttempt {
+  CellSize viewport;
+  WidthPolicy width;
+  std::uint64_t anchor{};
+  std::uint64_t horizontal{};
+  std::int64_t rowDelta{};
+  DocumentSyntaxPolicy policy{DocumentSyntaxPolicy::AUTO};
+  std::size_t remaining{};
+  std::size_t budget{};
+  bool wrap{};
+  bool lineNumbers{};
+  bool tail{};
+  bool exhausted{};
+};
+
 struct DocumentHighlightScan {
   DocumentLanguage language{DocumentLanguage::PLAIN};
   DocumentRevision revision;
@@ -78,6 +108,7 @@ struct DocumentHighlightScan {
   std::uint64_t classifiedEnd{};
   std::uint64_t retainBegin{};
   std::uint64_t retainEnd{};
+  std::uint64_t previewOriginalByteCutoff{};
   std::vector<DocumentTextMap> maps = std::vector<DocumentTextMap>(0);
   std::vector<DocumentTextMap> cachedMaps = std::vector<DocumentTextMap>(0);
   std::size_t maxMaps{};
@@ -88,6 +119,9 @@ struct DocumentHighlightScan {
   bool beganAtOrigin{true};
   std::shared_ptr<const DocumentPreparedFrame> plain;
   std::optional<DocumentSourceReplay> replay;
+  std::shared_ptr<DocumentHighlightPreview> preview;
+  std::optional<DocumentHighlightAttempt> attempt;
+  bool previewLayout{};
   std::optional<DocumentHighlightResult> failure;
   bool sequential{};
   bool final{};
@@ -133,9 +167,11 @@ bool sameDocumentDecoderOptions(const DocumentDecoderOptions &left, const Docume
 std::shared_ptr<DocumentHighlightScan> stageDocumentHighlight(const DocumentScan &scan,
                                                               const DocumentPrepareIntent &intent);
 void feedDocumentHighlight(DocumentHighlightScan &scan, std::span<const DecodedScalar> input, bool final = false);
+void feedDocumentPreview(DocumentHighlightScan &scan, std::span<const DecodedScalar> input, bool final = false);
 void mapDocumentCluster(DocumentHighlightScan &scan, std::uint64_t rowOffset, std::size_t renderedOffset,
                         std::uint64_t sourceOffset);
 void trimDocumentHighlightMaps(DocumentHighlightScan &scan, std::uint64_t firstRetained);
 std::unique_ptr<const DocumentTextFrame> projectDocumentHighlight(const DocumentPreparedFrame &frame,
-                                                                  const DocumentHighlightScan &scan, bool &ready);
+                                                                  const DocumentHighlightScan &scan, bool &ready,
+                                                                  bool preview = false);
 } // namespace portals::detail

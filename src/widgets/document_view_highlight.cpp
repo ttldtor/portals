@@ -67,6 +67,111 @@ bool lexicalFailure(DocumentHighlightScan &scan, const DocumentHighlightResult &
     return false;
   }
 }
+
+bool sameProjection(const DocumentHighlightAttempt &attempt, const DocumentPrepareIntent &intent) noexcept {
+  return attempt.viewport.width == intent.viewport.width && attempt.viewport.height == intent.viewport.height &&
+         attempt.width == intent.width && attempt.anchor == intent.anchor && attempt.horizontal == intent.horizontal &&
+         attempt.rowDelta == intent.rowDelta && attempt.wrap == intent.config.wrap &&
+         attempt.lineNumbers == intent.config.lineNumbers && attempt.tail == intent.tail;
+}
+
+std::uint64_t tailPreviewOriginalByteCutoff(const DocumentScan &scan, const DocumentPrepareIntent &intent) noexcept {
+  if (!intent.tail || !intent.config.wrap || !scan.metadata.capabilities.seekable || !scan.metadata.byteExtent ||
+      intent.viewport.height <= 0) {
+    return 0;
+  }
+
+  constexpr auto MAX = std::numeric_limits<std::uint64_t>::max();
+  constexpr std::uint64_t MAX_SCALAR_SOURCE_BYTES = 4;
+  constexpr auto MAX_SEPARATOR_SOURCE_BYTES = 2 * MAX_SCALAR_SOURCE_BYTES;
+  auto bytes = MAX_SCALAR_SOURCE_BYTES * DOCUMENT_CLUSTER_BYTES;
+  const auto include = [&](std::uint64_t count, std::uint64_t unit) {
+    bytes = count > (MAX - bytes) / unit ? MAX : bytes + count * unit;
+  };
+
+  // Decoder units, including malformed replacements, consume at most four
+  // source bytes. Every non-separator scalar contributes at least one UTF-8
+  // payload byte; escapes and continuation marks only increase that payload.
+  include(intent.config.maxFrameBytes, MAX_SCALAR_SOURCE_BYTES);
+  // CRLF consumes at most eight source bytes and is the only payload-free row
+  // seam. A spare row and cluster cover the fragment's initial boundary.
+  include(static_cast<std::uint64_t>(intent.viewport.height) + 1, MAX_SEPARATOR_SOURCE_BYTES);
+  const auto extent = *scan.metadata.byteExtent;
+
+  return extent > bytes ? extent - bytes : 0;
+}
+
+void stageAttempt(DocumentHighlightScan &scan, const DocumentPrepareIntent &intent) {
+  const bool sameWindow = scan.attempt && sameProjection(*scan.attempt, intent);
+  const bool sameAttempt = sameWindow && scan.attempt->policy == intent.config.syntax &&
+                           scan.attempt->budget == intent.config.maxAutoHighlightBytes;
+
+  if (!sameAttempt) {
+    scan.attempt = DocumentHighlightAttempt{intent.viewport,
+                                            intent.width,
+                                            intent.anchor,
+                                            intent.horizontal,
+                                            intent.rowDelta,
+                                            intent.config.syntax,
+                                            intent.config.maxAutoHighlightBytes,
+                                            intent.config.maxAutoHighlightBytes,
+                                            intent.config.wrap,
+                                            intent.config.lineNumbers,
+                                            intent.tail};
+  }
+
+  if (intent.suppressPreview) {
+    scan.preview.reset();
+    scan.previewLayout = false;
+    return;
+  }
+
+  scan.previewLayout = !scan.sequential && intent.config.syntax != DocumentSyntaxPolicy::EXACT;
+  if (scan.previewLayout) {
+    try {
+      scan.preview = scan.preview ? std::make_shared<DocumentHighlightPreview>(*scan.preview)
+                                  : std::make_shared<DocumentHighlightPreview>();
+      if (!intent.resume) {
+        scan.preview->maps.clear();
+        scan.preview->started = false;
+        scan.preview->failed = false;
+        scan.preview->clusterClassified = false;
+        scan.preview->lastRun.reset();
+      }
+      scan.preview->maps.reserve(scan.maxMaps);
+    } catch (const std::bad_alloc &) {
+      scan.preview.reset();
+      scan.previewLayout = false;
+    }
+  }
+}
+
+void classifyPreview(DocumentHighlightScan &scan, TokenRun run) {
+  auto &preview = *scan.preview;
+  constexpr auto MAX = std::numeric_limits<std::uint64_t>::max();
+  if (run.byteOffset > MAX - preview.fragmentBase || run.byteLength > MAX - run.byteOffset - preview.fragmentBase) {
+    preview.failed = true;
+    return;
+  }
+
+  run.byteOffset += preview.fragmentBase;
+  const auto end = run.byteOffset + run.byteLength;
+  auto point = std::lower_bound(preview.maps.begin(), preview.maps.end(), run.byteOffset,
+                                [](const DocumentTextMap &map, std::uint64_t offset) {
+                                  return map.sourceOffset < offset;
+                                });
+
+  for (; point != preview.maps.end() && point->sourceOffset < end; ++point) {
+    point->role = run.role;
+    point->classified = true;
+  }
+  if (scan.clusterOffset >= run.byteOffset && scan.clusterOffset < end) {
+    preview.clusterOffset = scan.clusterOffset;
+    preview.clusterRole = run.role;
+    preview.clusterClassified = true;
+  }
+  preview.lastRun = run;
+}
 } // namespace
 
 std::expected<DocumentInputPage, DocumentError> readDocumentInput(ByteDocumentSource &source,
@@ -154,11 +259,9 @@ std::shared_ptr<DocumentHighlightScan> stageDocumentHighlight(const DocumentScan
     auto staged = std::make_shared<DocumentHighlightScan>(*scan.highlight);
     staged->language = language;
     if (!intent.resume) {
-      if (staged->sequential) {
-        staged->cachedMaps.swap(staged->maps);
-      } else {
-        staged->maps.clear();
-      }
+      // Keep the previous bounded viewport's source-qualified roles during
+      // navigation, for seekable sources as well as forward-only replay.
+      staged->cachedMaps.swap(staged->maps);
       staged->maps.clear();
       staged->plain.reset();
       staged->pending = false;
@@ -166,9 +269,16 @@ std::shared_ptr<DocumentHighlightScan> stageDocumentHighlight(const DocumentScan
     staged->maxMaps = std::max(intent.retainedTextMaps, static_cast<std::size_t>(intent.viewport.width) *
                                                           (static_cast<std::size_t>(intent.viewport.height) + 1));
     staged->maps.reserve(staged->maxMaps);
+    stageAttempt(*staged, intent);
+    staged->previewOriginalByteCutoff =
+      staged->previewLayout && staged->preview ? tailPreviewOriginalByteCutoff(scan, intent) : 0;
     if (!staged->failure && staged->status != DocumentSyntaxState::REPLAY_UNAVAILABLE) {
       staged->status =
         language == DocumentLanguage::PLAIN ? DocumentSyntaxState::DISABLED : DocumentSyntaxState::PENDING;
+    }
+    if (!staged->preview && !staged->sequential && intent.config.syntax == DocumentSyntaxPolicy::PREVIEW &&
+        language != DocumentLanguage::PLAIN) {
+      staged->status = DocumentSyntaxState::RESOURCE_LIMIT;
     }
     return staged;
   }
@@ -188,7 +298,80 @@ std::shared_ptr<DocumentHighlightScan> stageDocumentHighlight(const DocumentScan
   if (!staged->beganAtOrigin) {
     staged->status = DocumentSyntaxState::REPLAY_UNAVAILABLE;
   }
+  stageAttempt(*staged, intent);
+  staged->previewOriginalByteCutoff =
+    staged->previewLayout && staged->preview ? tailPreviewOriginalByteCutoff(scan, intent) : 0;
+  if (!staged->preview && !staged->sequential && intent.config.syntax == DocumentSyntaxPolicy::PREVIEW &&
+      language != DocumentLanguage::PLAIN) {
+    staged->status = DocumentSyntaxState::RESOURCE_LIMIT;
+  }
   return staged;
+}
+
+void feedDocumentPreview(DocumentHighlightScan &scan, std::span<const DecodedScalar> input, bool final) {
+  if (!scan.previewLayout || !scan.preview || scan.preview->failed) {
+    return;
+  }
+  auto &preview = *scan.preview;
+
+  for (const auto &scalar : input) {
+    if (!preview.started || preview.final || scalar.byteOffset != preview.nextOffset) {
+      // Layout shortcuts can discard a span. Close the old synthetic fragment
+      // and start a new local fragment, never a qualified real-source origin.
+      if (preview.started && !preview.final) {
+        feedDocumentPreview(scan, {}, true);
+      }
+      if (preview.failed) {
+        return;
+      }
+      preview.lexer = DocumentHighlighter({.language = scan.language});
+      preview.fragmentBase = scalar.byteOffset;
+      preview.started = true;
+      preview.final = false;
+      preview.lastRun.reset();
+    }
+
+    auto local = scalar;
+    local.byteOffset -= preview.fragmentBase;
+    auto pending = std::span(&local, 1);
+    std::array<TokenRun, 32> output{};
+
+    do {
+      const auto result = preview.lexer.feed(pending, output);
+      pending = pending.subspan(result.inputConsumed);
+      for (const auto &run : std::span(output).first(result.outputProduced)) {
+        classifyPreview(scan, run);
+      }
+      if (result.status == DocumentHighlightStatus::NEED_INPUT) {
+        break;
+      }
+      if (result.status != DocumentHighlightStatus::OUTPUT_FULL &&
+          result.status != DocumentHighlightStatus::WORK_LIMIT) {
+        preview.failed = true;
+        return;
+      }
+    } while (true);
+    preview.nextOffset = scalar.byteOffset + scalar.byteLength;
+  }
+
+  if (final && preview.started && !preview.final && !preview.failed) {
+    std::array<TokenRun, 32> output{};
+    do {
+      const auto result = preview.lexer.feed({}, output, true);
+      for (const auto &run : std::span(output).first(result.outputProduced)) {
+        classifyPreview(scan, run);
+      }
+      if (result.status == DocumentHighlightStatus::DONE) {
+        preview.final = true;
+        return;
+      }
+      if (result.status != DocumentHighlightStatus::OUTPUT_FULL &&
+          result.status != DocumentHighlightStatus::WORK_LIMIT) {
+        preview.failed = true;
+        return;
+      }
+    } while (true);
+  }
 }
 
 void feedDocumentHighlight(DocumentHighlightScan &scan, std::span<const DecodedScalar> input, bool final) {
@@ -240,6 +423,9 @@ void feedDocumentHighlight(DocumentHighlightScan &scan, std::span<const DecodedS
 
 void mapDocumentCluster(DocumentHighlightScan &scan, std::uint64_t rowOffset, std::size_t renderedOffset,
                         std::uint64_t sourceOffset) {
+  if (sourceOffset < scan.previewOriginalByteCutoff) {
+    return;
+  }
   if (scan.maps.size() == scan.maxMaps) {
     scan.failure = DocumentHighlightResult{0, 0, DocumentHighlightStatus::RESOURCE_LIMIT, sourceOffset};
     scan.status = DocumentSyntaxState::RESOURCE_LIMIT;
@@ -267,6 +453,22 @@ void mapDocumentCluster(DocumentHighlightScan &scan, std::uint64_t rowOffset, st
     }
   }
   scan.maps.push_back(point);
+  if (scan.previewLayout && scan.preview && scan.preview->maps.size() < scan.maxMaps) {
+    auto provisional = point;
+    provisional.role = SemanticRole::NORMAL;
+    provisional.classified = false;
+    if (scan.preview->clusterClassified && scan.preview->clusterOffset == sourceOffset) {
+      provisional.role = scan.preview->clusterRole;
+      provisional.classified = true;
+    } else if (scan.preview->lastRun) {
+      const auto &run = *scan.preview->lastRun;
+      if (sourceOffset >= run.byteOffset && sourceOffset - run.byteOffset < run.byteLength) {
+        provisional.role = run.role;
+        provisional.classified = true;
+      }
+    }
+    scan.preview->maps.push_back(provisional);
+  }
 }
 
 void trimDocumentHighlightMaps(DocumentHighlightScan &scan, std::uint64_t firstRetained) {
@@ -275,41 +477,73 @@ void trimDocumentHighlightMaps(DocumentHighlightScan &scan, std::uint64_t firstR
                                         return value.sourceOffset < offset;
                                       });
   scan.maps.erase(scan.maps.begin(), first);
+  if (scan.previewLayout && scan.preview) {
+    auto &maps = scan.preview->maps;
+    const auto retained =
+      std::lower_bound(maps.begin(), maps.end(), firstRetained, [](const DocumentTextMap &value, std::uint64_t offset) {
+        return value.sourceOffset < offset;
+      });
+    maps.erase(maps.begin(), retained);
+  }
 }
 
 std::unique_ptr<const DocumentTextFrame> projectDocumentHighlight(const DocumentPreparedFrame &frame,
-                                                                  const DocumentHighlightScan &scan, bool &ready) {
+                                                                  const DocumentHighlightScan &scan, bool &ready,
+                                                                  bool preview) {
+  const auto &maps = preview && scan.preview ? scan.preview->maps : scan.maps;
   auto result = std::make_unique<DocumentTextFrame>();
   result->rows.reserve(frame.rows.size());
-  ready = !scan.failure && scan.status != DocumentSyntaxState::REPLAY_UNAVAILABLE;
+  ready = preview ? scan.preview && !scan.preview->failed
+                  : !scan.failure && scan.status != DocumentSyntaxState::REPLAY_UNAVAILABLE;
   for (std::size_t row = 0; row < frame.rows.size(); ++row) {
     // Construct the nested vector in place through its throwing count constructor.
     // MSVC Debug container-proxy allocation must stay inside the typed failure path.
     result->rows.emplace_back(0);
     auto &runs = result->rows.back();
     const auto clusters = frame.rows[row].graphemes();
-    auto point = std::lower_bound(scan.maps.begin(), scan.maps.end(), frame.anchors[row],
+    auto point = std::lower_bound(maps.begin(), maps.end(), frame.anchors[row],
                                   [](const DocumentTextMap &value, std::uint64_t offset) {
                                     return value.rowOffset < offset;
                                   });
-    const auto rowEnd = std::upper_bound(point, scan.maps.end(), frame.anchors[row],
-                                         [](std::uint64_t offset, const DocumentTextMap &value) {
-                                           return offset < value.rowOffset;
-                                         });
+    auto sourcePoint = std::lower_bound(scan.maps.begin(), scan.maps.end(), frame.anchors[row],
+                                        [](const DocumentTextMap &value, std::uint64_t offset) {
+                                          return value.rowOffset < offset;
+                                        });
+    const auto rowEnd =
+      std::upper_bound(point, maps.end(), frame.anchors[row], [](std::uint64_t offset, const DocumentTextMap &value) {
+        return offset < value.rowOffset;
+      });
     // One source cluster can expand to several escaped glyphs with one role.
     // Reserve by source mappings, not by the expanded display byte count.
     runs.reserve(static_cast<std::size_t>(rowEnd - point));
     std::int32_t column{};
-    for (std::size_t index = 0; index < clusters.size(); ++index) {
-      while (point != scan.maps.end() && point->rowOffset == frame.anchors[row] &&
-             std::next(point) != scan.maps.end() && std::next(point)->rowOffset == point->rowOffset &&
-             std::next(point)->renderedOffset <= clusters[index].byte_begin) {
-        ++point;
+    const auto advance = [&](auto &selected, const auto &points, std::size_t renderedOffset) {
+      while (selected != points.end() && selected->rowOffset == frame.anchors[row] &&
+             std::next(selected) != points.end() && std::next(selected)->rowOffset == selected->rowOffset &&
+             std::next(selected)->renderedOffset <= renderedOffset) {
+        ++selected;
       }
-      const bool known = point != scan.maps.end() && point->rowOffset == frame.anchors[row] &&
-                         point->renderedOffset <= clusters[index].byte_begin && point->classified;
+    };
+
+    for (std::size_t index = 0; index < clusters.size(); ++index) {
+      advance(point, maps, clusters[index].byte_begin);
+      if (preview) {
+        advance(sourcePoint, scan.maps, clusters[index].byte_begin);
+      }
+
+      // A retained preview can outlive navigation or a policy reflow. Matching
+      // display positions alone does not prove that they describe these bytes.
+      const bool sameSource =
+        !preview ||
+        (point != maps.end() && sourcePoint != scan.maps.end() && point->sourceOffset == sourcePoint->sourceOffset &&
+         point->rowOffset == sourcePoint->rowOffset && point->renderedOffset == sourcePoint->renderedOffset);
+      const bool exact = preview && sourcePoint != scan.maps.end() && sourcePoint->rowOffset == frame.anchors[row] &&
+                         sourcePoint->renderedOffset <= clusters[index].byte_begin && sourcePoint->classified;
+      const bool known =
+        exact || (point != maps.end() && point->rowOffset == frame.anchors[row] &&
+                  point->renderedOffset <= clusters[index].byte_begin && point->classified && sameSource);
       ready = ready && known;
-      const auto role = known ? point->role : SemanticRole::NORMAL;
+      const auto role = exact ? sourcePoint->role : known ? point->role : SemanticRole::NORMAL;
       if (role != SemanticRole::NORMAL) {
         if (!runs.empty() && runs.back().role == role && runs.back().first + runs.back().count == index) {
           ++runs.back().count;
@@ -332,12 +566,18 @@ void beginHighlight(DocumentHighlightScan &highlight, const DocumentPrepareInten
       selected = &*point;
     }
   }
-  highlight.decoder = selected ? DocumentDecoder::restore(selected->decoder) : DocumentDecoder(intent.config.decoder);
-  highlight.lexer =
-    selected ? DocumentHighlighter(selected->lexer) : DocumentHighlighter({.language = intent.config.language});
-  highlight.offset = selected ? selected->offset : 0;
+  const bool keepProgress = highlight.started && !highlight.final && !highlight.failure && highlight.offset <= target &&
+                            highlight.lexer.nextByteOffset() == highlight.offset && highlight.decoder.checkpoint() &&
+                            (!selected || highlight.offset > selected->offset);
+
+  if (!keepProgress) {
+    highlight.decoder = selected ? DocumentDecoder::restore(selected->decoder) : DocumentDecoder(intent.config.decoder);
+    highlight.lexer =
+      selected ? DocumentHighlighter(selected->lexer) : DocumentHighlighter({.language = intent.config.language});
+    highlight.offset = selected ? selected->offset : 0;
+    highlight.started = selected != nullptr;
+  }
   highlight.lastCheckpoint = highlight.offset;
-  highlight.started = selected != nullptr;
   highlight.final = false;
   highlight.waiting = false;
   highlight.failure.reset();
@@ -410,7 +650,15 @@ std::shared_ptr<const DocumentPreparedFrame> coloredFrame(ByteDocumentSource &so
   frame->gutterCells = plain.gutterCells;
   frame->anchors = plain.anchors;
   if (plain.footer) {
-    frame->footer = std::make_unique<GraphemeText>(*plain.footer);
+    auto caption = plain.footer->bytes();
+    if (caption.ends_with(" ~")) {
+      caption.remove_suffix(2);
+    }
+    auto footer = GraphemeText::from(caption, intent.width);
+    if (!footer) {
+      throw DocumentError{SourceError::INVALID_REPLY, {}, {}};
+    }
+    frame->footer = std::make_unique<GraphemeText>(std::move(*footer));
   }
   frame->viewport = plain.viewport;
   frame->finalEndVisible = plain.finalEndVisible;
@@ -421,6 +669,8 @@ std::shared_ptr<const DocumentPreparedFrame> coloredFrame(ByteDocumentSource &so
     throw DocumentError{SourceError::INVALID_REPLY, {}, {}};
   }
   frame->status.language = intent.config.language;
+  frame->status.syntax = intent.config.syntax;
+  frame->status.syntaxAccuracy = DocumentSyntaxAccuracy::EXACT;
   frame->status.highlighting = DocumentSyntaxState::READY;
   frame->status.highlightErrorOffset.reset();
   return frame;
@@ -438,6 +688,9 @@ std::shared_ptr<const DocumentPreparation> prepareDocumentHighlight(std::shared_
   result->kind = DocumentPreparationKind::HIGHLIGHT;
   result->syntax = DocumentSyntaxState::PENDING;
   result->baseFrame = previous && previous->highlight ? previous->highlight->plain : nullptr;
+  if (result->baseFrame) {
+    result->syntaxAccuracy = result->baseFrame->status.syntaxAccuracy;
+  }
   try {
     if (!previous || !previous->highlight || !previous->highlight->plain ||
         intent.config.mode != DocumentViewMode::TEXT || intent.config.language == DocumentLanguage::PLAIN) {
@@ -465,15 +718,33 @@ std::shared_ptr<const DocumentPreparation> prepareDocumentHighlight(std::shared_
       beginHighlight(highlight, intent);
     }
     previous.reset();
+    result->scan = scan;
     std::size_t work{};
     bool ready = frameClassified(*highlight.plain, highlight);
-    while (!ready && !highlight.failure && !highlight.final && !highlight.waiting && work < intent.config.workBytes) {
+    const bool automatic = intent.config.syntax == DocumentSyntaxPolicy::AUTO;
+    auto &attempt = *highlight.attempt;
+    const auto required = highlight.maps.empty() ? highlight.offset : highlight.maps.back().sourceOffset;
+    if (!ready && (intent.config.syntax == DocumentSyntaxPolicy::PREVIEW ||
+                   (automatic && (attempt.exhausted || !attempt.remaining ||
+                                  (required > highlight.offset && required - highlight.offset > attempt.remaining))))) {
+      attempt.exhausted = true;
+    }
+
+    while (!ready && !attempt.exhausted && !highlight.failure && !highlight.final && !highlight.waiting &&
+           work < intent.config.workBytes) {
       if (stop.stop_requested()) {
         throw DocumentError{SourceError::CANCELLED, {}, {}};
       }
       const auto remaining = std::numeric_limits<std::uint64_t>::max() - highlight.offset;
-      const auto requested = static_cast<std::size_t>(
+      auto requested = static_cast<std::size_t>(
         std::min<std::uint64_t>(std::min(source->maxPageBytes(), intent.config.workBytes - work), remaining));
+      if (automatic) {
+        requested = std::min(requested, attempt.remaining);
+        if (!requested) {
+          attempt.exhausted = true;
+          break;
+        }
+      }
       if (!requested) {
         throw DocumentError{SourceError::POSITION_EXHAUSTED, {}, {}};
       }
@@ -489,6 +760,11 @@ std::shared_ptr<const DocumentPreparation> prepareDocumentHighlight(std::shared_
       }
       auto input = page->bytes();
       work += input.size();
+      if (automatic) {
+        // Charge the admitted page, including bytes not needed once the frame
+        // becomes exact. Cancellation or a short turn never refunds admission.
+        attempt.remaining -= input.size();
+      }
       bool drain{};
       do {
         if (stop.stop_requested()) {
@@ -514,17 +790,26 @@ std::shared_ptr<const DocumentPreparation> prepareDocumentHighlight(std::shared_
           break;
         }
       } while (!input.empty() || drain);
+      if (automatic && !attempt.remaining && !ready) {
+        attempt.exhausted = true;
+      }
     }
     if (ready) {
       result->frame = coloredFrame(*source, intent, *highlight.plain, highlight);
       result->syntax = result->frame->status.highlighting;
+      result->syntaxAccuracy = result->frame->status.syntaxAccuracy;
       highlight.ready = true;
       highlight.status = result->syntax;
       highlight.plain.reset();
+      highlight.preview.reset();
     } else if (highlight.failure) {
       result->syntax = highlight.status;
       result->syntaxErrorOffset = highlight.failure->errorOffset;
       highlight.plain.reset();
+    } else if (attempt.exhausted) {
+      highlight.status = DocumentSyntaxState::PREVIEW;
+      highlight.pending = false;
+      result->syntax = highlight.status;
     } else if (highlight.final) {
       throw DocumentError{SourceError::INVALID_REPLY, {}, {}};
     } else {

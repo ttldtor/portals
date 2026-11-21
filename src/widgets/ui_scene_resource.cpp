@@ -275,6 +275,8 @@ std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneRes
         const auto &document = arguments.settings.documentSettings();
         DocumentViewConfig config;
         config.language = document.language.value_or(config.language);
+        config.syntax = document.syntax.value_or(config.syntax);
+        config.maxAutoHighlightBytes = document.maxAutoHighlightBytes.value_or(config.maxAutoHighlightBytes);
         config.lineNumbers = document.lineNumbers.value_or(config.lineNumbers);
         config.wrap = document.wrap.value_or(config.wrap);
         config.decoder.explicitEncoding = document.encoding.value_or(config.decoder.explicitEncoding);

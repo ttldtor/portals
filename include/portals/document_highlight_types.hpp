@@ -23,8 +23,30 @@ enum class DocumentSyntaxState {
   UNSUPPORTED_PROFILE, ///< A construct exceeds the selected lexical profile; plain text remains available.
   RESOURCE_LIMIT,      ///< The fixed lexical policy was exhausted; plain text remains available.
   UNAVAILABLE,         ///< Optional syntax work failed; the plain frame remains readable.
-  REPLAY_UNAVAILABLE   ///< The source cannot restore the required earlier lexical context.
+  REPLAY_UNAVAILABLE,  ///< The source cannot restore the required earlier lexical context.
+  PREVIEW              ///< A readable provisional projection remains after bounded refinement stops.
 };
+
+/// Recovery policy; the language still selects the lexical rules.
+enum class DocumentSyntaxPolicy {
+  AUTO,    ///< Preview immediately and refine within the automatic source-admission budget.
+  PREVIEW, ///< Reuse known exact context or show bounded local-fragment colors without long recovery.
+  EXACT    ///< Allow cancellable recovery from a proven checkpoint or the real source origin.
+};
+
+/// Accuracy of the syntax roles actually displayed, independently of recovery errors.
+enum class DocumentSyntaxAccuracy {
+  NONE,    ///< Plain source text without syntax-role projection.
+  PREVIEW, ///< Best-effort local-fragment roles; the enclosing lexical context is not proven.
+  EXACT    ///< Source-qualified roles within the selected lexical profile.
+};
+
+/// Compact typed policy values for viewer descriptions and commands.
+namespace syntax {
+inline constexpr auto AUTO = DocumentSyntaxPolicy::AUTO;       ///< Bounded automatic refinement.
+inline constexpr auto PREVIEW = DocumentSyntaxPolicy::PREVIEW; ///< Local work only.
+inline constexpr auto EXACT = DocumentSyntaxPolicy::EXACT;     ///< Explicit full recovery.
+} // namespace syntax
 
 /// Theme-independent source roles implemented by these profiles.
 enum class SemanticRole {

@@ -314,6 +314,18 @@ void addScalar(DocumentScan &scan, const DocumentPrepareIntent &intent, const De
     if (scan.highlight) {
       scan.highlight->clusterOffset = decoded.byteOffset;
       scan.highlight->clusterClassified = false;
+      if (scan.highlight->previewLayout && scan.highlight->preview) {
+        auto &preview = *scan.highlight->preview;
+        preview.clusterOffset = decoded.byteOffset;
+        preview.clusterClassified = false;
+        if (preview.lastRun && decoded.byteOffset >= preview.lastRun->byteOffset &&
+            decoded.byteOffset - preview.lastRun->byteOffset < preview.lastRun->byteLength) {
+          // Immediate roles arrive before this cluster exists. Keep its first
+          // scalar role until the next grapheme boundary creates its map.
+          preview.clusterRole = preview.lastRun->role;
+          preview.clusterClassified = true;
+        }
+      }
     }
     scan.clusterCheckpoint = before;
     scan.clusterCheckpoint.line = scan.line;
@@ -380,6 +392,15 @@ std::size_t consumeAsciiTail(DocumentScan &scan, const DocumentPrepareIntent &in
   // proven printable ASCII successor, so its grapheme boundary and width are exact.
   const auto count = printable - 1;
   const auto offset = scan.offset;
+  // maxMaps covers at least (height + 1) complete content rows. A following
+  // printable ASCII suffix of that length evicts every earlier cluster from
+  // the tail window, even when this run starts in a partially occupied row.
+  // Discard that prefix's maps as well as its optional lexical work.
+  auto mappedBegin = scan.highlight && count > scan.highlight->maxMaps ? count - scan.highlight->maxMaps : 0;
+  if (scan.highlight && scan.highlight->previewOriginalByteCutoff > offset) {
+    mappedBegin = std::max(mappedBegin, static_cast<std::size_t>(std::min<std::uint64_t>(
+                                          count, scan.highlight->previewOriginalByteCutoff - offset)));
+  }
   const auto checkpoint = [&](std::size_t index) {
     const auto proof =
       DocumentDecoder::localCheckpoint(*scan.origin, input.subspan(index, 1), offset + index, offset + index);
@@ -417,8 +438,11 @@ std::size_t consumeAsciiTail(DocumentScan &scan, const DocumentPrepareIntent &in
 
     checkPayload(scan, intent, scan.row.size(), chunk);
     if (scan.highlight && intent.config.language != DocumentLanguage::PLAIN) {
-      for (std::size_t index = 0; index < chunk; ++index) {
-        mapDocumentCluster(*scan.highlight, scan.rowOffset, scan.row.size() + index, offset + consumed + index);
+      for (auto position = std::max(consumed, mappedBegin); position < consumed + chunk; ++position) {
+        const DecodedScalar scalar{static_cast<char32_t>(std::to_integer<unsigned char>(input[position])),
+                                   offset + position, 1, false};
+        feedDocumentPreview(*scan.highlight, std::span(&scalar, 1));
+        mapDocumentCluster(*scan.highlight, scan.rowOffset, scan.row.size() + (position - consumed), offset + position);
       }
     }
     scan.row.append(reinterpret_cast<const char *>(input.data() + consumed), chunk);
@@ -914,6 +938,51 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
     frame->visibleByteEnd = std::max(row.offset, row.end);
   }
 
+  frame->status.language = intent.config.language;
+  frame->status.syntax = intent.config.syntax;
+  if (scan.highlight && intent.config.language != DocumentLanguage::PLAIN) {
+    try {
+      bool ready{};
+      if (scan.highlight->started) {
+        frame->text = projectDocumentHighlight(*frame, *scan.highlight, ready);
+      }
+      if (ready) {
+        frame->status.syntaxAccuracy = DocumentSyntaxAccuracy::EXACT;
+      } else if (scan.highlight->preview) {
+        frame->text.reset();
+        bool provisional{};
+        auto projected = projectDocumentHighlight(*frame, *scan.highlight, provisional, true);
+        if (provisional) {
+          frame->text = std::move(projected);
+          frame->status.syntaxAccuracy = DocumentSyntaxAccuracy::PREVIEW;
+        } else {
+          frame->text.reset();
+        }
+      } else {
+        frame->text.reset();
+      }
+      frame->status.highlighting = ready ? DocumentSyntaxState::READY : scan.highlight->status;
+      if (!ready && intent.config.syntax == DocumentSyntaxPolicy::PREVIEW && scan.highlight->preview &&
+          scan.highlight->preview->failed) {
+        frame->status.highlighting = DocumentSyntaxState::RESOURCE_LIMIT;
+      }
+      if (!ready &&
+          (intent.config.syntax == DocumentSyntaxPolicy::PREVIEW ||
+           (scan.highlight->attempt && scan.highlight->attempt->exhausted)) &&
+          frame->status.highlighting == DocumentSyntaxState::PENDING) {
+        frame->status.highlighting = DocumentSyntaxState::PREVIEW;
+      }
+      if (scan.highlight->failure) {
+        frame->status.highlightErrorOffset = scan.highlight->failure->errorOffset;
+      }
+    } catch (const std::bad_alloc &) {
+      // Syntax projection is optional; the already prepared text stays usable.
+      frame->text.reset();
+      frame->status.syntaxAccuracy = DocumentSyntaxAccuracy::NONE;
+      frame->status.highlighting = DocumentSyntaxState::RESOURCE_LIMIT;
+    }
+  }
+
   std::array<char, 192> footer{};
   std::array<char, 32> progress{};
 
@@ -925,24 +994,14 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
     std::snprintf(progress.data(), progress.size(), "progress unknown");
   }
 
-  std::snprintf(footer.data(), footer.size(), "%s%s%s", progress.data(), scan.waiting ? " | waiting" : "",
-                scan.fragmented ? " | cluster continuation" : "");
+  std::snprintf(footer.data(), footer.size(), "%s%s%s%s", progress.data(), scan.waiting ? " | waiting" : "",
+                scan.fragmented ? " | cluster continuation" : "",
+                frame->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW ? " ~" : "");
   auto caption = GraphemeText::from(footer.data(), intent.width);
   if (!caption) {
     fail(SourceError::INVALID_ARGUMENT);
   }
   frame->footer = std::make_unique<GraphemeText>(std::move(*caption));
-  frame->status.language = intent.config.language;
-  if (scan.highlight && intent.config.language != DocumentLanguage::PLAIN) {
-    bool ready{};
-    if (scan.highlight->started) {
-      frame->text = projectDocumentHighlight(*frame, *scan.highlight, ready);
-    }
-    frame->status.highlighting = ready ? DocumentSyntaxState::READY : scan.highlight->status;
-    if (scan.highlight->failure) {
-      frame->status.highlightErrorOffset = scan.highlight->failure->errorOffset;
-    }
-  }
   return frame;
 }
 } // namespace
@@ -1067,6 +1126,9 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
           fail(SourceError::INVALID_REPLY);
         }
         if (decoded.outputProduced) {
+          if (scan->highlight && output[0].byteOffset >= scan->highlight->previewOriginalByteCutoff) {
+            feedDocumentPreview(*scan->highlight, std::span(output).first(decoded.outputProduced));
+          }
           addScalar(*scan, intent, output[0], before);
           if (scan->highlight && scan->highlight->sequential) {
             scan->highlight->offset = scan->offset;
@@ -1120,7 +1182,12 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
     result->continueWork = !scan->done && !scan->waiting &&
                            (!enoughRows(*scan, intent) || needsCrLfLookahead(*scan, intent)) && !horizontalReady;
     if (!result->continueWork) {
+      if (scan->highlight) {
+        feedDocumentPreview(*scan->highlight, {}, true);
+      }
       result->frame = makeFrame(source, intent, *scan);
+      result->syntax = result->frame->status.highlighting;
+      result->syntaxAccuracy = result->frame->status.syntaxAccuracy;
       if (scan->highlight && !scan->highlight->sequential && intent.config.language != DocumentLanguage::PLAIN) {
         scan->highlight->plain = result->frame;
         scan->highlight->pending = false;

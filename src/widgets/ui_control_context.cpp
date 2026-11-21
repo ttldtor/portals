@@ -69,6 +69,7 @@ constexpr std::array<std::string_view, 3> DIALOG_PLACEMENT_NAMES{"CENTER", "BELO
 constexpr std::array<std::string_view, 2> CHART_MODE_NAMES{"LINE", "CANDLES"};
 constexpr std::array<std::string_view, 2> CHART_GLYPH_NAMES{"ASCII", "BOX_DRAWING"};
 constexpr std::array<std::string_view, 2> DOCUMENT_MODE_NAMES{"text", "hex"};
+constexpr std::array<std::string_view, 3> DOCUMENT_SYNTAX_NAMES{"auto", "preview", "exact"};
 constexpr std::array<std::string_view, 3> DOCUMENT_MODIFIER_NAMES{"SHIFT", "ALT", "CTRL"};
 constexpr std::array<std::string_view, 8> DOCUMENT_ENCODING_NAMES{
   "UNRESOLVED", "UTF8", "UTF16LE", "UTF16BE", "UTF32LE", "UTF32BE", "WINDOWS1251", "WINDOWS1252"};
@@ -356,7 +357,9 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"hex.uppercase", Kind::BOOLEAN, 2, {}},
    {"hex.showAscii", Kind::BOOLEAN, 2, {}},
    {"hex.autoFit", Kind::BOOLEAN, 2, {}},
-   {"language", Kind::LITERAL_STRING, 1, {}}}};
+   {"language", Kind::LITERAL_STRING, 1, {}},
+   {"syntax", Kind::ENUMERATION, 1, DOCUMENT_SYNTAX_NAMES},
+   {"maxAutoHighlightBytes", Kind::UNSIGNED_INTEGER, 1, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -389,7 +392,7 @@ constexpr Mask SCROLL_COMMON_MASK =
   SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48, 231, 232, 233);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
 constexpr Mask DOCUMENT_VIEW_MASK =
-  SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277);
+  SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
 constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 225, 226, 227, 228, 229);
 constexpr Mask OVERLAY_MASK = SIZE_MASK | propertyMask(22, 23, 24, 25, 56, 57);
@@ -1105,7 +1108,9 @@ ControlContextError exceptionError() noexcept {
   X(documentSettings().hexUppercase, 274)                                                                              \
   X(documentSettings().hexShowAscii, 275)                                                                              \
   X(documentSettings().hexAutoFit, 276)                                                                                \
-  X(documentSettings().language, 277)
+  X(documentSettings().language, 277)                                                                                  \
+  X(documentSettings().syntax, 278)                                                                                    \
+  X(documentSettings().maxAutoHighlightBytes, 279)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES =
@@ -1227,6 +1232,8 @@ void merge(ControlSettings &target, const ControlSettings &patch) {
     assign(document->wrap, source.wrap, 266);
     assign(document->encoding, source.encoding, 267);
     assign(document->language, source.language, 277);
+    assign(document->syntax, source.syntax, 278);
+    assign(document->maxAutoHighlightBytes, source.maxAutoHighlightBytes, 279);
     assign(document->fastScroll, source.fastScroll, 268);
     assign(document->fastKeyModifier, source.fastKeyModifier, 269);
     assign(document->fastWheelModifier, source.fastWheelModifier, 270);
@@ -1253,6 +1260,9 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
     if (index == 272 || index == 273) {
       return value > 0 && value <= MAX_HEX_ROW_BYTES;
     }
+    if (index == 279) {
+      return value > 0 && value <= std::numeric_limits<std::size_t>::max() / 1024;
+    }
     if (index == 268) {
       return value > 0 && value <= static_cast<std::uint64_t>(std::numeric_limits<std::int64_t>::max());
     }
@@ -1268,6 +1278,8 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
     return value == key::SHIFT || value == key::ALT || value == key::CTRL;
   } else if constexpr (std::same_as<T, DocumentViewMode>) {
     return value == DocumentViewMode::TEXT || value == DocumentViewMode::HEX;
+  } else if constexpr (std::same_as<T, DocumentSyntaxPolicy>) {
+    return value >= DocumentSyntaxPolicy::AUTO && value <= DocumentSyntaxPolicy::EXACT;
   } else if constexpr (std::same_as<T, DocumentEncoding>) {
     return value >= DocumentEncoding::UNRESOLVED && value <= DocumentEncoding::WINDOWS1252;
   } else if constexpr (std::same_as<T, ToastPlacement>) {
@@ -1509,6 +1521,8 @@ void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &
     apply(document->wrap, source.wrap);
     apply(document->encoding, source.encoding);
     apply(document->language, source.language);
+    apply(document->syntax, source.syntax);
+    apply(document->maxAutoHighlightBytes, source.maxAutoHighlightBytes);
     apply(document->fastScroll, source.fastScroll);
     apply(document->fastKeyModifier, source.fastKeyModifier);
     apply(document->fastWheelModifier, source.fastWheelModifier);
@@ -1544,6 +1558,9 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
 
     const std::array fields{
       std::pair<std::string_view, bool>{"language", patch.documentSettings().language.has_value()},
+      std::pair<std::string_view, bool>{"syntax", patch.documentSettings().syntax.has_value()},
+      std::pair<std::string_view, bool>{"maxAutoHighlightBytes",
+                                        patch.documentSettings().maxAutoHighlightBytes.has_value()},
       std::pair<std::string_view, bool>{"file", patch.documentSettings().file.has_value()},
       std::pair<std::string_view, bool>{"lineNumbers", patch.documentSettings().lineNumbers.has_value()},
       std::pair<std::string_view, bool>{"wrap", patch.documentSettings().wrap.has_value()},

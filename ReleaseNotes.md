@@ -13,9 +13,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 - DocumentView adds worker-prepared SQL/MySQL and Markdown source highlighting,
   compact language selection in descriptions, references and loaded scenes, and
-  theme-controlled semantic roles. Cold seeks remain readable while exact lexical
-  context is restored. Syntax caches are optional and bounded; forward-only sources
-  retain accepted bytes within explicit history limits.
+  theme-controlled semantic roles. The default AUTO policy provides provisional
+  local colors and bounds automatic refinement; long exact context computation is
+  explicit. A position marker identifies provisional colors, and status reports
+  their accuracy independently of refinement errors. Syntax caches are optional
+  and bounded; forward-only sources retain accepted bytes within explicit history
+  limits. DocumentViewConfig and DocumentViewStatus have changed binary layouts;
+  rebuild consumers together with the library.
 
 - A new document example opens a path from a field or the command line, switches
   between text and hexadecimal modes, and provides help without opening a terminal.

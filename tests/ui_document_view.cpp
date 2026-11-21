@@ -3260,3 +3260,92 @@ TEST_CASE("language changes preserve already accepted relative navigation") {
   CHECK(status.language == DocumentLanguage::MARKDOWN_SOURCE);
   CHECK(status.highlighting == DocumentSyntaxState::READY);
 }
+
+TEST_CASE("syntax policy commands preserve queued navigation and reject invalid policies") {
+  auto provider = std::make_shared<Provider>();
+  for (unsigned row = 0; row < 40; ++row) {
+    provider->text += "SELECT 42;\n";
+  }
+  Fixture f(ui::document(provider), {.language = DocumentLanguage::MYSQL_LEXICAL});
+  f.settle();
+  CHECK(take(f.reference.status()).syntax == syntax::AUTO);
+  const auto submitted = f.executor.submissions;
+  take(f.reference.setSyntax(syntax::AUTO));
+  f.settle();
+  CHECK(f.executor.submissions == submitted);
+  const auto before = take(f.reference.status()).byteOffset;
+  take(f.reference.scrollRows(2));
+  CHECK(f.reference.syntax(syntax::EXACT));
+  f.settle();
+  const auto status = take(f.reference.status());
+  CHECK(status.byteOffset > before);
+  CHECK(status.syntax == syntax::EXACT);
+  CHECK(status.syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+  CHECK_FALSE(status.error);
+  const auto invalid = f.reference.setSyntax(static_cast<DocumentSyntaxPolicy>(99));
+  CHECK_FALSE(invalid);
+  CHECK(take(f.reference.status()).syntax == syntax::EXACT);
+}
+
+TEST_CASE("syntax policy changes drain an accepted forward-only turn without losing bytes") {
+  auto provider = std::make_shared<Provider>();
+  provider->seekable = false;
+  provider->enforceSequential = true;
+  provider->text = "SELECT 1;\nSELECT 2;\nSELECT 3;\nSELECT 4;\n";
+  Fixture f(ui::document(provider), {.language = DocumentLanguage::MYSQL_LEXICAL});
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+  REQUIRE(provider->bytesRead.load() > 0);
+  take(f.reference.setSyntax(syntax::EXACT));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows[0].bytes() == "SELECT 1;");
+  const auto status = take(f.reference.status());
+  CHECK_FALSE(status.error);
+  CHECK(status.syntax == syntax::EXACT);
+  CHECK(status.syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+}
+
+TEST_CASE("AUTO preview survives paint and policy races without stale exact publication") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = "/*" + std::string(2 * 1024 * 1024, 'a') + "*/\nSELECT 42;\n";
+  DocumentViewConfig config;
+  config.language = DocumentLanguage::MYSQL_LEXICAL;
+  config.maxAutoHighlightBytes = 17;
+  Fixture f(ui::document(provider), config);
+  f.settle();
+  take(f.reference.seekByte(1024 * 1024));
+  f.settle();
+  REQUIRE(f.frame());
+  auto preview = f.frame();
+  REQUIRE(preview->text);
+  CHECK(take(f.reference.status()).syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(take(f.reference.status()).highlighting == DocumentSyntaxState::PREVIEW);
+  CHECK(preview->footer->bytes().find('~') != std::string_view::npos);
+  const auto anchors = preview->anchors;
+  const auto submissions = f.executor.submissions;
+  const auto bytesRead = provider->bytesRead.load();
+  take(f.scene->theme(take(parsePss("DocumentView{role-keyword-foreground:#AABBCC;}"))));
+  f.settle();
+  CHECK(f.executor.submissions == submissions);
+  CHECK(provider->bytesRead.load() == bytesRead);
+  take(f.reference.setSyntax(syntax::EXACT));
+  f.pump();
+  REQUIRE(f.executor.job);
+  f.executor.runOne();
+  take(f.reference.setSyntax(syntax::PREVIEW));
+  f.settle();
+  CHECK(take(f.reference.status()).syntax == syntax::PREVIEW);
+  CHECK(take(f.reference.status()).syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  CHECK(f.frame()->anchors == anchors);
+  CHECK(preview->status.syntaxAccuracy == DocumentSyntaxAccuracy::PREVIEW);
+  take(f.reference.setSyntax(syntax::EXACT));
+  f.settle(100);
+  REQUIRE(f.frame()->text);
+  REQUIRE_FALSE(f.frame()->text->rows[0].empty());
+  CHECK(f.frame()->text->rows[0][0].role == SemanticRole::COMMENT);
+  CHECK(take(f.reference.status()).syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
+  CHECK(f.frame()->anchors == anchors);
+  CHECK(f.frame()->footer->bytes().find('~') == std::string_view::npos);
+}

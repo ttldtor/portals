@@ -55,6 +55,8 @@ struct DocumentPreparationStorage {
   std::size_t textMaps{};
   std::size_t replayBytes{};
   bool frame{};
+  bool preview{};
+  bool suppressPreview{};
 };
 
 // One calculator keeps job/frame admission and peak overlap consistent.
@@ -115,9 +117,12 @@ documentPreparationBytes(CellSize viewport, const DocumentViewConfig &config,
     } else {
       if (height == MAX || width > MAX / (height + 1) || !include(1, sizeof(DocumentHighlightScan)) ||
           !include(std::max(storage.textMaps, width * (height + 1)), sizeof(DocumentTextMap)) ||
-          (storage.replayBytes &&
-           (!include(std::max(storage.textMaps, width * (height + 1)), sizeof(DocumentTextMap)) ||
-            !include(storage.replayBytes, 2)))) {
+          (!storage.suppressPreview && (storage.preview || config.syntax != DocumentSyntaxPolicy::EXACT) &&
+           (!include(1, sizeof(DocumentHighlightPreview)) ||
+            !include(std::max(storage.textMaps, width * (height + 1)), sizeof(DocumentTextMap)))) ||
+          ((storage.textMaps || storage.replayBytes) &&
+           !include(std::max(storage.textMaps, width * (height + 1)), sizeof(DocumentTextMap))) ||
+          (storage.replayBytes && !include(storage.replayBytes, 2))) {
         return std::unexpected(SourceError::PAGE_TOO_LARGE);
       }
     }
@@ -365,7 +370,9 @@ struct DocumentPrepareIntent {
   std::size_t retainedHexRows{};
   std::size_t replayBytes{};
   std::size_t retainedTextMaps{};
+  bool retainPreview{};
   DocumentPreparationKind kind{DocumentPreparationKind::LAYOUT};
+  bool suppressPreview{};
 };
 
 struct DocumentPreparation {
@@ -378,6 +385,7 @@ struct DocumentPreparation {
   bool providerWaiting{};
   DocumentPreparationKind kind{DocumentPreparationKind::LAYOUT};
   DocumentSyntaxState syntax{DocumentSyntaxState::DISABLED};
+  DocumentSyntaxAccuracy syntaxAccuracy{DocumentSyntaxAccuracy::NONE};
   std::optional<std::uint64_t> syntaxErrorOffset;
   std::shared_ptr<const DocumentPreparedFrame> baseFrame;
 };

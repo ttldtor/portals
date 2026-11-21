@@ -829,7 +829,7 @@ private:
 
     if (schema->kind == ControlPropertyKind::ENUMERATION) {
       std::string modeLiteral(0, '\0');
-      if (path == "mode" && peek() == '"') {
+      if ((path == "mode" || path == "syntax") && peek() == '"') {
         const auto parsed = string(modeLiteral);
         if (!parsed) {
           return std::unexpected(withProperty(parsed.error(), type, path));
@@ -838,16 +838,16 @@ private:
       const auto value = modeLiteral.empty() ? name() : std::string_view(modeLiteral);
       const bool documentModifier = path == "fastKeyModifier" || path == "fastWheelModifier";
       const auto found = std::ranges::find_if(schema->enumNames, [&](std::string_view candidate) {
-        return documentModifier ? std::ranges::equal(candidate, value,
-                                                     [](char first, char second) {
-                                                       const auto upper = [](char character) {
-                                                         return character >= 'a' && character <= 'z'
-                                                                  ? character - 'a' + 'A'
-                                                                  : character;
-                                                       };
-                                                       return upper(first) == upper(second);
-                                                     })
-                                : candidate == value;
+        return documentModifier || path == "syntax" ? std::ranges::equal(candidate, value,
+                                                                         [](char first, char second) {
+                                                                           const auto upper = [](char character) {
+                                                                             return character >= 'a' && character <= 'z'
+                                                                                      ? character - 'a' + 'A'
+                                                                                      : character;
+                                                                           };
+                                                                           return upper(first) == upper(second);
+                                                                         })
+                                                    : candidate == value;
       });
 
       if (found == schema->enumNames.end()) {
@@ -882,6 +882,10 @@ private:
           document->mode = static_cast<DocumentViewMode>(index - 2);
           settings.document = std::move(document);
         }
+      } else if (path == "syntax") {
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        document->syntax = static_cast<DocumentSyntaxPolicy>(index);
+        settings.document = std::move(document);
       } else if (path == "encoding") {
         auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
         document->encoding = static_cast<DocumentEncoding>(index);
@@ -1018,9 +1022,9 @@ private:
       return {};
     }
 
-    if (path == "hex.bytesPerRow" || path == "hex.groupSize" || path == "fastScroll" || path == "keyStep" ||
-        path == "pageOverlap" || path == "pageSteps" || path == "spinnerInterval" || path == "interval" ||
-        path == "radioInitial.index") {
+    if (path == "maxAutoHighlightBytes" || path == "hex.bytesPerRow" || path == "hex.groupSize" ||
+        path == "fastScroll" || path == "keyStep" || path == "pageOverlap" || path == "pageSteps" ||
+        path == "spinnerInterval" || path == "interval" || path == "radioInitial.index") {
       const auto value = capacity<std::uint64_t>();
 
       if (!value) {
@@ -1037,6 +1041,13 @@ private:
         } else {
           document->hexGroupSize = static_cast<std::size_t>(*value);
         }
+        settings.document = std::move(document);
+      } else if (path == "maxAutoHighlightBytes") {
+        if (!*value || *value > std::numeric_limits<std::size_t>::max() / 1024) {
+          return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
+        }
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        document->maxAutoHighlightBytes = static_cast<std::size_t>(*value);
         settings.document = std::move(document);
       } else if (path == "fastScroll") {
         auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());

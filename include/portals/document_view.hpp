@@ -62,6 +62,8 @@ struct DocumentViewConfig {
   std::optional<DocumentFastScroll> fastScroll;  ///< Absent keeps modified scrolling disabled.
   DocumentLanguage language{
     DocumentLanguage::PLAIN}; ///< Optional source highlighting; plain allocates no lexical cache.
+  DocumentSyntaxPolicy syntax{DocumentSyntaxPolicy::AUTO}; ///< Recovery policy; full-prefix work is explicit.
+  std::size_t maxAutoHighlightBytes{512 * 1024}; ///< Positive extra source-admission cap per AUTO viewport intent.
 };
 
 /** @brief Owning scalar observation; no source I/O or preparation is performed by status commands. */
@@ -83,6 +85,8 @@ struct DocumentViewStatus {
   DocumentLanguage language{DocumentLanguage::PLAIN}; ///< Active lexical profile retained across HEX projection.
   DocumentSyntaxState highlighting{DocumentSyntaxState::DISABLED}; ///< Proven state of displayed syntax roles.
   std::optional<std::uint64_t> highlightErrorOffset; ///< Original byte offset of a lexical limitation, if reported.
+  DocumentSyntaxAccuracy syntaxAccuracy{DocumentSyntaxAccuracy::NONE}; ///< Accuracy of the displayed roles.
+  DocumentSyntaxPolicy syntax{DocumentSyntaxPolicy::AUTO};             ///< Requested recovery policy.
 };
 
 /** @brief Read-only retained document viewport; source I/O, decoding and layout run on application workers.
@@ -132,6 +136,11 @@ std::expected<void, ManagedError> setDocumentHexOptions(ManagedScene &, Node<Doc
 std::expected<void, ManagedError> setDocumentLineNumbers(ManagedScene &, Node<DocumentView>, bool);
 std::expected<void, ManagedError> setDocumentWrap(ManagedScene &, Node<DocumentView>, bool);
 std::expected<void, ManagedError> setDocumentLanguage(ManagedScene &, Node<DocumentView>, DocumentLanguage);
+/** @param scene Receiving scene. @param node Viewer. @param policy Recovery policy.
+ * @return Checked deferred policy change; no source I/O is performed here.
+ */
+std::expected<void, ManagedError> setDocumentSyntax(ManagedScene &scene, Node<DocumentView> node,
+                                                    DocumentSyntaxPolicy policy);
 std::expected<void, ManagedError> setDocumentEncoding(ManagedScene &, Node<DocumentView>, DocumentEncoding);
 /// @endcond
 } // namespace portals

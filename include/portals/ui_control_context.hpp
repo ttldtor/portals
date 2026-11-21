@@ -367,17 +367,19 @@ struct ControlRadioInitialSettings {
 
 /** @brief Sparse file-backed document presentation; shared snapshots are immutable. */
 struct ControlDocumentSettings {
-  std::optional<DocumentLanguage> language{};  ///< Lexical profile; plain disables syntax roles.
-  std::optional<DocumentViewMode> mode{};      ///< Projection without changing the source.
-  std::optional<std::size_t> hexBytesPerRow{}; ///< Raw-byte slots, from 1 through MAX_HEX_ROW_BYTES.
-  std::optional<std::size_t> hexGroupSize{};   ///< Group size, from 1 through MAX_HEX_ROW_BYTES.
-  std::optional<bool> hexUppercase{};          ///< Use uppercase hexadecimal digits.
-  std::optional<bool> hexShowAscii{};          ///< Include safe ASCII.
-  std::optional<bool> hexAutoFit{};            ///< Fit up to the configured row width.
-  std::optional<std::string> file{};           ///< Literal UTF-8 file path.
-  std::optional<bool> lineNumbers{};           ///< Show logical line numbers.
-  std::optional<bool> wrap{};                  ///< Wrap text at the viewport edge.
-  std::optional<DocumentEncoding> encoding{};  ///< Explicit decoder selection.
+  std::optional<DocumentLanguage> language{};         ///< Lexical profile; plain disables syntax roles.
+  std::optional<DocumentSyntaxPolicy> syntax{};       ///< Recovery policy; AUTO is the default.
+  std::optional<std::size_t> maxAutoHighlightBytes{}; ///< Positive automatic original-source admission cap.
+  std::optional<DocumentViewMode> mode{};             ///< Projection without changing the source.
+  std::optional<std::size_t> hexBytesPerRow{};        ///< Raw-byte slots, from 1 through MAX_HEX_ROW_BYTES.
+  std::optional<std::size_t> hexGroupSize{};          ///< Group size, from 1 through MAX_HEX_ROW_BYTES.
+  std::optional<bool> hexUppercase{};                 ///< Use uppercase hexadecimal digits.
+  std::optional<bool> hexShowAscii{};                 ///< Include safe ASCII.
+  std::optional<bool> hexAutoFit{};                   ///< Fit up to the configured row width.
+  std::optional<std::string> file{};                  ///< Literal UTF-8 file path.
+  std::optional<bool> lineNumbers{};                  ///< Show logical line numbers.
+  std::optional<bool> wrap{};                         ///< Wrap text at the viewport edge.
+  std::optional<DocumentEncoding> encoding{};         ///< Explicit decoder selection.
   std::optional<std::uint64_t>
     fastScroll{}; ///< Positive absolute modified step; absence preserves disabled/default policy.
   std::optional<key::Modifier> fastKeyModifier{};   ///< Exact modified-arrow tag.

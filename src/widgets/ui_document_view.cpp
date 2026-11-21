@@ -136,6 +136,8 @@ bool validConfig(const DocumentViewConfig &config) noexcept {
     return encoding >= DocumentEncoding::UNRESOLVED && encoding <= DocumentEncoding::WINDOWS1252;
   };
   return config.language >= DocumentLanguage::PLAIN && config.language <= DocumentLanguage::MARKDOWN_SOURCE &&
+         config.syntax >= DocumentSyntaxPolicy::AUTO && config.syntax <= DocumentSyntaxPolicy::EXACT &&
+         config.maxAutoHighlightBytes && config.maxAutoHighlightBytes <= SAFE_LIMIT &&
          (config.mode == DocumentViewMode::TEXT || config.mode == DocumentViewMode::HEX) &&
          hexRowWidth({config.hex.bytesPerRow, config.hex.groupSize, config.hex.uppercase, config.hex.showAscii}) &&
          validEncoding(config.decoder.explicitEncoding) && validEncoding(config.decoder.hint) &&
@@ -610,6 +612,7 @@ public:
     state->status = {};
     state->status.mode = state->config.mode;
     state->status.language = state->config.language;
+    state->status.syntax = state->config.syntax;
     state->status.highlighting =
       state->config.mode == DocumentViewMode::TEXT && state->config.language != DocumentLanguage::PLAIN
         ? DocumentSyntaxState::PENDING
@@ -684,6 +687,10 @@ private:
 
     auto completed = std::exchange(completion_, {});
     busy_ = false;
+    if (completed->scan) {
+      // Optional recovery still owns admitted bytes and its spent AUTO budget on failure.
+      scan_ = completed->scan;
+    }
     if (completed->error) {
       if (completed->error->code == SourceError::WOULD_BLOCK && completed->error->budgetDemand) {
         waitingDemand_ = *completed->error->budgetDemand;
@@ -704,7 +711,9 @@ private:
     state->status.highlightErrorOffset = completed->syntaxErrorOffset;
     if (completed->frame) {
       state->frame = completed->frame;
-      state->status.highlighting = DocumentSyntaxState::READY;
+      state->status.highlighting = completed->frame->status.highlighting;
+      state->status.syntaxAccuracy = completed->frame->status.syntaxAccuracy;
+      state->status.syntax = state->config.syntax;
       (void)app_.tree().invalidate(node_, Invalidation::PAINT);
     }
 
@@ -1141,6 +1150,7 @@ private:
         commandPending_ = false;
         state->frame = completed->frame;
         state->status = completed->frame->status;
+        state->status.syntax = state->config.syntax;
         state->rowDelta = 0;
         if (!state->frame->anchors.empty() && (intent_.tail || intent_.rowDelta)) {
           state->anchor = state->frame->anchors.front();
@@ -1201,6 +1211,10 @@ private:
     return scan_ && scan_->highlight ? scan_->highlight->maxMaps : 0;
   }
 
+  bool retainedPreview() const noexcept {
+    return scan_ && scan_->highlight && scan_->highlight->preview != nullptr;
+  }
+
   std::size_t replayBytes(const DocumentViewState &state) const noexcept {
     if (scan_ && scan_->highlight && scan_->highlight->replay) {
       return scan_->highlight->replay->bytes.size();
@@ -1218,9 +1232,12 @@ private:
   }
 
   std::expected<SourceBudgetUsage, SourceError> nextPeak(const DocumentViewState &state) const {
-    const auto amount = documentPreparationBytes(
-      viewport_, state.config,
-      {.hexRows = retainedHexRows(), .textMaps = retainedTextMaps(), .replayBytes = replayBytes(state)});
+    const auto amount = documentPreparationBytes(viewport_, state.config,
+                                                 {.hexRows = retainedHexRows(),
+                                                  .textMaps = retainedTextMaps(),
+                                                  .replayBytes = replayBytes(state),
+                                                  .preview = retainedPreview(),
+                                                  .suppressPreview = intent_.suppressPreview});
     if (!amount) {
       return std::unexpected(amount.error());
     }
@@ -1291,6 +1308,23 @@ private:
     state->status.backpressured = true;
   }
 
+  std::expected<SourceCredit, SourceError> reservePreparation(const DocumentViewState &state) {
+    const auto amount = documentPreparationBytes(viewport_, state.config,
+                                                 {.hexRows = retainedHexRows(),
+                                                  .textMaps = retainedTextMaps(),
+                                                  .replayBytes = replayBytes(state),
+                                                  .preview = retainedPreview(),
+                                                  .suppressPreview = intent_.suppressPreview});
+    if (!amount) {
+      return std::unexpected(amount.error());
+    }
+    const auto peak = nextPeak(state);
+    if (!peak) {
+      return std::unexpected(peak.error());
+    }
+    return capacity_.reserve({*amount, 0, 1, 0}, *peak);
+  }
+
   void dispatch(const std::shared_ptr<DocumentViewState> &state) {
     const auto width = static_cast<std::size_t>(viewport_.width);
     const auto height = static_cast<std::size_t>(viewport_.height);
@@ -1307,20 +1341,16 @@ private:
       fail({SourceError::PAGE_TOO_LARGE, {}, {}});
       return;
     }
-    const auto reserved = documentPreparationBytes(
-      viewport_, state->config,
-      {.hexRows = retainedHexRows(), .textMaps = retainedTextMaps(), .replayBytes = replayBytes(*state)});
-    if (!reserved) {
-      fail({reserved.error(), {}, {}});
-      return;
+    auto credit = reservePreparation(*state);
+    const bool optionalPreview = state->config.mode == DocumentViewMode::TEXT &&
+                                 state->config.language != DocumentLanguage::PLAIN &&
+                                 (state->config.syntax != DocumentSyntaxPolicy::EXACT || retainedPreview());
+    if (!credit && credit.error() == SourceError::PAGE_TOO_LARGE && optionalPreview && !intent_.suppressPreview) {
+      // An optional preview must not prevent admission of the ordinary readable viewport.
+      // This one-way fallback belongs to this intent; capacity retries do not re-enable it.
+      intent_.suppressPreview = true;
+      credit = reservePreparation(*state);
     }
-    const auto amount = *reserved;
-    const auto peak = nextPeak(*state);
-    if (!peak) {
-      fail({peak.error(), {}, {}});
-      return;
-    }
-    auto credit = capacity_.reserve({amount, 0, 1, 0}, *peak);
     if (!credit) {
       if (credit.error() == SourceError::WOULD_BLOCK) {
         armCapacity(state);
@@ -1335,6 +1365,7 @@ private:
     intent_.resume = continuation_ || intent_.resume;
     intent_.retainedHexRows = retainedHexRows();
     intent_.retainedTextMaps = retainedTextMaps();
+    intent_.retainPreview = retainedPreview();
     intent_.replayBytes = replayBytes(*state);
     const bool retainReplay = state->config.language != DocumentLanguage::PLAIN || (scan_ && scan_->highlight) ||
                               (state->config.mode == DocumentViewMode::HEX && !state->source->capabilities().seekable);
@@ -1504,6 +1535,8 @@ Description<DocumentView> viewer(DocumentSource source, DocumentViewConfig confi
       auto effectiveConfig = config;
       const auto &document = context.controlSettings->documentSettings();
       effectiveConfig.language = document.language.value_or(config.language);
+      effectiveConfig.syntax = document.syntax.value_or(config.syntax);
+      effectiveConfig.maxAutoHighlightBytes = document.maxAutoHighlightBytes.value_or(config.maxAutoHighlightBytes);
       effectiveConfig.lineNumbers = document.lineNumbers.value_or(config.lineNumbers);
       effectiveConfig.wrap = document.wrap.value_or(config.wrap);
       effectiveConfig.mode = document.mode.value_or(config.mode);
@@ -1614,6 +1647,7 @@ std::expected<void, ManagedError> configureDocument(ManagedScene &scene, Node<Do
     }
 
     const auto previousSerial = state.serial;
+    state.status.syntax = state.config.syntax;
     state.refresh = true;
     state.rowDelta = 0;
     ++state.serial;
@@ -1634,6 +1668,20 @@ std::expected<void, ManagedError> configureDocument(ManagedScene &scene, Node<Do
                      : std::unexpected(ui::detail::error(node, invalidated.error()));
 }
 } // namespace
+
+std::expected<void, ManagedError> setDocumentSyntax(ManagedScene &scene, Node<DocumentView> node,
+                                                    DocumentSyntaxPolicy policy) {
+  if (policy < DocumentSyntaxPolicy::AUTO || policy > DocumentSyntaxPolicy::EXACT) {
+    return std::unexpected(ui::detail::error(node, TreeError::INVALID_ARGUMENT));
+  }
+  return configureDocument(scene, node, [policy](DocumentViewConfig &config) {
+    if (config.syntax == policy) {
+      return false;
+    }
+    config.syntax = policy;
+    return true;
+  });
+}
 
 std::expected<void, ManagedError> setDocumentLanguage(ManagedScene &scene, Node<DocumentView> node,
                                                       DocumentLanguage language) {
@@ -1835,6 +1883,19 @@ std::expected<void, ManagedError> documentMode(const std::shared_ptr<RefTarget> 
     return std::unexpected(scene.error());
   }
   auto result = portals::setDocumentMode(**scene, node, mode);
+  if (!result) {
+    result.error().registrationOrigin = origin;
+  }
+  return result;
+}
+
+std::expected<void, ManagedError> documentSyntax(const std::shared_ptr<RefTarget> &target, Node<DocumentView> node,
+                                                 DocumentSyntaxPolicy policy, std::source_location origin) {
+  const auto scene = eventScene(target);
+  if (!scene) {
+    return std::unexpected(scene.error());
+  }
+  auto result = portals::setDocumentSyntax(**scene, node, policy);
   if (!result) {
     result.error().registrationOrigin = origin;
   }
