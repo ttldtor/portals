@@ -692,8 +692,10 @@ private:
       scan_ = completed->scan;
     }
     if (completed->error) {
-      if (completed->error->code == SourceError::WOULD_BLOCK && completed->error->budgetDemand) {
-        waitingDemand_ = *completed->error->budgetDemand;
+      if (completed->error->code == SourceError::WOULD_BLOCK &&
+          (completed->error->budgetPeak || completed->error->budgetDemand)) {
+        waitingDemand_ =
+          completed->error->budgetPeak.value_or(completed->error->budgetDemand.value_or(SourceBudgetUsage{}));
         continuation_ = true;
         completed.reset();
         armCapacity(state);
@@ -1116,8 +1118,10 @@ private:
           // A failed turn can still own irreversibly accepted source bytes.
           scan_ = completed->scan;
         }
-        if (completed->error->code == SourceError::WOULD_BLOCK && completed->error->budgetDemand) {
-          waitingDemand_ = *completed->error->budgetDemand;
+        if (completed->error->code == SourceError::WOULD_BLOCK &&
+            (completed->error->budgetPeak || completed->error->budgetDemand)) {
+          waitingDemand_ =
+            completed->error->budgetPeak.value_or(completed->error->budgetDemand.value_or(SourceBudgetUsage{}));
           completed.reset();
           armCapacity(state);
           return;
@@ -1283,7 +1287,8 @@ private:
     if ((state.errorCaption && state.errorCaption->ownerBudget == state.source->budget() &&
          !includeOwned(state.errorCaption->credit.usage().bytes)) ||
         !includeOwned(SourceBudget::ROOT_METADATA_BYTES + SourceBudget::CAPACITY_OBSERVER_BYTES) ||
-        !includeOwned(envelope) || (state.frame && !includeOwned(state.frame->credit.usage().bytes)) ||
+        !includeOwned(envelope) || !includeOwned(state.source->pinnedBudgetBytes()) ||
+        (state.frame && !includeOwned(state.frame->credit.usage().bytes)) ||
         (scan_ && !includeOwned(scan_->reservation->usage().bytes)) ||
         peak.bytes > options.maxBytes - std::min(owned, options.maxBytes) ||
         peak.consumers > options.maxConsumers - credit_.usage().consumers) {
@@ -1294,6 +1299,8 @@ private:
   }
 
   void armCapacity(const std::shared_ptr<DocumentViewState> &state) {
+    (void)state->source->tryReleaseOptionalStorage();
+
     const auto peak = nextPeak(*state);
     if (!peak) {
       fail({peak.error(), {}, {}});
@@ -1322,7 +1329,13 @@ private:
     if (!peak) {
       return std::unexpected(peak.error());
     }
-    return capacity_.reserve({*amount, 0, 1, 0}, *peak);
+    auto reserved = capacity_.reserve({*amount, 0, 1, 0}, *peak);
+
+    if (!reserved && reserved.error() == SourceError::WOULD_BLOCK && state.source->tryReleaseOptionalStorage()) {
+      return capacity_.reserve({*amount, 0, 1, 0}, *peak);
+    }
+
+    return reserved;
   }
 
   void dispatch(const std::shared_ptr<DocumentViewState> &state) {
@@ -1497,6 +1510,10 @@ std::shared_ptr<SourceBudget> DocumentSource::budget() const noexcept {
 
 DocumentSource document(std::shared_ptr<ByteDocumentSource> source) {
   return detail::DocumentSourceAccess::make(std::move(source));
+}
+
+DocumentSource document(std::unexpected<DocumentError> failure) {
+  return detail::DocumentSourceAccess::make({}, std::move(failure.error()));
 }
 
 DocumentSource document(std::shared_ptr<ByteDocumentProvider> provider, std::shared_ptr<SourceBudget> budget,

@@ -21,3 +21,14 @@ add_custom_command(TARGET portals_document_highlight_example POST_BUILD
     "${CMAKE_CURRENT_SOURCE_DIR}/orders.sql" "${CMAKE_CURRENT_SOURCE_DIR}/notes.md"
     "$<TARGET_FILE_DIR:portals_document_highlight_example>"
   VERBATIM)
+
+if(PORTALS_ENABLE_GZIP)
+  add_executable(portals_document_gzip_example gzip.cpp)
+  target_link_libraries(portals_document_gzip_example PRIVATE portals::gzip)
+  portals_enable_warnings(portals_document_gzip_example)
+  add_custom_command(TARGET portals_document_gzip_example POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+      "${CMAKE_CURRENT_SOURCE_DIR}/archive.sql" "${CMAKE_CURRENT_SOURCE_DIR}/archive.sql.gz"
+      "$<TARGET_FILE_DIR:portals_document_gzip_example>"
+    VERBATIM)
+endif()

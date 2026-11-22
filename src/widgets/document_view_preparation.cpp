@@ -1027,7 +1027,7 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
   std::shared_ptr<DocumentScan> scan;
 
   try {
-    auto metadata = source->inspect(stop);
+    auto metadata = (intent.tail ? source->inspectEnd(stop) : source->inspect(stop));
     if (!metadata) {
       throw PreparationFailure{metadata.error()};
     }

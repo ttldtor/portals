@@ -15,6 +15,8 @@ struct DocumentError {
   std::optional<FileLogFailure> fileFailure;       ///< Exact file semantic/operation cause when applicable.
   std::optional<SourceBudgetUsage>
     budgetDemand{}; ///< Exact failed reservation on this source root; absent for provider waiting.
+  std::optional<SourceBudgetUsage> budgetPeak{}; ///< Minimum transient retry overlap on the same root; excludes pinned
+                                                 ///< provider storage and is extended by enclosing source operations.
 };
 
 /** @brief Exact document namespace and provider revision. */
@@ -64,10 +66,39 @@ public:
   virtual ~ByteDocumentProvider() = default; ///< Safe final destruction after worker release.
   /** @return Capabilities without allocation, opening files or other I/O. */
   virtual ByteDocumentCapabilities capabilities() const noexcept = 0;
+
+  /** @param root Credit root whose mandatory retained bytes are observed.
+   * @return Thread-safe allocation-free snapshot of provider-owned pinned bytes on that root.
+   * Excludes optional cache and source/view credits counted by their owners. No I/O or blocking lock is allowed.
+   */
+  virtual std::size_t pinnedBudgetBytes(const SourceBudget &root) const noexcept {
+    (void)root;
+    return 0;
+  }
+
+  /** @return Whether optional storage was released without changing document data or navigation state.
+   * Thread-safe, bounded and nonblocking; no I/O, decoding, allocation or user callback is allowed.
+   * A busy implementation may defer the request to its current worker before that worker completes.
+   */
+  virtual bool tryReleaseOptionalStorage() noexcept {
+    return false;
+  }
+
   /** @param stop Cooperative cancellation.
    * @return Current exact revision/optional extent, or typed failure.
    */
   virtual std::expected<ByteDocumentMetadata, DocumentError> metadata(std::stop_token stop) = 0;
+
+  /** @param stop Cooperative cancellation of worker-only extent discovery.
+   * @return Current revision and optional extent, or typed failure.
+   * The default only observes metadata. Adapters may discover their exact end using
+   * bounded storage without formatting document content; an unknown extent remains valid.
+   * The source serializes this operation with metadata/read and discards late cancellation.
+   */
+  virtual std::expected<ByteDocumentMetadata, DocumentError> discoverExtent(std::stop_token stop) {
+    return metadata(stop);
+  }
+
   /** @param command Exact revision/offset.
    * @param destination Writable bounded storage borrowed for this call only.
    * @param stop Cooperative cancellation, also checked after returning by the source.
@@ -191,10 +222,21 @@ public:
     return options_.envelopeBytes;
   }
 
+  /** @return Nonblocking provider-owned mandatory bytes on this source's root; excludes source/page/view storage. */
+  std::size_t pinnedBudgetBytes() const noexcept;
+  /** @return Whether bounded optional provider storage was reclaimed without I/O or blocking. */
+  bool tryReleaseOptionalStorage() noexcept;
+
   /** @param stop Cooperative cancellation.
    * @return Qualified metadata, or worker-affinity/provider/cancellation failure.
    */
   std::expected<DocumentMetadata, DocumentError> inspect(std::stop_token stop = {});
+  /** @param stop Cooperative cancellation, including provider extent discovery.
+   * @return Qualified metadata after optional worker-only end discovery, or typed failure.
+   * Providers without this capability retain the ordinary inspect behavior.
+   */
+  std::expected<DocumentMetadata, DocumentError> inspectEnd(std::stop_token stop = {});
+
   /** @param request Exact bounded window and caller generation.
    * @param stop Cooperative cancellation; late cancellation discards the page.
    * @return Owning page or typed failure; no publication/callback occurs here.
@@ -202,6 +244,7 @@ public:
   std::expected<DocumentBytePage, DocumentError> read(DocumentReadRequest request, std::stop_token stop = {});
 
 private:
+  std::expected<DocumentMetadata, DocumentError> inspectOnWorker(std::stop_token stop, bool discoverEnd);
   ByteDocumentSource(std::shared_ptr<ByteDocumentProvider> provider, std::shared_ptr<SourceBudget> budget,
                      SourceCredit credit, DocumentSourceOptions options, SourceStamp stamp);
   std::shared_ptr<ByteDocumentProvider> provider_;

@@ -85,10 +85,33 @@ public:
   std::atomic<std::size_t> metadataCalls{};
   std::atomic<bool> uiOperation{};
   bool unknown{};
+  bool discoverable{};
+  std::atomic<std::size_t> discoveries{};
   bool finalUnknown{};
   bool emptyMore{};
   bool failRead{};
   bool providerWouldBlock{};
+  std::shared_ptr<SourceBudget> accountedRoot;
+  SourceCredit pinnedCredit;
+  SourceCredit optionalCache;
+  std::size_t cacheTrims{};
+  std::optional<DocumentError> budgetFailure;
+
+  std::size_t pinnedBudgetBytes(const SourceBudget &root) const noexcept override {
+    return accountedRoot.get() == &root ? pinnedCredit.usage().bytes : 0;
+  }
+
+  bool tryReleaseOptionalStorage() noexcept override {
+    if (!optionalCache.usage().bytes) {
+      return false;
+    }
+
+    optionalCache = {};
+    ++cacheTrims;
+
+    return true;
+  }
+
   std::optional<std::uint64_t> syntheticExtent;
   const std::thread::id ui = std::this_thread::get_id();
 
@@ -104,6 +127,17 @@ public:
                                                             : std::optional<std::uint64_t>(text.size())};
   }
 
+  std::expected<ByteDocumentMetadata, DocumentError> discoverExtent(std::stop_token stop) override {
+    ++discoveries;
+    auto result = metadata(stop);
+
+    if (result && discoverable) {
+      result->byteExtent = syntheticExtent;
+    }
+
+    return result;
+  }
+
   std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
                                                     std::stop_token) override {
     ++reads;
@@ -113,6 +147,10 @@ public:
     if (providerWouldBlock) {
       return std::unexpected(DocumentError{SourceError::WOULD_BLOCK, {}, {}});
     }
+    if (budgetFailure) {
+      return std::unexpected(*budgetFailure);
+    }
+
     if (failRead) {
       return std::unexpected(DocumentError{SourceError::IO_ERROR, std::make_error_code(std::errc::io_error), {}});
     }
@@ -270,6 +308,21 @@ std::uint64_t navigationSerial(Fixture &fixture) {
   return serial;
 }
 } // namespace
+
+TEST_CASE("cold adapter construction failure is retained until mounting") {
+  const auto descriptor = ui::document(std::unexpected(DocumentError{SourceError::UNSUPPORTED, {}, {}}));
+
+  CHECK_FALSE(descriptor.byteSource());
+  CHECK_FALSE(descriptor.budget());
+
+  Executor executor;
+  auto app = take(Application::create({.backgroundExecutor = &executor}));
+  auto scene = take(ManagedScene::create(*app));
+  const auto mounted = ui::mount(*scene, ui::viewer(descriptor));
+
+  REQUIRE_FALSE(mounted);
+  CHECK(mounted.error().source == SourceError::UNSUPPORTED);
+}
 
 TEST_CASE("cold factory mounts fluent native framing without UI metadata reads") {
   auto provider = std::make_shared<Provider>();
@@ -3348,4 +3401,93 @@ TEST_CASE("AUTO preview survives paint and policy races without stale exact publ
   CHECK(take(f.reference.status()).syntaxAccuracy == DocumentSyntaxAccuracy::EXACT);
   CHECK(f.frame()->anchors == anchors);
   CHECK(f.frame()->footer->bytes().find('~') == std::string_view::npos);
+}
+
+TEST_CASE("provider pinned storage rejects impossible view overlap instead of waiting forever") {
+  auto budget = take(SourceBudget::create());
+  auto provider = std::make_shared<Provider>();
+  provider->text = "bounded";
+  provider->accountedRoot = budget;
+  Fixture f(ui::document(provider, budget));
+  const auto free = budget->options().maxBytes - budget->usage().bytes;
+  provider->pinnedCredit = take(budget->reserve({free - 1, 0, 0, 0}));
+
+  f.settle(3);
+  const auto status = take(f.reference.status());
+
+  REQUIRE(status.error);
+  CHECK(status.error->code == SourceError::PAGE_TOO_LARGE);
+  CHECK_FALSE(status.backpressured);
+  CHECK_FALSE(f.executor.job);
+}
+
+TEST_CASE("optional provider cache is reclaimed before view capacity waiting") {
+  auto budget = take(SourceBudget::create());
+  auto provider = std::make_shared<Provider>();
+  provider->text = "cache reclaimed";
+  Fixture f(ui::document(provider, budget));
+  const auto free = budget->options().maxBytes - budget->usage().bytes;
+  provider->optionalCache = take(budget->reserve({free, 0, 0, 0}));
+
+  f.settle(3);
+
+  REQUIRE(f.frame());
+  CHECK(f.frame()->rows.front().bytes() == "cache reclaimed");
+  CHECK(provider->cacheTrims == 1);
+  CHECK_FALSE(take(f.reference.status()).backpressured);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("nested provider retry peak rejects an impossible decoder turn without resubmission") {
+  auto budget = take(SourceBudget::create());
+  auto provider = std::make_shared<Provider>();
+  provider->text = "unread";
+  DocumentError blocked{SourceError::WOULD_BLOCK, {}, {}};
+  blocked.budgetDemand = SourceBudgetUsage{1, 0, 0, 0};
+  blocked.budgetPeak = SourceBudgetUsage{budget->options().maxBytes, 0, 0, 0};
+  provider->budgetFailure = blocked;
+  Fixture f(ui::document(provider, budget));
+
+  f.settle(3);
+  const auto status = take(f.reference.status());
+
+  REQUIRE(status.error);
+  CHECK(status.error->code == SourceError::PAGE_TOO_LARGE);
+  CHECK_FALSE(status.backpressured);
+  CHECK(provider->reads.load() == 1);
+  CHECK_FALSE(f.executor.job);
+}
+
+TEST_CASE("End discovers unknown seekable extent before bounded last-page layout") {
+  for (const auto mode : {DocumentViewMode::TEXT, DocumentViewMode::HEX}) {
+    CAPTURE(mode);
+    constexpr std::uint64_t EXTENT = std::uint64_t{8} << 30;
+    auto provider = std::make_shared<Provider>();
+    provider->syntheticExtent = EXTENT;
+    provider->unknown = true;
+    provider->discoverable = true;
+    DocumentViewConfig config;
+    config.mode = mode;
+    Fixture f(ui::document(provider), config);
+    f.settle(3);
+    REQUIRE(f.frame());
+    CHECK(provider->discoveries == 0);
+    CHECK_FALSE(f.frame()->status.byteExtent);
+
+    REQUIRE(f.reference.end());
+    f.settle(4);
+
+    REQUIRE(f.frame());
+    CHECK(f.frame()->status.byteExtent == EXTENT);
+    CHECK(f.frame()->finalEndVisible);
+    const auto rowCount = f.frame()->rows.size();
+    take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+      const auto height = detail::ScrollWidgetAccess::state(widget).geometry.viewport.height;
+      CHECK(rowCount == static_cast<std::size_t>(height));
+    }));
+    CHECK(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
+    CHECK(provider->discoveries > 0);
+    CHECK(provider->bytesRead.load() <= 512 * 1024);
+    CHECK_FALSE(provider->uiOperation.load());
+  }
 }

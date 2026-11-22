@@ -18,3 +18,9 @@
 # Preserve exact provenance hashes and upstream notices for encoding data.
 /vendor/whatwg-encoding/** -text
 /tests/fixtures/encoding/** -text
+
+# Preserve checksum-pinned upstream compression sources and notices.
+/vendor/zlib/** -text
+
+/examples/document_view/archive.sql text eol=lf
+/examples/document_view/archive.sql.gz -text
