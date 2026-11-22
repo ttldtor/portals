@@ -15,6 +15,26 @@ DocumentError failure(SourceError code) {
   return {code, {}, std::nullopt};
 }
 
+DocumentError operationFailure(DocumentError error, std::size_t envelopeBytes, std::size_t pageBytes) {
+  if (!error.budgetPeak) {
+    return error;
+  }
+
+  auto &peak = *error.budgetPeak;
+  constexpr auto MAX = std::numeric_limits<std::size_t>::max();
+
+  if (envelopeBytes > MAX - pageBytes || peak.bytes > MAX - envelopeBytes - pageBytes ||
+      (pageBytes && peak.pages == MAX) || peak.work == MAX) {
+    return failure(SourceError::PAGE_TOO_LARGE);
+  }
+
+  peak.bytes += envelopeBytes + pageBytes;
+  peak.pages += pageBytes ? 1 : 0;
+  ++peak.work;
+
+  return error;
+}
+
 DocumentError fileFailure(FileLogFailure cause) {
   auto code = SourceError::IO_ERROR;
 
@@ -249,11 +269,29 @@ ByteDocumentCapabilities ByteDocumentSource::capabilities() const noexcept {
   return capabilities_;
 }
 
+std::size_t ByteDocumentSource::pinnedBudgetBytes() const noexcept {
+  return provider_->pinnedBudgetBytes(*budget_);
+}
+
+bool ByteDocumentSource::tryReleaseOptionalStorage() noexcept {
+  // These observation/reclamation methods are independently thread-safe and never perform provider I/O.
+  return provider_->tryReleaseOptionalStorage();
+}
+
 std::size_t ByteDocumentSource::maxPageBytes() const noexcept {
   return options_.maxPageBytes;
 }
 
 std::expected<DocumentMetadata, DocumentError> ByteDocumentSource::inspect(std::stop_token stop) {
+  return inspectOnWorker(stop, false);
+}
+
+std::expected<DocumentMetadata, DocumentError> ByteDocumentSource::inspectEnd(std::stop_token stop) {
+  return inspectOnWorker(stop, true);
+}
+
+std::expected<DocumentMetadata, DocumentError> ByteDocumentSource::inspectOnWorker(std::stop_token stop,
+                                                                                   bool discoverEnd) {
   if (std::this_thread::get_id() == ownerThread_) {
     return std::unexpected(failure(SourceError::WRONG_THREAD));
   }
@@ -277,14 +315,14 @@ std::expected<DocumentMetadata, DocumentError> ByteDocumentSource::inspect(std::
   }
 
   try {
-    auto info = provider_->metadata(stop);
+    auto info = discoverEnd ? provider_->discoverExtent(stop) : provider_->metadata(stop);
 
     if (stop.stop_requested()) {
       return std::unexpected(failure(SourceError::CANCELLED));
     }
 
     if (!info) {
-      return std::unexpected(info.error());
+      return std::unexpected(operationFailure(info.error(), options_.envelopeBytes, 0));
     }
 
     if (!info->dataRevision) {
@@ -365,7 +403,8 @@ std::expected<DocumentBytePage, DocumentError> ByteDocumentSource::read(Document
     }
 
     if (!result) {
-      return std::unexpected(result.error());
+      return std::unexpected(
+        operationFailure(result.error(), options_.envelopeBytes, request.maxBytes + SourceArena::METADATA_BYTES));
     }
 
     if (result->bytesRead > request.maxBytes) {

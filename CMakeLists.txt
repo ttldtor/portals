@@ -33,6 +33,7 @@ if(PORTALS_BUILD_TESTS AND
   message(FATAL_ERROR "PORTALS_RELEASE_START_TEST_TIMEOUT must be a positive integer <= 86400 seconds")
 endif()
 option(PORTALS_BUILD_EXAMPLES "Build Portals example consumer" ${PROJECT_IS_TOP_LEVEL})
+option(PORTALS_ENABLE_GZIP "Build the optional offline gzip document adapter" OFF)
 option(PORTALS_BUILD_WASM_GALLERY "Build the opt-in Emscripten gallery" OFF)
 option(PORTALS_BUILD_FUZZERS "Build opt-in Clang libFuzzer targets with sanitizers" OFF)
 option(PORTALS_BUILD_DOCS "Build Portals API documentation with Doxygen" OFF)
@@ -249,6 +250,10 @@ function(portals_enable_warnings target)
 endfunction()
 
 portals_enable_warnings(portals_core)
+
+if(PORTALS_ENABLE_GZIP)
+  include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/PortalsGzip.cmake")
+endif()
 
 if(PORTALS_BUILD_TOOLS)
   add_executable(portals_compactness tools/compactness/main.cpp tools/compactness/scanner.cpp
@@ -1955,6 +1960,7 @@ if(PORTALS_BUILD_DOCS)
   list(APPEND portals_documentation_inputs docs/choices.md docs/ru/choices.md)
   list(APPEND portals_documentation_inputs docs/menus.md docs/ru/menus.md)
   list(APPEND portals_documentation_inputs docs/sliders.md docs/ru/sliders.md docs/spin-boxes.md docs/ru/spin-boxes.md)
+  list(APPEND portals_documentation_inputs vendor/zlib/README.md)
   list(APPEND portals_documentation_inputs docs/api-groups.dox)
   set(portals_language_config "${CMAKE_CURRENT_BINARY_DIR}/docs/languages")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS

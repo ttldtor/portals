@@ -216,6 +216,82 @@ Collected commands report failures through the receiving scene's existing error 
 
 The first version is read-only. It does not provide text selection, clipboard export, editing, search or automatic semantic rebasing over arbitrary external rewrites.
 
+## Compressed gzip documents {#document-view-gzip}
+
+Enable `PORTALS_ENABLE_GZIP=ON` when building Portals and link the optional
+`portals::gzip` target. Include `<portals/ui_gzip.hpp>` to use
+`ui::viewer(ui::gzipFile("archive.sql.gz"))`. The ordinary core build has no gzip
+runtime dependency. The adapter is bundled for offline builds; an installed
+consumer needs no separate zlib installation.
+
+```cmake
+find_package(Portals CONFIG REQUIRED COMPONENTS gzip)
+target_link_libraries(my_viewer PRIVATE portals::gzip)
+```
+
+Build `portals_document_gzip_example` with `PORTALS_BUILD_EXAMPLES=ON` and run it
+from its executable directory. The build places identical SQL data in plain and
+gzip form beside the program. F2 selects the original file, F3 selects the
+compressed archive, and each retained descriptor remembers its reading position.
+Home and End navigate within the selected logical document. F10 closes the app.
+
+[Complete source](../examples/document_view/gzip.cpp)
+
+\include document_view/gzip.cpp
+
+@image html document-view-gzip.gif "Read plain and gzip SQL, restore each reading position and reach the final complete page."
+
+The factory owns the path and creates a cold descriptor. Opening, checking the
+gzip header, decompression and seeking happen on the existing background
+executor. Gzip selection is explicit: the adapter checks the content and does
+not infer its format from a filename extension. `ui::gzip(provider)` adapts an
+existing seekable byte provider; files are one supported source family.
+
+The view displays decompressed bytes. Until every gzip member and the physical
+end have been checked, the logical size is unknown; the footer can therefore
+show `progress unknown`. The archive's 32-bit ISIZE field is not used as a total
+size. Concatenated gzip members form one logical document. CRC failures,
+truncation and trailing garbage produce a source error instead of a clean EOF.
+An integrity error replaces the visible body with a recoverable error message.
+Previously prepared data remain retained for recovery; that prefix is not proof
+that the whole archive passed validation.
+
+The adapter keeps a bounded number of in-memory decompressor checkpoints,
+including their dictionary and bit state. Backward seeks can replay from an
+earlier checkpoint or the source origin after eviction. A cold End may decompress
+the complete archive cumulatively. End first asks the provider to discover the
+logical extent without laying out the intervening text, then prepares a bounded
+suffix for the last full page. Discovery validates the complete gzip stream but
+discards its output, retaining only bounded buffers and restart checkpoints.
+It can still take substantial time and occupy a worker. Cancellation is checked
+between bounded input/output quanta; an underlying provider's blocking I/O is
+subject to that provider's own cancellation contract. `DocumentViewConfig.workBytes`
+is not a limit on hidden compressed replay work.
+
+`GzipDocumentOptions` exposes the input/output capacities, checkpoint spacing
+and count, replay-buffer size, inflater allocation cap and header-byte cap.
+Decompressor allocations and retained checkpoints use the same `SourceBudget`
+root as the view. There is no temporary-file or persistent disk cache. Reuse one
+gzip wrapper across views; do not concurrently access its underlying provider
+through separate wrappers or other owners. Changes to the compressed source
+invalidate the frozen revision and are reported as `REVISION_CHANGED`.
+
+Default tuning through `GzipDocumentOptions`:
+
+| Setting | Default | Purpose |
+|---|---|---|
+| `compressedBlockBytes` | 64 KiB | Input quantum; valid range 1–64 KiB. |
+| `inflateOutputBytes` | 32 KiB | Maximum output per inflate call before a cancellation check. |
+| `checkpointStrideBytes` | 4 MiB | Logical spacing between optional restart snapshots. |
+| `maxCheckpoints` | 8 | Resident snapshot count; 0 disables them, maximum 64. |
+| `replayBytes` | 64 KiB | Logical-byte replay ring; 0 disables it. |
+| `maxInflateBytes` | 512 KiB | Combined live inflater allocation cap, including copied states. |
+| `maxHeaderBytes` | 1 MiB | Compressed-byte cap for each gzip member header. |
+
+The count and byte limits apply together, so fewer snapshots can be retained.
+Under memory pressure, idle inflater state and checkpoints can be reclaimed;
+a later cache miss replays from an available starting point.
+
 ## Encodings and resource settings {#document-view-settings}
 
 The default UTF-8 hint applies after an explicit encoding or a recognized BOM. Supported decoders are UTF-8, UTF-16LE/BE, UTF-32LE/BE, Windows-1251 and Windows-1252. Select one with `.encoding(DocumentEncoding::UTF16LE)`. `.wrap(false)` keeps a horizontal cell window; `.lineNumbers()` enables the gutter. Neither setting changes the original byte anchor.

@@ -118,6 +118,40 @@ public:
   }
 };
 
+class DiscoveringProvider final : public ByteDocumentProvider {
+public:
+  std::size_t discoveries{};
+  std::stop_source *cancel{};
+  std::optional<DocumentError> error;
+
+  ByteDocumentCapabilities capabilities() const noexcept override {
+    return {true, false};
+  }
+
+  std::expected<ByteDocumentMetadata, DocumentError> metadata(std::stop_token) override {
+    return ByteDocumentMetadata{1, std::nullopt};
+  }
+
+  std::expected<ByteDocumentMetadata, DocumentError> discoverExtent(std::stop_token) override {
+    ++discoveries;
+
+    if (cancel) {
+      cancel->request_stop();
+    }
+
+    if (error) {
+      return std::unexpected(*error);
+    }
+
+    return ByteDocumentMetadata{1, 8192};
+  }
+
+  std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &, std::span<std::byte>,
+                                                    std::stop_token) override {
+    return std::unexpected(DocumentError{SourceError::UNSUPPORTED, {}, {}});
+  }
+};
+
 struct FileFixture {
   std::filesystem::path path =
     std::filesystem::temp_directory_path() /
@@ -706,4 +740,84 @@ TEST_CASE("shared document source serializes two worker reads without UI lock wa
   CHECK(secondPage.generation() == 12);
   CHECK(budget->usage().work == 0);
   CHECK(budget->usage().pages == 2);
+}
+
+TEST_CASE("provider retry peak includes the live byte-source read workspace") {
+  auto budget = take(SourceBudget::create());
+  auto provider = std::make_shared<SyntheticProvider>();
+  auto source = take(ByteDocumentSource::create(provider, budget, {.maxPageBytes = 16}));
+  const auto metadata = inspect(*source);
+  DocumentError blocked{SourceError::WOULD_BLOCK, {}, {}};
+  blocked.budgetDemand = SourceBudgetUsage{32768, 0, 0, 0};
+  blocked.budgetPeak = SourceBudgetUsage{40000, 0, 0, 0};
+  provider->error = blocked;
+  const auto before = budget->usage().bytes;
+  const auto result = worker([&] {
+    return source->read({metadata.revision, 0, 16, 1});
+  });
+
+  REQUIRE_FALSE(result);
+  REQUIRE(result.error().budgetDemand);
+  CHECK(result.error().budgetDemand->bytes == 32768);
+  REQUIRE(result.error().budgetPeak);
+  CHECK(result.error().budgetPeak->bytes == 40000 + source->envelopeBytes() + 16 + SourceArena::METADATA_BYTES);
+  CHECK(result.error().budgetPeak->pages == 1);
+  CHECK(result.error().budgetPeak->work == 1);
+  CHECK(budget->usage().bytes == before);
+
+  provider->error->budgetPeak->bytes = std::numeric_limits<std::size_t>::max();
+  const auto overflow = worker([&] {
+    return source->read({metadata.revision, 0, 16, 2});
+  });
+
+  REQUIRE_FALSE(overflow);
+  CHECK(overflow.error().code == SourceError::PAGE_TOO_LARGE);
+  CHECK(budget->usage().bytes == before);
+}
+
+TEST_CASE("end discovery keeps worker affinity late cancellation and nested credit peaks") {
+  auto budget = take(SourceBudget::create());
+  auto provider = std::make_shared<DiscoveringProvider>();
+  auto source = take(ByteDocumentSource::create(provider, budget));
+  CHECK(source->inspectEnd().error().code == SourceError::WRONG_THREAD);
+  CHECK(provider->discoveries == 0);
+  CHECK_FALSE(inspect(*source).byteExtent);
+
+  auto end = take(worker([&] {
+    return source->inspectEnd();
+  }));
+  CHECK(end.byteExtent == 8192);
+  CHECK(end.revision.source == source->stamp());
+  CHECK(provider->discoveries == 1);
+
+  std::stop_source cancellation;
+  provider->cancel = &cancellation;
+  auto cancelled = worker([&] {
+    return source->inspectEnd(cancellation.get_token());
+  });
+  REQUIRE_FALSE(cancelled);
+  CHECK(cancelled.error().code == SourceError::CANCELLED);
+  provider->cancel = nullptr;
+  provider->error = DocumentError{SourceError::WOULD_BLOCK, {}, {}};
+  provider->error->budgetPeak = SourceBudgetUsage{40000, 0, 0, 0};
+
+  auto blocked = worker([&] {
+    return source->inspectEnd();
+  });
+  REQUIRE_FALSE(blocked);
+  REQUIRE(blocked.error().budgetPeak);
+  CHECK(blocked.error().budgetPeak->bytes == 40000 + source->envelopeBytes());
+  CHECK(blocked.error().budgetPeak->pages == 0);
+  CHECK(blocked.error().budgetPeak->work == 1);
+}
+
+TEST_CASE("providers without end discovery retain optional unknown metadata") {
+  auto provider = std::make_shared<SyntheticProvider>();
+  provider->extentKnown = false;
+  auto source = take(ByteDocumentSource::create(provider, take(SourceBudget::create())));
+  auto end = take(worker([&] {
+    return source->inspectEnd();
+  }));
+  CHECK_FALSE(end.byteExtent);
+  CHECK(provider->readCalls == 0);
 }

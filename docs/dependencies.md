@@ -8,6 +8,7 @@ The linked notices contain the full license texts.
 
 | Component | Purpose and delivery | License and source record |
 |---|---|---|
+| zlib 1.4 | Optional gzip document source through `<portals/ui_gzip.hpp>` and `portals::gzip`. Enable `PORTALS_ENABLE_GZIP`; the bundled inflate-only objects are included in the optional installed archive, with no separate system package. | [Zlib license](../vendor/zlib/LICENSE), [source record](../vendor/zlib/README.md), [manifest](../vendor/zlib/manifest.json) |
 | WHATWG Encoding indexes (2024-09-18) | Windows-1251 and Windows-1252 mappings are incorporated into the document decoder; no additional runtime library is required. | [License](../vendor/whatwg-encoding/LICENSE), [index provenance](../vendor/whatwg-encoding/README.md), [manifest](../vendor/whatwg-encoding/manifest.json) |
 | utf8proc 2.12.0 | Unicode decoding, [grapheme](glossary.md#glossary-text-units) boundaries, character properties and widths. Its vendored C sources build as a private static dependency of `portals::core`; its archive is included in the installed SDK. | MIT/Expat for code and Unicode notices for data: [license](../vendor/utf8proc/LICENSE.md), [source record](../vendor/utf8proc/README.md) |
 | Monocypher 4.0.3 | Linux native `SecureString` authenticated encryption. Windows uses its system backend; WASM does not include Monocypher. Source bundles and installed SDKs retain its notices. | [BSD-2-Clause notice](../vendor/monocypher/LICENCE.md), [source record](../vendor/monocypher/README.md), [manifest](../vendor/monocypher/manifest.json) |

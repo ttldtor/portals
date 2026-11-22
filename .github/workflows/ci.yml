@@ -53,6 +53,7 @@ jobs:
           -DCMAKE_EXPORT_COMPILE_COMMANDS=ON
           -DPORTALS_BUILD_TESTS=ON
           -DPORTALS_BUILD_EXAMPLES=ON
+          -DPORTALS_ENABLE_GZIP=ON
       - name: Check project names
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
@@ -104,7 +105,7 @@ jobs:
           }
       - name: Configure
         # Package setup and runtime verification use separate fixture phases; per-consumer limits remain.
-        run: cmake --preset ${{ matrix.preset }} -DPORTALS_PACKAGE_TEST_TIMEOUT=1200 -DPORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO=${{ matrix.minimal_consumer_debug_info }} -DPORTALS_PACKAGE_CONSUMER_EMBEDDED_DEBUG_INFO=${{ matrix.embedded_consumer_debug_info }}
+        run: cmake --preset ${{ matrix.preset }} -DPORTALS_ENABLE_GZIP=ON -DPORTALS_PACKAGE_TEST_TIMEOUT=1200 -DPORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO=${{ matrix.minimal_consumer_debug_info }} -DPORTALS_PACKAGE_CONSUMER_EMBEDDED_DEBUG_INFO=${{ matrix.embedded_consumer_debug_info }}
       - name: Build
         run: cmake --build --preset ${{ matrix.preset }}
       - name: Test

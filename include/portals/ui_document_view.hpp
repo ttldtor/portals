@@ -32,6 +32,11 @@ private:
  * @return Owning descriptor without inspecting or reading the source. The low-level source must originate on UI.
  */
 DocumentSource document(std::shared_ptr<ByteDocumentSource> source);
+/** @param failure Exact adapter construction failure, retained without source I/O.
+ * @return Failed cold descriptor reported by the receiving scene through runApp.
+ */
+DocumentSource document(std::unexpected<DocumentError> failure);
+
 /** @param provider Owning worker provider. @param budget Existing shared root, or null to create SDK defaults.
  * @param options Bounded source pages. @return Cold descriptor preserving typed creation failures.
  */

@@ -7,6 +7,17 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- An optional gzip source lets DocumentView navigate decompressed text through
+  bounded buffers and in-memory restart checkpoints. Enable `PORTALS_ENABLE_GZIP`
+  and link `portals::gzip`; the normal core build has no compression dependency.
+  Cold seeks may require cancellable replay, and the logical size remains unknown
+  until validated EOF. Concatenated members are supported; corruption is reported
+  as a source error. A complete example switches between plain and compressed SQL.
+  ByteDocumentProvider adds optional worker-side extent discovery and default
+  nonblocking cache/pinned-budget hooks, and
+  DocumentError carries nested retry-budget overlap. Rebuild custom providers
+  and consumers together with the library.
+
 - Text rendering can borrow a selected grapheme range without copying a whole
   row for each syntax span. TextCommand and RenderCommand have a changed binary
   layout; rebuild consumers together with the library.

@@ -203,7 +203,7 @@ std::shared_ptr<const DocumentPreparation> prepareHexDocument(std::shared_ptr<By
     if (stop.stop_requested()) {
       failHex(SourceError::CANCELLED);
     }
-    const auto metadata = source->inspect(stop);
+    const auto metadata = (intent.tail ? source->inspectEnd(stop) : source->inspect(stop));
     if (!metadata) {
       throw HexFailure{metadata.error()};
     }
