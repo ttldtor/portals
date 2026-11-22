@@ -136,7 +136,10 @@
     <tab type="usergroup" title="5. Develop Portals">
       <tab type="usergroup" title="Developer tools" url="@ref docs/developer-tools.md">
         <tab type="user" title="Build, CI and documentation" url="@ref docs/developer-tools-build.md" />
-        <tab type="user" title="Measurements and terminals" url="@ref docs/developer-tools-measure.md" />
+        <tab type="usergroup" title="Measurements and terminals" url="@ref docs/developer-tools-measure.md">
+          <tab type="user" title="Document qualification" url="@ref docs/document-qualification.md" />
+          <tab type="user" title="Document probe commands" url="@ref docs/document-probe-reference.md" />
+        </tab>
         <tab type="user" title="Packaging and releases" url="@ref docs/developer-tools-release.md" />
       </tab>
       <tab type="user" title="Contributor guide and notices" url="@ref docs/development.md" />
@@ -268,7 +271,10 @@
       <tab type="user" title="Разработка Portals" url="@ref docs/ru/development.md" />
       <tab type="usergroup" title="Инструменты разработчика" url="@ref docs/ru/developer-tools.md">
         <tab type="user" title="Сборка, CI и документация" url="@ref docs/ru/developer-tools-build.md" />
-        <tab type="user" title="Измерения и терминалы" url="@ref docs/ru/developer-tools-measure.md" />
+        <tab type="usergroup" title="Измерения и терминалы" url="@ref docs/ru/developer-tools-measure.md">
+          <tab type="user" title="Квалификация документов" url="@ref docs/ru/document-qualification.md" />
+          <tab type="user" title="Команды проверочных утилит" url="@ref docs/ru/document-probe-reference.md" />
+        </tab>
         <tab type="user" title="Упаковка и релизы" url="@ref docs/ru/developer-tools-release.md" />
       </tab>
       <tab type="user" title="Ограничения" url="@ref docs/ru/limitations.md" />

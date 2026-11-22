@@ -422,3 +422,9 @@ before payload reads, and requires an explicit end when the extent is unknown.
 the source's budget. They preserve the original text encoding; gzip sources
 produce decompressed bytes. Neither operation writes to the OS clipboard. A
 custom sink defines its own storage and blocking/cancellation latency.
+
+## Measured viewing profile {#document-view-measurements}
+
+See the [2/8 GiB qualification](document-qualification.md) for measured memory,
+first-text and navigation costs with one or four views, and the boundaries of
+AUTO/EXACT results. These fixed-workload observations are not universal latency guarantees.

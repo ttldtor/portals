@@ -16,6 +16,8 @@ this source revision; the installed SDK and the release HTML may contain an olde
 | Measure source changes | `portals_compactness` | [Measurements](developer-tools-measure.md#tool-compactness) |
 | Measure runtime costs | Five `portals_*_benchmark` executables | [Benchmarks](developer-tools-measure.md#tool-benchmarks) |
 | Check file-backed LogView memory | `tests/probes/log_view_memory.py` | [LogView memory probe](developer-tools-measure.md#tool-log-memory) |
+| Qualify large document viewing | `portals_document_ui_probe`, `portals_document_oracle_probe` | [Document probes](developer-tools-measure.md#tool-document-probes) |
+| Generate document fixtures or check probe contracts | `tests/probes/document_corpus.py`, `test_document_probes.py` | [Document probe reference](document-probe-reference.md) |
 | Save and compare measurements | `tools/quality/performance.cmake` | [Performance receipts](developer-tools-measure.md#tool-performance) |
 | Collect Clang-tidy observations | `tools/quality/readability.cmake` | [Readability](developer-tools-measure.md#tool-readability) |
 | Inspect terminal behavior | `portals_terminal_probe` | [Terminal probe](developer-tools-measure.md#tool-probe) |

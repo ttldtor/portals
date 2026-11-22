@@ -2,6 +2,39 @@
 
 [Английская версия](../developer-tools-measure.md) · [Каталог инструментов](developer-tools.md)
 
+## Проверить DocumentView на настоящих файлах {#tool-document-probes-ru}
+
+При `PORTALS_BUILD_TESTS=ON` CMake собирает `portals_document_ui_probe` и
+`portals_document_oracle_probe`. `PORTALS_ENABLE_GZIP=ON` добавляет поддержку
+gzip-входов. Это инструменты для разработки; в установленный SDK они не входят.
+При наличии Python регистрируется маленькая CTest-проверка
+`portals.document-probes`. Она создаёт временные файлы масштаба МиБ и не
+генерирует многогигабайтные входы.
+
+`portals_document_ui_probe` запускает настоящий `Application` с управляемыми
+viewers, штатными workers и headless-приёмником вывода. Измеряется одно видимое
+окно 120×40 или четыре видимых квадранта 60×20 с общими источником и корнем
+бюджета. `portals_document_oracle_probe` подготавливает состояния worker-view
+и проверяет показанные исходные байты, навигацию и доказанную подсветку по
+известному шаблону генератора. Его worker-времена не описывают задержку всего
+`Application`.
+
+```powershell
+cmake --build build/tools --target portals_document_ui_probe portals_document_oracle_probe
+./build/tools/portals_document_ui_probe.exe --help
+./build/tools/portals_document_oracle_probe.exe --help
+python tests/probes/document_corpus.py --help
+python tests/probes/test_document_probes.py --help
+ctest --test-dir build/tools -R '^portals.document-probes$' --output-on-failure
+```
+
+Каталог сборки уже должен быть настроен с включёнными тестами. Все четыре
+команды справки работают без входов нагрузки. Probe читают файлы и пишут
+ограниченный JSON в stdout; историю VT они не сохраняют и native-терминал не
+открывают. Генератор создаёт собственный файл данных и manifest. Параметры,
+маленькие примеры, коды завершения и трактовка времени, preview-подсветки и памяти
+описаны в двуязычной [справке по проверкам документов](document-probe-reference.md).
+
 ## Измерить память внешнего LogView {#tool-log-memory-ru}
 
 Соберите отдельно подключаемый probe с `PORTALS_BUILD_TESTS=ON`. Он исключён из
