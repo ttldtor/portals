@@ -21,6 +21,12 @@ struct FindRange {
   std::uint64_t rowOrdinal{};
 };
 
+struct FindByteMatch {
+  std::uint64_t offset{};
+  std::uint64_t length{};
+  std::uint64_t revision{};
+};
+
 // A search result contains ranges, not a page of model rows. Several ranges may refer to one row.
 struct FindResult {
   std::shared_ptr<const FindDocument> document;
@@ -30,6 +36,7 @@ struct FindResult {
   std::shared_ptr<const FindWorkerSource> source;
   std::uint64_t session{};
   std::uint64_t generation{};
+  std::unique_ptr<const FindByteMatch> byteMatch;
 };
 
 struct FindSearchInput {

@@ -85,6 +85,11 @@ std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
   const bool arranged = scroll.arranged;
   const auto frame = document_->frame;
   const auto palette = document_->roles.snapshot();
+  const auto searchSelection = document_->search ? document_->search->selection : std::nullopt;
+  const bool showSearch = frame && frame->search && searchSelection && frame->search->selection == *searchSelection &&
+                          frame->status.revision == searchSelection->revision &&
+                          frame->status.mode == document_->config.mode &&
+                          detail::sameDocumentDecoderOptions(frame->search->decoderOptions, document_->config.decoder);
   const bool statusError = document_->status.error.has_value();
   const auto *errorCaption = statusError ? document_->errorCaption.get() : nullptr;
   std::optional<ComputedStyle> manual;
@@ -101,6 +106,7 @@ std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
   const auto body = roleStyle("body");
   const auto gutter = roleStyle("gutter");
   const auto position = roleStyle("position");
+  const auto match = roleStyle("match");
   const auto *options = detail::scrollFrameOptions(scroll);
   std::optional<CellRect> footer;
   const bool currentPosition =
@@ -193,6 +199,21 @@ std::expected<void, TreeError> DocumentView::paint(PaintContext &context) {
                                                                            : "hex-high-byte";
         const RenderCommand command =
           TextCommand{{bodyArea->origin().x + run.column, y}, run.text, *bodyArea, roleStyle(name)};
+        painted = context.submit(std::span(&command, 1));
+        if (!painted) {
+          return painted;
+        }
+      }
+    }
+    if (showSearch) {
+      for (const auto &run : frame->search->runs) {
+        if (run.row != row) {
+          continue;
+        }
+
+        const RenderCommand command = TextCommand{
+          {bodyArea->origin().x + run.column, y}, frame->rows[row], *bodyArea, match, 0, run.first, run.count};
+
         painted = context.submit(std::span(&command, 1));
         if (!painted) {
           return painted;

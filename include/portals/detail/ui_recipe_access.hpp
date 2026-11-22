@@ -8,7 +8,11 @@
 
 namespace portals {
 struct SearchItem;
+
+namespace detail {
+struct FindExternalBinding;
 }
+} // namespace portals
 
 namespace portals::ui {
 struct FormFieldConfig;
@@ -112,7 +116,8 @@ struct Access {
   }
 
   static Description<FindBar> findBar(std::string document, std::string query, FindBarConfig config,
-                                      std::shared_ptr<portals::detail::FindModelSource> source = {});
+                                      std::shared_ptr<portals::detail::FindModelSource> source = {},
+                                      std::shared_ptr<portals::detail::FindExternalBinding> external = {});
   static std::expected<std::size_t, ManagedError> findPreparedQueries(ManagedScene &scene, Node<Widget> node);
   static std::expected<std::shared_ptr<portals::detail::FindRecord>, ManagedError> findRecord(ManagedScene &scene,
                                                                                               Node<Widget> node);

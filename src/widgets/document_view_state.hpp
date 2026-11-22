@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 #include "document_view_highlight.hpp"
+#include "document_view_search.hpp"
 #include "scroll_controls_state.hpp"
 #include <array>
 #include <limits>
@@ -57,6 +58,7 @@ struct DocumentPreparationStorage {
   bool frame{};
   bool preview{};
   bool suppressPreview{};
+  bool search{};
 };
 
 // One calculator keeps job/frame admission and peak overlap consistent.
@@ -125,6 +127,16 @@ documentPreparationBytes(CellSize viewport, const DocumentViewConfig &config,
           (storage.replayBytes && !include(storage.replayBytes, 2))) {
         return std::unexpected(SourceError::PAGE_TOO_LARGE);
       }
+    }
+  }
+  if (storage.search) {
+    // Worker maps retain at most one screen plus its pending row. The published
+    // overlay owns an independent subcredit and at most one run per visible cell.
+    if (!include(1, DOCUMENT_SEARCH_FRAME_BYTES) || !include(preparedCells, sizeof(DocumentSearchRun)) ||
+        (!storage.frame && (height == MAX || width > MAX / (height + 1) ||
+                            !include(1, sizeof(DocumentSearchScan) + DOCUMENT_SEARCH_OWNER_BYTES) ||
+                            !include(width * (height + 1), sizeof(DocumentSearchMap))))) {
+      return std::unexpected(SourceError::PAGE_TOO_LARGE);
     }
   }
   return bytes;
@@ -222,6 +234,7 @@ struct DocumentScan {
   DocumentMetadata metadata;
   std::shared_ptr<DocumentHexScan> hex;
   std::shared_ptr<DocumentHighlightScan> highlight;
+  std::shared_ptr<DocumentSearchScan> search;
   DocumentDecoderOptions decoderOptions;
   std::int32_t layoutWidth{};
   std::uint64_t requestedAnchor{};
@@ -282,6 +295,7 @@ struct DocumentPreparedFrame {
   std::int32_t gutterCells{};
   std::unique_ptr<DocumentHexFrame> hex;
   std::unique_ptr<const DocumentTextFrame> text;
+  std::shared_ptr<const DocumentSearchFrame> search;
   std::vector<std::uint64_t> anchors = std::vector<std::uint64_t>(0);
   std::unique_ptr<GraphemeText> footer;
   CellSize viewport;
@@ -319,6 +333,10 @@ struct DocumentErrorCaption {
   GraphemeText text;
 };
 
+struct DocumentExportPresentation {
+  std::shared_ptr<ui::detail::SceneActivity> activity;
+};
+
 struct DocumentViewState {
   WidthPolicy width;
   DocumentViewConfig config;
@@ -327,6 +345,8 @@ struct DocumentViewState {
   // Once published, keep the borrowed caption alive across source replacement.
   std::unique_ptr<DocumentErrorCaption> errorCaption;
   std::shared_ptr<ByteDocumentSource> source;
+  std::unique_ptr<DocumentSearchPresentation> search;
+  std::unique_ptr<DocumentExportPresentation> exporting;
   StyleRoleRegistration roles;
   DocumentViewStatus status;
   std::uint64_t anchor{};
@@ -373,6 +393,8 @@ struct DocumentPrepareIntent {
   bool retainPreview{};
   DocumentPreparationKind kind{DocumentPreparationKind::LAYOUT};
   bool suppressPreview{};
+  std::optional<DocumentSearchSelection> searchSelection;
+  bool searchReflow{};
 };
 
 struct DocumentPreparation {

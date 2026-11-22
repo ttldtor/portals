@@ -23,6 +23,7 @@
 #include <vector>
 
 namespace portals {
+struct DocumentOperationFailure;
 
 class ManagedScene;
 enum class AsyncError;
@@ -94,7 +95,9 @@ struct ManagedError {
   std::optional<SearchError> search{};         ///< Exact bounded choice/search provider failure.
   std::optional<NumericError> numeric{};       ///< Exact finite-value, range, step or numeric-source conflict cause.
   std::optional<SourceError> source{};         ///< Exact window-source admission/read/delivery failure.
-  std::optional<FileLogFailure> logFile{};     ///< Original per-operation file cause and native error code.
+  /** @brief Optional owning document source/decoder detail; allocation failures retain the scalar cause. */
+  std::shared_ptr<const DocumentOperationFailure> document{};
+  std::optional<FileLogFailure> logFile{}; ///< Original per-operation file cause and native error code.
 };
 
 namespace detail {

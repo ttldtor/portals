@@ -1234,7 +1234,8 @@ add_test(NAME consumer.log-navigation COMMAND portals_log_navigation_consumer)
 set_tests_properties(consumer.log-navigation PROPERTIES TIMEOUT 15)
 
 add_executable(portals_document_source_consumer document_source.cpp)
-add_library(portals_document_source_headers OBJECT document_source_header.cpp)
+add_library(portals_document_source_headers OBJECT document_source_header.cpp
+  document_search_header.cpp document_export_header.cpp)
 foreach(target IN ITEMS portals_document_source_consumer portals_document_source_headers)
   target_link_libraries(${target} PRIVATE portals::core)
   set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
@@ -1279,7 +1280,8 @@ add_test(NAME consumer.document-hex COMMAND portals_document_hex_consumer)
 set_tests_properties(consumer.document-hex PROPERTIES TIMEOUT 30)
 
 add_executable(portals_document_view_consumer document_view.cpp)
-add_library(portals_document_view_headers OBJECT document_view_header.cpp ui_document_view_header.cpp)
+add_library(portals_document_view_headers OBJECT document_view_header.cpp ui_document_view_header.cpp
+  ui_document_search_header.cpp ui_document_export_header.cpp)
 foreach(target IN ITEMS portals_document_view_consumer portals_document_view_headers)
   target_link_libraries(${target} PRIVATE portals::core)
   set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)

@@ -7,6 +7,20 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- FindBar can search the current DocumentView or file-backed LogView source on
+  workers without loading the document or retaining every match. Next/Previous
+  cover the complete source, with exact original-byte ranges and optional match
+  styles in text and hexadecimal projections. Source replacement keeps the query
+  and reading position while cancelling obsolete results. A complete declarative
+  example combines search, navigation, source colors and background export.
+
+- Document sources support bounded raw-byte copies and streaming export to a
+  host sink or an exclusively created output file. Existing files are preserved;
+  failures and cancellation report partial progress. Viewer export captures its
+  source at admission and delivers completion through the existing UI runtime.
+  Managed errors can retain precise document/decoder details. The diagnostic
+  layout changes; rebuild consumers with the library.
+
 - An optional gzip source lets DocumentView navigate decompressed text through
   bounded buffers and in-memory restart checkpoints. Enable `PORTALS_ENABLE_GZIP`
   and link `portals::gzip`; the normal core build has no compression dependency.

@@ -141,6 +141,11 @@ public:
    */
   static std::expected<std::shared_ptr<FileDocumentProvider>, DocumentError>
   create(std::filesystem::path path, std::size_t ioBlockBytes = 64 * 1024);
+  /** @param model Existing cold file model; no reopen or replacement of its identity.
+   * @return Adapter sharing the model, or typed validation/allocation failure.
+   */
+  static std::expected<std::shared_ptr<FileDocumentProvider>, DocumentError>
+  create(std::shared_ptr<FileLogModel> model);
   ByteDocumentCapabilities capabilities() const noexcept override; ///< @return Seekable, revision may change.
   std::expected<ByteDocumentMetadata, DocumentError>
   metadata(std::stop_token stop) override; ///< @param stop Cooperative cancellation. @return Observe exact snapshot.

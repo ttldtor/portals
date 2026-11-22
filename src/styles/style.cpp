@@ -606,6 +606,27 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
                                           {"markup", {.foreground = tokens.accent}}});
   sheet.rules.push_back(std::move(syntax));
 
+  const auto matchRoles = std::make_shared<const std::vector<StyleRolePatch>>(std::initializer_list<StyleRolePatch>{
+    {"match", {.foreground = tokens.background, .background = tokens.accent, .bold = true}}});
+  const auto disabledMatchRoles =
+    std::make_shared<const std::vector<StyleRolePatch>>(std::initializer_list<StyleRolePatch>{
+      {"match", {.foreground = tokens.background, .background = tokens.muted, .bold = false}}});
+
+  for (const auto type : {"DocumentView", "LogView"}) {
+    StyleRule match;
+
+    match.selector.type = type;
+    match.roles = matchRoles;
+    sheet.rules.push_back(std::move(match));
+
+    StyleRule disabledMatch;
+
+    disabledMatch.selector.type = type;
+    disabledMatch.selector.state = StyleState::DISABLED;
+    disabledMatch.roles = disabledMatchRoles;
+    sheet.rules.push_back(std::move(disabledMatch));
+  }
+
   StyleRule syntaxDisabled;
   syntaxDisabled.selector.type = "DocumentView";
   syntaxDisabled.selector.state = StyleState::DISABLED;

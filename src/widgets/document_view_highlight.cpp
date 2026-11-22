@@ -269,10 +269,16 @@ std::shared_ptr<DocumentHighlightScan> stageDocumentHighlight(const DocumentScan
     staged->maxMaps = std::max(intent.retainedTextMaps, static_cast<std::size_t>(intent.viewport.width) *
                                                           (static_cast<std::size_t>(intent.viewport.height) + 1));
     staged->maps.reserve(staged->maxMaps);
-    stageAttempt(*staged, intent);
+    if (intent.searchReflow) {
+      // Coloring a selected range must not replay the lexer. Exact cached maps
+      // and immutable preview maps still describe this unchanged visible window.
+      staged->previewLayout = false;
+    } else {
+      stageAttempt(*staged, intent);
+    }
     staged->previewOriginalByteCutoff =
       staged->previewLayout && staged->preview ? tailPreviewOriginalByteCutoff(scan, intent) : 0;
-    if (!staged->failure && staged->status != DocumentSyntaxState::REPLAY_UNAVAILABLE) {
+    if (!intent.searchReflow && !staged->failure && staged->status != DocumentSyntaxState::REPLAY_UNAVAILABLE) {
       staged->status =
         language == DocumentLanguage::PLAIN ? DocumentSyntaxState::DISABLED : DocumentSyntaxState::PENDING;
     }
@@ -648,6 +654,7 @@ std::shared_ptr<const DocumentPreparedFrame> coloredFrame(ByteDocumentSource &so
   frame->rows = plain.rows;
   frame->gutters = plain.gutters;
   frame->gutterCells = plain.gutterCells;
+  frame->search = plain.search;
   frame->anchors = plain.anchors;
   if (plain.footer) {
     auto caption = plain.footer->bytes();
@@ -710,6 +717,7 @@ std::shared_ptr<const DocumentPreparation> prepareDocumentHighlight(std::shared_
     }
     auto reservation = std::make_shared<SourceCredit>(std::move(*reserved));
     auto scan = std::make_shared<DocumentScan>(*previous);
+    stageDocumentSearch(*scan, intent);
     scan->highlight = stageDocumentHighlight(*scan, intent);
     scan->reservation = std::move(reservation);
     auto &highlight = *scan->highlight;

@@ -353,3 +353,72 @@ Limits bound retained capacity and work, rather than document size. The default 
 Pinned pages, immutable scanner snapshots, prepared output and cancelled work retain their credits until their actual owners finish. Provider-owned domain storage is outside the SDK's retained-page ledger. Process memory, source credits, cold-seek latency and terminal presentation time are different measurements; none is a file-size guarantee.
 
 The view retains up to 16 in-session source bookmarks. Slots are reused cyclically for additional sources; a source without a retained bookmark opens at byte zero. These bookmarks are not persisted across application runs.
+
+## Search a large document and export bytes {#document-view-search}
+
+The path/CLI viewer example also includes this search bar: open your own file and
+use F6 or Shift+F6 to navigate matches. Its existing F3 hexadecimal shortcut stays
+available. The smaller application below bundles a reproducible input.
+
+Build `portals_document_search_example` and run it from its executable directory;
+the build places `archive.sql` beside it. The search bar can appear before the
+viewer in the scene. Edit its query or use Previous/Next, F3 and Shift+F3. F4
+shows the same selected bytes in hexadecimal mode; F5 returns to text.
+
+[Complete source](../examples/document_view/search.cpp)
+
+\include document_view/search.cpp
+
+@image html document-view-search.gif "Literal search, Next/Previous, the same selected bytes in HEX, and an exported copy."
+
+`ui::findBar(search, reader, "INSERT")` searches the reader's current logical
+source on workers. It keeps one selected match and bounded query/decoder storage,
+without loading the document or retaining every hit. Matching is case-sensitive,
+allows overlaps, and requires complete source graphemes. There is no Unicode
+normalization. The query is UTF-8; returned source ranges use original encoded
+byte offsets. `FindMatch::sourceByteOffset()` and `sourceByteLength()` distinguish
+those offsets from `begin()` and `end()` within the bounded UTF-8 result context.
+`storedCount()` describes retained results, not the total number of source hits.
+
+While a search is pending, another Next/Previous request is rejected with
+`WOULD_BLOCK`; query editing and ordinary document navigation remain available.
+
+Next continues the streaming scan. Previous may rescan the required prefix while
+retaining only the last eligible match; it can therefore take longer on a distant
+position. Both directions wrap. The UI remains available and query changes cancel
+obsolete work. A source or encoding replacement clears old results and retains
+the query and reading position. Edit the query or choose a navigation button to
+search the replacement. Manual navigation while a search is pending prevents its
+late result from moving the reading position.
+
+The selected range uses the optional `match` role in text and hex projections:
+
+```css
+DocumentView {
+  role-match-foreground: #202630;
+  role-match-background: #ebcb8b;
+  role-match-bold: true;
+}
+```
+
+Themes supply contrasting match colors, including disabled state. The role uses
+the existing foreground/background/bold/italic/underline properties. Unused
+search extensions add no role payload to every control's computed style.
+
+`ui::exportFile(reader, output, completed)` admits a background export of the
+source currently attached to the reader. `ui::startExport` returns the checked
+admission result. An existing output is never overwritten, including the source
+file itself. The completion runs on UI and receives `DocumentExportResult` with
+actual accepted bytes and any source/sink error. Runtime failures also enter the
+scene's error reporting. Only one export per viewer is admitted at a time.
+Changing its model does not redirect an admitted export; removing the viewer or
+closing its scene requests cancellation. A partial output remains after an error
+or cancellation. Completion does not promise durable storage or rollback.
+
+For worker integrations, `copyDocumentBytes(source, range, maxBytes)` returns an
+owning raw-byte copy; the default ceiling is 64 KiB. It rejects oversized ranges
+before payload reads, and requires an explicit end when the extent is unknown.
+`exportDocument` writes fixed-size portions to `DocumentExportSink`. Both share
+the source's budget. They preserve the original text encoding; gzip sources
+produce decompressed bytes. Neither operation writes to the OS clipboard. A
+custom sink defines its own storage and blocking/cancellation latency.

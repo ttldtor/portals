@@ -767,6 +767,10 @@ public:
         report_(std::move(report)) {
   }
 
+  std::shared_ptr<const ui::detail::LogSourceData> sourceData() const noexcept {
+    return data_;
+  }
+
   ~ExternalLogActivity() override {
     cancel();
   }
@@ -1973,8 +1977,20 @@ private:
         return;
       }
 
+      std::optional<ExternalLogAnchor> selected;
+
+      if (state->search) {
+        const auto reveal = std::exchange(state->search->pendingReveal, {});
+
+        if (reveal && reveal->first == byte && reveal->second <= std::numeric_limits<std::size_t>::max()) {
+          selected.emplace();
+          selected->row = {byte + 1, fileGeneration_};
+          selected->firstByte = static_cast<std::size_t>(reveal->second);
+        }
+      }
+
       state->followTail = false;
-      request({SourceAnchorKind::ROW, {}, {byte + 1, fileGeneration_}}, SourceDirection::FORWARD, false);
+      request({SourceAnchorKind::ROW, {}, {byte + 1, fileGeneration_}}, SourceDirection::FORWARD, false, selected);
 
       return;
     }
@@ -2209,6 +2225,10 @@ private:
 };
 } // namespace
 
+std::shared_ptr<const ui::detail::LogSourceData> externalLogSource(const ExternalLogState &state) {
+  return state.activity ? std::static_pointer_cast<ExternalLogActivity>(state.activity)->sourceData() : nullptr;
+}
+
 std::expected<void, ManagedError> replaceExternalLogView(ManagedScene &scene, Node<LogView> node,
                                                          ui::LogSource source) {
   const auto data = ui::detail::ExternalLogAccess::data(source);
@@ -2423,6 +2443,33 @@ std::expected<void, SourceError> seekLogByte(WidgetTree &tree, Node<LogView> nod
     } else if (byteOffset == std::numeric_limits<std::uint64_t>::max()) {
       result = std::unexpected(SourceError::POSITION_EXHAUSTED);
     } else {
+      if (state->search) {
+        const auto intent = detail::ScrollWidgetAccess::state(widget).intent.lock();
+
+        if (!intent) {
+          result = std::unexpected(SourceError::CONTEXT_ERROR);
+
+          return;
+        }
+
+        if (intent->serial == std::numeric_limits<std::uint64_t>::max()) {
+          result = std::unexpected(SourceError::IDENTITY_EXHAUSTED);
+
+          return;
+        }
+
+        // Invalidate an earlier search's reveal permission immediately, before
+        // the external view samples this checked navigation during layout.
+        ++intent->serial;
+        state->intentSerial = intent->serial;
+
+        // Keep the initial window load: it publishes the file generation needed
+        // to resolve this byte request. Later requests can retire older work.
+        if (state->fileGeneration) {
+          state->navigationChanged = true;
+        }
+      }
+
       state->byteRequest = byteOffset;
     }
   });
