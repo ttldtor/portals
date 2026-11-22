@@ -7,6 +7,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Native document qualification tools exercise one or four visible viewers on
+  generated SQL/Markdown and gzip sources, verify sampled text and exact colors,
+  and report process memory separately from shared source credits. Small CLI
+  regressions run with tests; multi-gigabyte workloads are explicit. The
+  [measured profile](docs/document-qualification.md) records reproducible results
+  and the limits of provisional syntax and compressed seeking.
+
 - FindBar can search the current DocumentView or file-backed LogView source on
   workers without loading the document or retaining every match. Next/Previous
   cover the complete source, with exact original-byte ranges and optional match

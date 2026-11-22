@@ -9,6 +9,8 @@
 | Задача | Точка запуска | Справка |
 | --- | --- | --- |
 | Проверить память LogView из файла | `tests/probes/log_view_memory.py` | [Измерение памяти LogView](developer-tools-measure.md#tool-log-memory-ru) |
+| Проверить просмотр больших документов | `portals_document_ui_probe`, `portals_document_oracle_probe` | [Проверки DocumentView](developer-tools-measure.md#tool-document-probes-ru) |
+| Создать файлы для проверки или проверить контракты probe | `tests/probes/document_corpus.py`, `test_document_probes.py` | [Справка по проверкам документов](document-probe-reference.md) |
 | Собрать библиотеку и запустить тесты | CMake и CTest | [Сборка и проверки](developer-tools-build.md) |
 | Проверить имена | `python tools/check_naming.py` | [Именование](developer-tools-build.md#tool-naming-ru) |
 | Выбрать и проверить набор CI | `python tools/ci/checks.py` | [Выбор CI](developer-tools-build.md#tool-ci-ru) |

@@ -2,6 +2,37 @@
 
 [Русская версия](ru/developer-tools-measure.md) · [Tool catalog](developer-tools.md)
 
+## Qualify DocumentView with real files {#tool-document-probes}
+
+With `PORTALS_BUILD_TESTS=ON`, CMake builds `portals_document_ui_probe` and
+`portals_document_oracle_probe`. `PORTALS_ENABLE_GZIP=ON` adds their gzip input
+support. These are contributor test tools; they are not installed SDK programs.
+The small `portals.document-probes` CTest check is registered when Python is found.
+It creates temporary MiB-scale files and does not generate multi-gigabyte inputs.
+
+`portals_document_ui_probe` runs a real `Application` with managed viewers,
+production workers and a headless output sink. It measures one visible 120×40
+viewport or four visible 60×20 quadrants sharing one source and credit root.
+`portals_document_oracle_probe` prepares worker view states and checks rendered
+source bytes, navigation and source-qualified syntax against the generator's
+known pattern. Its worker timings do not describe whole-Application latency.
+
+```powershell
+cmake --build build/tools --target portals_document_ui_probe portals_document_oracle_probe
+./build/tools/portals_document_ui_probe.exe --help
+./build/tools/portals_document_oracle_probe.exe --help
+python tests/probes/document_corpus.py --help
+python tests/probes/test_document_probes.py --help
+ctest --test-dir build/tools -R '^portals.document-probes$' --output-on-failure
+```
+
+The build directory must already be configured with tests enabled. All four help
+commands work without workload inputs. The probes read files and write bounded
+JSON to stdout; they do not retain a VT transcript or open a native terminal.
+The generator creates its own data file and manifest. See the bilingual
+[document probe reference](document-probe-reference.md) for parameters, small
+examples, exit codes and interpretation of timings, preview syntax and memory.
+
 ## External LogView memory probe {#tool-log-memory}
 
 Build the opt-in test probe with `PORTALS_BUILD_TESTS=ON`. It is excluded from
