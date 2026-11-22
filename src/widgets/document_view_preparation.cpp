@@ -53,6 +53,7 @@ void saveCheckpoint(DocumentScan &scan, const DocumentLayoutCheckpoint &point) {
 void discardFirst(DocumentScan &scan) {
   scan.payload -= scan.rows.front().bytes.size();
   scan.rows.erase(scan.rows.begin());
+  trimDocumentSearch(scan, scan.rows.empty() ? scan.rowOffset : scan.rows.front().offset);
   if (scan.highlight) {
     trimDocumentHighlightMaps(*scan.highlight, scan.rows.empty() ? scan.rowOffset : scan.rows.front().offset);
   }
@@ -153,6 +154,7 @@ void finishRow(DocumentScan &scan, const DocumentPrepareIntent &intent, std::uin
   scan.column = 0;
   scan.rowOffset = end;
   scan.rowEnd = end;
+  trimDocumentSearch(scan, scan.rows.empty() ? end : scan.rows.front().offset);
   if (scan.highlight) {
     trimDocumentHighlightMaps(*scan.highlight, scan.rows.empty() ? end : scan.rows.front().offset);
   }
@@ -163,12 +165,17 @@ void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
     return;
   }
 
-  const std::string_view bytes(scan.cluster.data(), scan.clusterBytes);
+  std::string_view bytes(scan.cluster.data(), scan.clusterBytes);
   auto measured = GraphemeText::from(
     bytes, intent.width,
     {DOCUMENT_CLUSTER_BYTES, DOCUMENT_CLUSTER_BYTES, DOCUMENT_CLUSTER_BYTES, DOCUMENT_CLUSTER_BYTES * 2});
   if (!measured) {
     fail(SourceError::INVALID_REPLY);
+  }
+  if (measured->graphemes().size() == 1 && measured->graphemes().front().display == TextDisplay::UNSUPPORTED) {
+    // Preserve the per-source-cluster placeholder through whole-row segmentation.
+    // A standalone extender must not attach to the final digit of an escaped control.
+    bytes = "?";
   }
 
   const bool atKnownEnd = scan.metadata.byteExtent && intent.anchor >= *scan.metadata.byteExtent;
@@ -190,6 +197,7 @@ void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
     scan.payload = 0;
     scan.row.clear();
     scan.rowOffset = scan.clusterOffset;
+    trimDocumentSearch(scan, scan.rowOffset);
     if (scan.highlight) {
       trimDocumentHighlightMaps(*scan.highlight, scan.rowOffset);
     }
@@ -226,6 +234,8 @@ void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
     if (scan.highlight && intent.config.language != DocumentLanguage::PLAIN) {
       mapDocumentCluster(*scan.highlight, scan.rowOffset, scan.row.size(), scan.clusterOffset);
     }
+    mapDocumentSearch(scan, scan.rowOffset, scan.row.size(), scan.row.size() + bytes.size(), scan.clusterOffset,
+                      scan.clusterEnd);
     scan.row.append(bytes);
     scan.rowEnd = scan.clusterEnd;
   } else if (scan.column < horizontal && endColumn > horizontal) {
@@ -233,7 +243,11 @@ void flushCluster(DocumentScan &scan, const DocumentPrepareIntent &intent) {
     if (scan.highlight && intent.config.language != DocumentLanguage::PLAIN) {
       mapDocumentCluster(*scan.highlight, scan.rowOffset, scan.row.size(), scan.clusterOffset);
     }
-    scan.row.append(static_cast<std::size_t>(endColumn - horizontal), ' ');
+    const auto padding = static_cast<std::size_t>(endColumn - horizontal);
+
+    mapDocumentSearch(scan, scan.rowOffset, scan.row.size(), scan.row.size() + padding, scan.clusterOffset,
+                      scan.clusterEnd);
+    scan.row.append(padding, ' ');
     scan.rowEnd = scan.clusterEnd;
   }
 
@@ -285,6 +299,7 @@ void addScalar(DocumentScan &scan, const DocumentPrepareIntent &intent, const De
     scan.anchorLine = scan.lineKnown ? std::optional(scan.line) : std::nullopt;
     scan.rows.clear();
     scan.payload = 0;
+    trimDocumentSearch(scan, scan.rowOffset);
     if (scan.highlight) {
       trimDocumentHighlightMaps(*scan.highlight, scan.rowOffset);
     }
@@ -445,6 +460,16 @@ std::size_t consumeAsciiTail(DocumentScan &scan, const DocumentPrepareIntent &in
         mapDocumentCluster(*scan.highlight, scan.rowOffset, scan.row.size() + (position - consumed), offset + position);
       }
     }
+    if (scan.search) {
+      const auto begin = std::max(offset + consumed, scan.search->selection.begin);
+      const auto end = std::min(offset + consumed + chunk, scan.search->selection.end);
+
+      if (begin < end) {
+        const auto rendered = scan.row.size() + static_cast<std::size_t>(begin - offset - consumed);
+
+        mapDocumentSearch(scan, scan.rowOffset, rendered, rendered + static_cast<std::size_t>(end - begin), begin, end);
+      }
+    }
     scan.row.append(reinterpret_cast<const char *>(input.data() + consumed), chunk);
     consumed += chunk;
     scan.column += chunk;
@@ -468,8 +493,10 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
                                           std::optional<DocumentDecoderCheckpoint> origin) {
   // The caller qualifies the complete navigation intent before requesting resume.
   // Matching only anchor/horizontal would retain a different rowDelta's skip state.
-  const bool resume =
-    previous && intent.resume && (!intent.tail || !previous->tail || previous->tail->height == intent.viewport.height);
+  const auto previousSelection =
+    previous && previous->search ? std::optional(previous->search->selection) : std::nullopt;
+  const bool resume = previous && intent.resume && previousSelection == intent.searchSelection &&
+                      (!intent.tail || !previous->tail || previous->tail->height == intent.viewport.height);
   auto scan = resume ? std::make_shared<DocumentScan>(*previous) : std::make_shared<DocumentScan>();
   if (resume) {
     scan->waiting = false;
@@ -842,7 +869,8 @@ bool prepareLocalStart(DocumentScan &scan, ByteDocumentSource &source, const Doc
 
 std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocumentSource> source,
                                                        const DocumentPrepareIntent &intent, const DocumentScan &scan) {
-  const auto amount = documentPreparationBytes(intent.viewport, intent.config, {.frame = true});
+  const auto amount = documentPreparationBytes(intent.viewport, intent.config,
+                                               {.frame = true, .search = intent.searchSelection.has_value()});
   if (!amount) {
     fail(amount.error());
   }
@@ -936,6 +964,12 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
     frame->rows.push_back(std::move(*text));
     frame->anchors.push_back(row.offset);
     frame->visibleByteEnd = std::max(row.offset, row.end);
+  }
+
+  const auto search = projectDocumentSearch(*frame, scan);
+
+  if (!search) {
+    throw PreparationFailure{search.error()};
   }
 
   frame->status.language = intent.config.language;
@@ -1063,6 +1097,7 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
     }
     auto reservation = std::make_shared<SourceCredit>(std::move(*reserved));
     scan = initialScan(intent, *metadata, previous, std::move(highlight), std::move(origin));
+    stageDocumentSearch(*scan, intent);
     if (intent.config.language != DocumentLanguage::PLAIN ||
         (scan->highlight && scan->highlight->sequential && scan->highlight->replay)) {
       scan->highlight = stageDocumentHighlight(*scan, intent);

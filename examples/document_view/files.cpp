@@ -1,13 +1,14 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/ui.hpp>
+#include <portals/ui_document_search.hpp>
 #include <portals/ui_lyra.hpp>
 
 int main(int argc, char **argv) {
   using namespace portals;
 
   // clang-format off
-  constexpr std::string_view HINTS = "Ctrl+O: open path | F2 Text | F3 Hex | F5 refresh | F10 quit";
+  constexpr std::string_view HINTS = "Ctrl+O: open path | F2 Text | F3 Hex | F5 refresh | F6 next | Shift+F6 previous | F10 quit";
   std::string initialPath = "README.md";
   bool help{};
   auto cli = ::lyra::cli()
@@ -22,6 +23,7 @@ int main(int argc, char **argv) {
   return [&] {
     ui::Ref<LineEdit> path;
     ui::Ref<DocumentView> reader;
+    ui::Ref<FindBar> search;
     auto open = [=]() -> std::expected<void, ManagedError> {
       auto selected = path.text().get();
 
@@ -34,6 +36,7 @@ int main(int argc, char **argv) {
 
     return ui::scene(ui::vbox(
       ui::hbox(ui::label("File: "), ui::lineEdit(path, initialPath), ui::button("Open").onClick(open)),
+      ui::findBar(search, reader),
       ui::viewer(reader, initialPath).fastScroll().framed("rounded", "Document"),
       ui::label(HINTS)))
       | ui::theme(nordTheme())
@@ -41,6 +44,8 @@ int main(int argc, char **argv) {
       | ui::onKey("F5", [=] { reader.reload(); })
       | ui::onKey("F2", [=] { reader.mode(DocumentViewMode::TEXT); })
       | ui::onKey("F3", [=] { reader.mode(DocumentViewMode::HEX); })
+      | ui::onKey("F6", [=] { search.next(); })
+      | ui::onKey("Shift+F6", [=] { search.previous(); })
       | ui::onKey("F10 | Ctrl+C", ui::quit)
       | ui::reportOnError();
   }

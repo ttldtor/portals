@@ -218,3 +218,18 @@ LineEdit.find-bar-query { min-width: 16; }
 Button.find-bar-next:focused { background: #245070; }
 Label.find-bar-summary { italic: true; }
 ```
+
+## Поиск в потоковом источнике Viewer {#find-bar-viewer-ru}
+
+Подключите `<portals/ui_document_search.hpp>` и свяжите
+`ui::findBar(searchRef, viewerRef)` с `ui::Ref<DocumentView>`. Для файлового
+LogView тот же вариант принимает `ui::Ref<LogView>`. Он хранит одно выбранное
+совпадение, а Previous/Next перемещаются по всему источнику. См.
+[полный пример Viewer и ограничения](document-view.md#document-view-search-ru).
+Остальные семейства моделей LogView сохраняют собственные возможности поиска
+и не превращаются автоматически в байтовые файловые источники.
+
+Файловый LogView сохраняет прежние ограничения UTF-8-записей: подключение поиска
+не отменяет предел размера отдельной записи. Для документа с произвольно длинными
+логическими строками используйте DocumentView. Оба варианта не загружают источник
+целиком в память.

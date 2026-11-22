@@ -77,6 +77,11 @@ public:
   RowId rowId() const noexcept;
   /** @return Exact provider revision, or zero for a legacy document match. */
   std::uint64_t sourceRevision() const noexcept;
+  /** @return Original logical-source byte offset for document/file search, otherwise empty. */
+  std::optional<std::uint64_t> sourceByteOffset() const noexcept;
+  /** @return Original encoded byte length for document/file search, otherwise empty. */
+  std::optional<std::uint64_t> sourceByteLength() const noexcept;
+
   /** @return Accepted model query generation, or zero for a legacy document match. */
   std::uint64_t queryGeneration() const noexcept;
   /** @return Number of stored ranges; never an exact total when truncated() is true. */

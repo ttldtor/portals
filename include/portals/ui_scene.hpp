@@ -1088,6 +1088,11 @@ private:
 namespace detail {
 /** @brief Internal bridge from consuming recipes to one stable facade owner. */
 struct SceneAccess {
+  /** @param owner Live managed owner. @return Weak callback attribution, never owning the facade. */
+  static std::weak_ptr<SceneAnchor> callbackContext(ManagedScene &owner) noexcept {
+    return owner.facadeContext();
+  }
+
   /** @param owner UI-affine managed owner before entering its application session.
    * @return Checked opt-in to the existing native-owned or host-borrowed executor.
    */

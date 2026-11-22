@@ -955,6 +955,14 @@ std::expected<void, TreeError> LogView::paint(PaintContext &context) {
     return ready;
   }
 
+  // Capture search owners and values before any sink callback can replace a model.
+  const auto external = log_->external;
+  const auto externalFrame = external ? external->frame : nullptr;
+  const auto search = external && external->search && external->search->fileGeneration == external->fileGeneration
+                        ? external->search->selection
+                        : std::nullopt;
+  const auto searchPalette = external && external->search ? external->search->roles.snapshot() : nullptr;
+
   const auto framed = ScrollArea::paint(context);
   const auto &scroll = detail::ScrollWidgetAccess::state(*this);
 
@@ -984,8 +992,8 @@ std::expected<void, TreeError> LogView::paint(PaintContext &context) {
 
   const auto &data = *log_->data;
 
-  if (log_->external) {
-    const auto frame = log_->external->frame;
+  if (external) {
+    const auto frame = externalFrame;
 
     if (!frame) {
       return {};
@@ -1005,6 +1013,46 @@ std::expected<void, TreeError> LogView::paint(PaintContext &context) {
 
       if (!painted) {
         return painted;
+      }
+
+      if (search && first + row < frame->anchors.size()) {
+        const auto &anchor = frame->anchors[first + row];
+        const auto &text = *frame->rows[first + row];
+        const auto clusters = text.graphemes();
+        const auto base = anchor.row.value ? anchor.row.value - 1 + anchor.firstByte : 0;
+        std::size_t begin{};
+        std::int32_t column{};
+
+        while (begin < clusters.size() && base + clusters[begin].byte_end <= search->begin) {
+          column += clusters[begin++].cells;
+        }
+
+        auto end = begin;
+
+        while (end < clusters.size() && base + clusters[end].byte_begin < search->end) {
+          ++end;
+        }
+
+        if (begin < end) {
+          const auto state = !scroll.enabled  ? StyleState::DISABLED
+                             : scroll.focused ? StyleState::FOCUSED
+                                              : StyleState::NORMAL;
+          const auto highlight = searchPalette ? searchPalette->find("match", state).value_or(style) : style;
+          const RenderCommand selected =
+            TextCommand{{viewport->origin().x + column, viewport->origin().y + static_cast<std::int32_t>(row)},
+                        text,
+                        *viewport,
+                        highlight,
+                        0,
+                        begin,
+                        end - begin};
+
+          painted = context.submit(std::span(&selected, 1));
+
+          if (!painted) {
+            return painted;
+          }
+        }
       }
     }
 

@@ -115,19 +115,41 @@ AsyncError documentAsync(SchedulerError error) noexcept {
 
 std::expected<StyleRoleRegistration, ManagedError> documentRoles(ManagedScene &scene, Node<DocumentView> node,
                                                                  DocumentViewMode mode, DocumentLanguage language,
-                                                                 const StyleRoleRegistration *previous = nullptr) {
+                                                                 const StyleRoleRegistration *previous = nullptr,
+                                                                 bool search = false) {
   const auto registerNames = [&](std::initializer_list<std::string_view> names) {
     return previous ? ui::detail::SceneAccess::replaceDocumentRoles(scene, node, *previous, names)
                     : ui::detail::SceneAccess::registerPreparedRoles(scene, node, names);
   };
   if (mode == DocumentViewMode::HEX) {
+    if (search) {
+      return registerNames(
+        {"body", "gutter", "position", "hex-zero", "hex-printable", "hex-control", "hex-high-byte", "match"});
+    }
     return registerNames({"body", "gutter", "position", "hex-zero", "hex-printable", "hex-control", "hex-high-byte"});
   }
   if (language != DocumentLanguage::PLAIN) {
+    if (search) {
+      return registerNames({"body", "gutter", "position", "keyword", "number", "string", "comment", "identifier",
+                            "operator", "heading", "markup", "match"});
+    }
     return registerNames({"body", "gutter", "position", "keyword", "number", "string", "comment", "identifier",
                           "operator", "heading", "markup"});
   }
+  if (search) {
+    return registerNames({"body", "gutter", "position", "match"});
+  }
   return registerNames({"body", "gutter", "position"});
+}
+
+std::optional<DocumentSearchSelection> documentSearchSelection(const DocumentViewState &state) noexcept {
+  return state.search ? state.search->selection : std::nullopt;
+}
+
+void qualifyDocumentSearch(DocumentViewState &state, DocumentRevision revision) noexcept {
+  if (state.search && state.search->selection && state.search->selection->revision != revision) {
+    state.search->selection.reset();
+  }
 }
 
 bool validConfig(const DocumentViewConfig &config) noexcept {
@@ -605,6 +627,9 @@ public:
       capacity_ = std::move(replacementObserver);
     }
     state->source = std::move(source);
+    if (state->search) {
+      state->search->selection.reset();
+    }
     state->anchor = anchor;
     state->rowDelta = 0;
     state->tail = false;
@@ -678,7 +703,7 @@ private:
     const bool current = state && visible_ && !state->refresh && state->serial == serial_ &&
                          completion_->generation == generation_ && completion_->baseFrame == state->frame &&
                          state->horizontal == intent_.horizontal && state->width == intent_.width &&
-                         matchesPreparedGeometry();
+                         documentSearchSelection(*state) == intent_.searchSelection && matchesPreparedGeometry();
 
     if (!current) {
       (void)app_.tree().invalidate(node_, Invalidation::LAYOUT);
@@ -736,7 +761,7 @@ private:
                          completion_->generation == generation_ && !capacityBlocked_ && !state->status.error &&
                          completion_->scan->metadata.revision.source == state->source->stamp() &&
                          state->horizontal == intent_.horizontal && state->width == intent_.width &&
-                         matchesPreparedGeometry();
+                         documentSearchSelection(*state) == intent_.searchSelection && matchesPreparedGeometry();
 
     if (!current) {
       // A new layout/intent must pass through ordinary preparation before any
@@ -749,6 +774,8 @@ private:
     // successor after delivery, without waiting for the next rendering cadence.
     auto completed = std::exchange(completion_, {});
     scan_ = completed->scan;
+    qualifyDocumentSearch(*state, scan_->metadata.revision);
+    intent_.searchSelection = documentSearchSelection(*state);
     busy_ = false;
     continuation_ = true;
     state->status.preparing = true;
@@ -861,6 +888,7 @@ private:
     serial_ = state.serial;
     supersede();
     intent_ = {state.config, state.width, viewport_, state.anchor, state.horizontal, batch, false};
+    intent_.searchSelection = documentSearchSelection(state);
     commandPending_ = true;
   }
 
@@ -882,6 +910,9 @@ private:
     auto state = state_.lock();
     if (!active() || !state) {
       return;
+    }
+    if (error.code == SourceError::REVISION_CHANGED && state->search) {
+      state->search->selection.reset();
     }
     if (intent_.kind == DocumentPreparationKind::HIGHLIGHT && state->frame) {
       supersede();
@@ -1006,7 +1037,8 @@ private:
     viewportOrigin_ = area.placement.viewportOrigin;
 
     if (!state->roles.snapshot() && (!roleFailureSerial_ || *roleFailureSerial_ != state->serial)) {
-      auto roles = documentRoles(scene_, node_, state->config.mode, state->config.language);
+      auto roles = documentRoles(scene_, node_, state->config.mode, state->config.language, nullptr,
+                                 static_cast<bool>(state->search));
       if (!roles) {
         roleFailureSerial_ = state->serial;
         // Queue one plain fallback turn before a diagnostic callback may retire
@@ -1091,7 +1123,8 @@ private:
 
       const bool resumeWaiting = state->status.waiting && scan_ && state->config.language == intent_.config.language &&
                                  state->anchor == intent_.anchor && state->horizontal == intent_.horizontal &&
-                                 state->rowDelta == intent_.rowDelta && state->tail == intent_.tail;
+                                 state->rowDelta == intent_.rowDelta && state->tail == intent_.tail &&
+                                 documentSearchSelection(*state) == intent_.searchSelection;
       supersede();
       viewport_ = viewport;
       serial_ = state->serial;
@@ -1105,6 +1138,19 @@ private:
       state->status.byteOffset = state->anchor;
       state->status.mode = state->config.mode;
       intent_ = {state->config, state->width, viewport, state->anchor, state->horizontal, state->rowDelta, state->tail};
+      intent_.searchSelection = documentSearchSelection(*state);
+      if (state->search) {
+        // A selection-only reflow reuses source-qualified lexical roles. Any
+        // actual presentation change takes the ordinary lexical preparation path.
+        intent_.searchReflow =
+          std::exchange(state->search->reflow, false) && scan_ && state->frame && state->frame->viewport == viewport &&
+          state->frame->status.byteOffset == state->anchor && state->frame->status.mode == state->config.mode &&
+          state->frame->status.language == state->config.language &&
+          state->frame->status.syntax == state->config.syntax &&
+          state->frame->status.revision == scan_->metadata.revision && scan_->horizontal == state->horizontal &&
+          scan_->layoutWidth == std::max(1, viewport.width - (state->config.lineNumbers ? DOCUMENT_GUTTER_CELLS : 0)) &&
+          scan_->wrap == state->config.wrap && sameDocumentDecoderOptions(scan_->decoderOptions, state->config.decoder);
+      }
       intent_.seed = std::exchange(restored_, {});
       intent_.resume = resumeWaiting;
       commandPending_ = true;
@@ -1130,6 +1176,10 @@ private:
         return;
       }
       scan_ = completed->scan;
+      if (scan_) {
+        qualifyDocumentSearch(*state, scan_->metadata.revision);
+        intent_.searchSelection = documentSearchSelection(*state);
+      }
       if (completed->providerWaiting) {
         state->status.waiting = true;
         state->status.preparing = false;
@@ -1241,7 +1291,8 @@ private:
                                                   .textMaps = retainedTextMaps(),
                                                   .replayBytes = replayBytes(state),
                                                   .preview = retainedPreview(),
-                                                  .suppressPreview = intent_.suppressPreview});
+                                                  .suppressPreview = intent_.suppressPreview,
+                                                  .search = intent_.searchSelection.has_value()});
     if (!amount) {
       return std::unexpected(amount.error());
     }
@@ -1254,7 +1305,9 @@ private:
       return std::unexpected(SourceError::PAGE_TOO_LARGE);
     }
 
-    const auto frame = documentPreparationBytes(viewport_, state.config, {.hexRows = retainedHexRows(), .frame = true});
+    const auto frame = documentPreparationBytes(
+      viewport_, state.config,
+      {.hexRows = retainedHexRows(), .frame = true, .search = intent_.searchSelection.has_value()});
     if (!frame) {
       return std::unexpected(frame.error());
     }
@@ -1281,6 +1334,17 @@ private:
           return std::unexpected(SourceError::PAGE_TOO_LARGE);
         }
       }
+    }
+    const auto plain = scan_ && scan_->highlight ? scan_->highlight->plain : nullptr;
+    const auto currentSearch = state.frame ? state.frame->search : nullptr;
+    const auto plainSearch = plain ? plain->search : nullptr;
+
+    // Lexical publication may share an overlay while retaining a different base
+    // frame. Count each independent frame and split overlay credit exactly once.
+    if ((plain && plain != state.frame && !includeOwned(plain->credit.usage().bytes)) ||
+        (currentSearch && !includeOwned(currentSearch->credit.usage().bytes)) ||
+        (plainSearch && plainSearch != currentSearch && !includeOwned(plainSearch->credit.usage().bytes))) {
+      return std::unexpected(SourceError::PAGE_TOO_LARGE);
     }
     // These private retained owners cannot disappear while this view is waiting.
     // Reject impossible overlap instead of promising a capacity event that cannot occur.
@@ -1321,7 +1385,8 @@ private:
                                                   .textMaps = retainedTextMaps(),
                                                   .replayBytes = replayBytes(state),
                                                   .preview = retainedPreview(),
-                                                  .suppressPreview = intent_.suppressPreview});
+                                                  .suppressPreview = intent_.suppressPreview,
+                                                  .search = intent_.searchSelection.has_value()});
     if (!amount) {
       return std::unexpected(amount.error());
     }
@@ -1470,6 +1535,95 @@ std::expected<void, ManagedError> attachDocument(ManagedScene &scene, Node<Docum
   return {};
 }
 } // namespace
+
+std::expected<void, ManagedError> setDocumentSearchSelection(ManagedScene &scene, Node<DocumentView> node,
+                                                             std::optional<DocumentSearchSelection> selection,
+                                                             bool reveal) {
+  auto &tree = ui::detail::SceneAccess::application(scene).tree();
+  std::shared_ptr<DocumentViewState> state;
+  const auto read = tree.read(node, [&](const DocumentView &widget) {
+    state = DocumentViewAccess::shared(widget);
+  });
+
+  if (!read) {
+    return std::unexpected(ui::detail::error(node, read.error()));
+  }
+  if (!state->source || !state->activity) {
+    return std::unexpected(ui::detail::error(node, TreeError::CLOSED));
+  }
+  if (selection && (selection->begin >= selection->end || !selection->revision.dataRevision ||
+                    selection->revision.source != state->source->stamp())) {
+    return std::unexpected(documentFailure(node, {SourceError::INVALID_ARGUMENT, {}, {}}));
+  }
+  if (selection && !state->source->capabilities().seekable) {
+    return std::unexpected(documentFailure(node, {SourceError::UNSUPPORTED, {}, {}}));
+  }
+  if (documentSearchSelection(*state) == selection && (!selection || !reveal)) {
+    return {};
+  }
+
+  std::unique_ptr<DocumentSearchPresentation> presentation;
+  StyleRoleRegistration roles;
+
+  try {
+    if (selection && !state->search) {
+      presentation = std::make_unique<DocumentSearchPresentation>();
+      if (state->roles.snapshot()) {
+        auto registered = documentRoles(scene, node, state->config.mode, state->config.language, &state->roles, true);
+
+        if (!registered) {
+          return std::unexpected(registered.error());
+        }
+
+        roles = std::move(*registered);
+      }
+    }
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(ui::detail::error(node, TreeError::NO_MEMORY));
+  }
+
+  const bool reuse = selection && state->frame && state->frame->search &&
+                     state->frame->search->selection == *selection && state->frame->status.mode == state->config.mode &&
+                     sameDocumentDecoderOptions(state->frame->search->decoderOptions, state->config.decoder);
+  const bool reflow = selection && (!reuse || reveal);
+  const auto edited = tree.edit(node, [&](DocumentView &) {
+    if (presentation) {
+      state->search = std::move(presentation);
+    }
+    if (roles.snapshot()) {
+      state->roles = std::move(roles);
+    }
+    if (state->search) {
+      state->search->selection = selection;
+      state->search->reflow = reflow && !reveal;
+    }
+    if (!reflow) {
+      return;
+    }
+
+    const auto previousSerial = state->serial;
+
+    state->rowDelta = 0;
+    state->refresh = true;
+    state->status.preparing = true;
+    ++state->serial;
+    if (reveal) {
+      state->anchor = selection->begin;
+      state->tail = false;
+    } else {
+      std::static_pointer_cast<DocumentActivity>(state->activity)->presentationReflow(previousSerial, state->serial);
+    }
+  });
+
+  if (!edited) {
+    return std::unexpected(ui::detail::error(node, edited.error()));
+  }
+
+  const auto invalidated = tree.invalidate(node, reflow ? Invalidation::LAYOUT : Invalidation::PAINT);
+
+  return invalidated ? std::expected<void, ManagedError>{}
+                     : std::unexpected(ui::detail::error(node, invalidated.error()));
+}
 
 std::expected<void, ManagedError> navigateDocument(ManagedScene &scene, Node<DocumentView> node,
                                                    DocumentNavigation command, std::int64_t amount) {
@@ -1658,12 +1812,16 @@ std::expected<void, ManagedError> configureDocument(ManagedScene &scene, Node<Do
   bool changed{};
   auto edited = tree.edit(node, [&](DocumentView &widget) {
     auto &state = detail::DocumentViewAccess::state(widget);
+    const auto decoder = state.config.decoder;
     changed = change(state.config);
     if (!changed) {
       return;
     }
 
     const auto previousSerial = state.serial;
+    if (!detail::sameDocumentDecoderOptions(decoder, state.config.decoder) && state.search) {
+      state.search->selection.reset();
+    }
     state.status.syntax = state.config.syntax;
     state.refresh = true;
     state.rowDelta = 0;
@@ -1732,7 +1890,8 @@ std::expected<void, ManagedError> setDocumentLanguage(ManagedScene &scene, Node<
   }
   StyleRoleRegistration roles;
   if (state->roles.snapshot()) {
-    auto replacement = detail::documentRoles(scene, node, state->config.mode, language, &state->roles);
+    auto replacement =
+      detail::documentRoles(scene, node, state->config.mode, language, &state->roles, static_cast<bool>(state->search));
     if (!replacement) {
       return std::unexpected(replacement.error());
     }
@@ -1782,7 +1941,8 @@ std::expected<void, ManagedError> setDocumentMode(ManagedScene &scene, Node<Docu
   }
   StyleRoleRegistration roles;
   if (state->roles.snapshot()) {
-    auto replacement = detail::documentRoles(scene, node, mode, state->config.language, &state->roles);
+    auto replacement =
+      detail::documentRoles(scene, node, mode, state->config.language, &state->roles, static_cast<bool>(state->search));
     if (!replacement) {
       return std::unexpected(replacement.error());
     }

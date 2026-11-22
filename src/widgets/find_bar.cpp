@@ -1,6 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
-#include <portals/background.hpp>
+#include "find_bar_state.hpp"
 #include <portals/detail/find_search.hpp>
 #include <portals/ui_find_bar.hpp>
 #include <portals/ui_scene.hpp>
@@ -10,81 +10,6 @@
 #include <stdexcept>
 
 namespace portals {
-namespace detail {
-struct FindPublication {
-  std::shared_ptr<const FindResult> result;
-  std::unique_ptr<GraphemeText> summary;
-  std::size_t index{};
-};
-
-struct FindRecord {
-  WidgetTree *tree{};
-  std::weak_ptr<const void> lifetime;
-  Node<FindBar> field;
-  Node<Widget> editor;
-  Node<Label> summary;
-  WidthPolicy policy{};
-  FindLimits limits{};
-  std::shared_ptr<const FindResult> result;
-  std::unique_ptr<FindPublication> pending;
-  std::shared_ptr<std::function<void(FindMatch)>> selected;
-  std::size_t index{};
-  bool active{true};
-  bool busy{};
-  bool readOnly{};
-  bool dirty{};
-  EditMode mode{};
-  std::optional<TreeError> lastFailure;
-  std::size_t preparedQueries{};
-  std::shared_ptr<ui::detail::SceneActivity> activity;
-  std::function<void(std::shared_ptr<const FindResult>)> requestModel;
-  std::function<bool()> modelCurrent;
-  bool modelPending{};
-};
-
-struct FindAccess {
-  // This private label always keeps its original policy and empty decorations. Commit only
-  // prepared text by noexcept assignment: no value-parameter move construction or parsing.
-  static std::expected<void, TreeError> installSummary(const std::shared_ptr<FindRecord> &record,
-                                                       FindPublication &value) {
-    std::expected<void, TreeError> result;
-    auto edited = record->tree->edit(record->summary, [&](Label &label) {
-      if (label.text_.policy() != value.summary->policy()) {
-        result = std::unexpected(TreeError::INVALID_ARGUMENT);
-        return;
-      }
-      if (label.text_ != *value.summary) {
-        result = record->tree->invalidate(record->summary, Invalidation::LAYOUT);
-        if (!result) {
-          return;
-        }
-        label.text_ = std::move(*value.summary);
-      }
-      record->result = value.result;
-      record->index = value.index;
-    });
-    return edited ? result : edited;
-  }
-
-  static FindMatch match(std::shared_ptr<const FindResult> result, std::size_t index) {
-    FindMatch value;
-    value.result_ = std::move(result);
-    value.index_ = index;
-
-    return value;
-  }
-
-  static bool current(const FindMatch &value, const std::shared_ptr<const FindResult> &result) noexcept {
-    return value && value.result_ == result;
-  }
-
-  static const FindDocument &document(const FindMatch &value) noexcept {
-    const auto &range = value.result_->ranges[value.index_];
-
-    return *(range.document ? range.document : value.result_->document);
-  }
-};
-} // namespace detail
 
 FindMatch::operator bool() const noexcept {
   return result_ && index_ < result_->ranges.size();
@@ -107,7 +32,17 @@ RowId FindMatch::rowId() const noexcept {
 }
 
 std::uint64_t FindMatch::sourceRevision() const noexcept {
-  return result_ && result_->source ? result_->source->revision : 0;
+  return result_ && result_->source      ? result_->source->revision
+         : result_ && result_->byteMatch ? result_->byteMatch->revision
+                                         : 0;
+}
+
+std::optional<std::uint64_t> FindMatch::sourceByteOffset() const noexcept {
+  return *this && result_->byteMatch ? std::optional(result_->byteMatch->offset) : std::nullopt;
+}
+
+std::optional<std::uint64_t> FindMatch::sourceByteLength() const noexcept {
+  return *this && result_->byteMatch ? std::optional(result_->byteMatch->length) : std::nullopt;
 }
 
 std::uint64_t FindMatch::queryGeneration() const noexcept {
@@ -963,6 +898,16 @@ std::expected<FindMatch, ManagedError> detail::Access::findNavigate(ManagedScene
     return std::unexpected(findError(node, eligible ? TreeError::WOULD_BLOCK : eligible.error()));
   }
 
+  if (record->external) {
+    auto result = record->external->request(direction);
+
+    if (!result) {
+      return std::unexpected(findError(node, result.error()));
+    }
+
+    return *result;
+  }
+
   const auto count = record->result->ranges.size();
 
   if (record->modelCurrent && !record->modelCurrent()) {
@@ -1147,124 +1092,160 @@ std::pair<std::expected<void, TreeError>, bool> detail::Access::findClear(Manage
   return {std::expected<void, TreeError>{}, false};
 }
 
+std::expected<void, TreeError> detail::publishFindResult(const std::shared_ptr<portals::detail::FindRecord> &record,
+                                                         std::shared_ptr<const portals::detail::FindResult> result,
+                                                         std::string_view notice, bool notify) {
+  if (!alive(record)) {
+    return std::unexpected(TreeError::STALE_NODE);
+  }
+
+  FindGuard guard(record);
+
+  try {
+    auto shown = presentation(std::move(result), 0, record->policy, false, notice);
+    auto installed = install(record, *shown);
+
+    if (installed && notify) {
+      selected(record);
+    }
+
+    return installed;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  } catch (...) {
+    return std::unexpected(TreeError::CALLBACK_FAILED);
+  }
+}
+
 Description<FindBar> detail::Access::findBar(std::string document, std::string initial, FindBarConfig config,
-                                             std::shared_ptr<portals::detail::FindModelSource> source) {
+                                             std::shared_ptr<portals::detail::FindModelSource> source,
+                                             std::shared_ptr<portals::detail::FindExternalBinding> external) {
   Ref<FindBar> self;
   auto bridge = std::make_shared<std::weak_ptr<FindRecord>>();
   ControlSettings arguments;
   arguments.text = TextValue(initial);
   arguments.findDocument = TextValue(document);
 
-  auto recipe =
-    cold<FindBar>([document = std::move(document), initial = std::move(initial), config = std::move(config), source,
-                   self, bridge](ManagedScene &scene, Node<Widget> parent,
-                                 MountContext &context) mutable -> std::expected<Node<FindBar>, ManagedError> {
-      const auto settings = context.controlSettings ? *context.controlSettings : ControlSettings{};
-      auto prepared = prepareFindBarInputs(settings, scene.widthPolicy(), parent, document, initial, config,
-                                           static_cast<bool>(source));
-      if (!prepared) {
-        return std::unexpected(prepared.error());
+  auto recipe = cold<FindBar>([document = std::move(document), initial = std::move(initial), config = std::move(config),
+                               source, external, self,
+                               bridge](ManagedScene &scene, Node<Widget> parent,
+                                       MountContext &context) mutable -> std::expected<Node<FindBar>, ManagedError> {
+    const auto settings = context.controlSettings ? *context.controlSettings : ControlSettings{};
+    auto prepared = prepareFindBarInputs(settings, scene.widthPolicy(), parent, document, initial, config,
+                                         static_cast<bool>(source || external));
+    if (!prepared) {
+      return std::unexpected(prepared.error());
+    }
+    auto shown = std::move(*prepared);
+    auto bar = scene.emplace<FindBar>(parent, config.appearance);
+
+    if (!bar) {
+      return bar;
+    }
+    if (context.root == Node<Widget>{}) {
+      context.root = *bar;
+    }
+
+    auto record = *findRecord(scene, *bar);
+    record->tree = &scene.app_.tree();
+    record->lifetime = lifetime(scene);
+    record->field = *bar;
+    record->policy = scene.widthPolicy();
+    record->limits = config.limits;
+    record->result = shown->result;
+    record->readOnly = config.editor.options.readOnly;
+    record->mode = config.editor.options.editMode;
+
+    if ((source || external) && config.selected) {
+      config.selected = detail::currentSceneCallback(scene.facadeContext(), std::move(config.selected));
+    }
+
+    record->selected = std::make_shared<std::function<void(FindMatch)>>(std::move(config.selected));
+    *bridge = record;
+
+    auto scope = scene.focusScope(*bar);
+
+    if (!scope) {
+      return std::unexpected(scope.error());
+    }
+
+    auto legacyValidate = std::make_shared<std::function<bool(std::string_view)>>(std::move(config.editor.validate));
+    config.editor.validate = [bridge, legacyValidate](std::string_view candidate) {
+      return prepareQueryPublication(bridge, legacyValidate, candidate);
+    };
+    config.editor.result =
+      [bridge, legacy = std::move(config.editor.result)](LineEditResult receipt) -> std::expected<void, TreeError> {
+      return finishQueryPublication(bridge, receipt, legacy);
+    };
+
+    auto mounted = mountFindBarChildren(scene, *bar, context, record, config, self, *shown);
+    if (!mounted) {
+      return std::unexpected(mounted.error());
+    }
+
+    if (source) {
+      if (config.searchFailed) {
+        config.searchFailed = detail::currentSceneCallback(scene.facadeContext(), std::move(config.searchFailed));
       }
-      auto shown = std::move(*prepared);
-      auto bar = scene.emplace<FindBar>(parent, config.appearance);
 
-      if (!bar) {
-        return bar;
-      }
-      if (context.root == Node<Widget>{}) {
-        context.root = *bar;
+      auto required = detail::SceneAccess::requireBackground(scene);
+
+      if (!required) {
+        return std::unexpected(required.error());
       }
 
-      auto record = *findRecord(scene, *bar);
-      record->tree = &scene.app_.tree();
-      record->lifetime = lifetime(scene);
-      record->field = *bar;
-      record->policy = scene.widthPolicy();
-      record->limits = config.limits;
-      record->result = shown->result;
-      record->readOnly = config.editor.options.readOnly;
-      record->mode = config.editor.options.editMode;
+      auto attached = source->attach(scene);
 
-      if (source && config.selected) {
-        config.selected = detail::currentSceneCallback(scene.facadeContext(), std::move(config.selected));
+      if (!attached) {
+        return std::unexpected(attached.error());
       }
 
-      record->selected = std::make_shared<std::function<void(FindMatch)>>(std::move(config.selected));
-      *bridge = record;
+      auto session = portals::detail::modelSession();
 
-      auto scope = scene.focusScope(*bar);
-
-      if (!scope) {
-        return std::unexpected(scope.error());
+      if (!session) {
+        return std::unexpected(findError(*bar, session.error()));
       }
 
-      auto legacyValidate = std::make_shared<std::function<bool(std::string_view)>>(std::move(config.editor.validate));
-      config.editor.validate = [bridge, legacyValidate](std::string_view candidate) {
-        return prepareQueryPublication(bridge, legacyValidate, candidate);
+      auto activity = std::make_shared<FindModelActivity>(scene, record, std::move(source), config.search,
+                                                          std::move(config.searchFailed), *session);
+      auto connected = activity->connect();
+
+      if (!connected) {
+        return std::unexpected(findError(*bar, connected.error()));
+      }
+
+      auto admitted = detail::SceneAccess::admitActivity(scene, activity);
+
+      if (!admitted) {
+        return std::unexpected(admitted.error());
+      }
+
+      record->activity = activity;
+      record->requestModel = [weak = std::weak_ptr(activity)](std::shared_ptr<const FindResult> query) {
+        if (auto live = weak.lock()) {
+          live->request(std::move(query));
+        }
       };
-      config.editor.result =
-        [bridge, legacy = std::move(config.editor.result)](LineEditResult receipt) -> std::expected<void, TreeError> {
-        return finishQueryPublication(bridge, receipt, legacy);
+      record->modelCurrent = [weak = std::weak_ptr(activity)] {
+        auto live = weak.lock();
+
+        return live && live->current();
       };
+      activity->request(record->result);
+    }
 
-      auto mounted = mountFindBarChildren(scene, *bar, context, record, config, self, *shown);
-      if (!mounted) {
-        return std::unexpected(mounted.error());
+    if (external) {
+      auto attached = external->attach(scene, record);
+
+      if (!attached) {
+        return std::unexpected(attached.error());
       }
 
-      if (source) {
-        if (config.searchFailed) {
-          config.searchFailed = detail::currentSceneCallback(scene.facadeContext(), std::move(config.searchFailed));
-        }
+      record->activity = std::move(*attached);
+    }
 
-        auto required = detail::SceneAccess::requireBackground(scene);
-
-        if (!required) {
-          return std::unexpected(required.error());
-        }
-
-        auto attached = source->attach(scene);
-
-        if (!attached) {
-          return std::unexpected(attached.error());
-        }
-
-        auto session = portals::detail::modelSession();
-
-        if (!session) {
-          return std::unexpected(findError(*bar, session.error()));
-        }
-
-        auto activity = std::make_shared<FindModelActivity>(scene, record, std::move(source), config.search,
-                                                            std::move(config.searchFailed), *session);
-        auto connected = activity->connect();
-
-        if (!connected) {
-          return std::unexpected(findError(*bar, connected.error()));
-        }
-
-        auto admitted = detail::SceneAccess::admitActivity(scene, activity);
-
-        if (!admitted) {
-          return std::unexpected(admitted.error());
-        }
-
-        record->activity = activity;
-        record->requestModel = [weak = std::weak_ptr(activity)](std::shared_ptr<const FindResult> query) {
-          if (auto live = weak.lock()) {
-            live->request(std::move(query));
-          }
-        };
-        record->modelCurrent = [weak = std::weak_ptr(activity)] {
-          auto live = weak.lock();
-
-          return live && live->current();
-        };
-        activity->request(record->result);
-      }
-
-      return *bar;
-    });
+    return *bar;
+  });
 
   return controlArguments(configuredControl(std::move(recipe), "FindBar"), std::move(arguments)).reference(self);
 }

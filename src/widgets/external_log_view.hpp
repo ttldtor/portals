@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include "document_view_search.hpp"
 #include <portals/log_file.hpp>
 #include <portals/ui_log_view.hpp>
 
@@ -81,7 +82,16 @@ struct ExternalLogFrame {
   std::optional<SourceError> bookmarkError;
 };
 
+struct ExternalLogSearch {
+  std::optional<DocumentSearchSelection> selection;
+  std::shared_ptr<ByteDocumentSource> source;
+  std::uint64_t fileGeneration{};
+  StyleRoleRegistration roles;
+  std::optional<std::pair<std::uint64_t, std::uint64_t>> pendingReveal;
+};
+
 struct ExternalLogState {
+  std::unique_ptr<ExternalLogSearch> search;
   std::shared_ptr<const ExternalLogFrame> frame;
   std::shared_ptr<ui::detail::SceneActivity> activity;
   CellSize viewport;
@@ -103,6 +113,9 @@ struct ExternalLogState {
   bool tailRequested{};
   LogNavigation navigation;
 };
+
+// UI-only observation of the already-owned delivery binding; no source I/O.
+std::shared_ptr<const ui::detail::LogSourceData> externalLogSource(const ExternalLogState &state);
 
 std::expected<void, ManagedError> replaceExternalLogView(ManagedScene &scene, Node<LogView> node, ui::LogSource source);
 std::expected<void, ManagedError> attachExternalLogView(ManagedScene &scene, Node<LogView> node, ui::LogSource source,

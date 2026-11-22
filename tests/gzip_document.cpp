@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
+#include <portals/document_export.hpp>
+#include <portals/document_search.hpp>
 #include <portals/gzip_document.hpp>
 
 #include <algorithm>
@@ -754,4 +756,46 @@ TEST_CASE("independent gzip providers and shared logical sources retain separate
         repeatedText().substr(7, 17));
   CHECK(std::string(reinterpret_cast<const char *>(pageB.bytes().data()), pageB.bytes().size()) ==
         repeatedText().substr(21, 17));
+}
+
+TEST_CASE("streaming search and bounded copy use decompressed offsets across gzip members") {
+  Fixture f(stored("prefix ne") + stored("edle final needle"), {.compressedBlockBytes = 7, .inflateOutputBytes = 3});
+  f.input->knownExtent = false;
+  auto source = take(ByteDocumentSource::create(f.gzip, f.budget, {.maxPageBytes = 3}));
+
+  worker([&] {
+    auto session =
+      take(DocumentSearchSession::create(source, "needle", {.hint = DocumentEncoding::UTF8}, {.workBytes = 3}));
+    const auto next = [&] {
+      for (unsigned turn = 0; turn < 128; ++turn) {
+        auto step = take(session->advance());
+
+        if (step.state != DocumentSearchState::PENDING) {
+          return step;
+        }
+      }
+
+      FAIL("small compressed fixture did not finish within its bounded test steps");
+      return DocumentSearchStep{};
+    };
+
+    auto first = next();
+    REQUIRE(first.state == DocumentSearchState::FOUND);
+    REQUIRE(first.match);
+    CHECK(first.match->byteOffset == 7);
+    CHECK(first.match->byteLength == 6);
+    CHECK(first.match->text == "needle");
+
+    auto second = next();
+    REQUIRE(second.state == DocumentSearchState::FOUND);
+    CHECK(second.match->byteOffset == 20);
+    CHECK(next().state == DocumentSearchState::END);
+    REQUIRE(session->start(DocumentSearchDirection::PREVIOUS, 20));
+    CHECK(next().match->byteOffset == 7);
+
+    auto copied = take(copyDocumentBytes(source, {7, 13}, 64));
+    const auto bytes = copied->bytes();
+    CHECK(std::string_view(reinterpret_cast<const char *>(bytes.data()), bytes.size()) == "needle");
+    CHECK(take(source->inspect()).byteExtent == 26);
+  });
 }

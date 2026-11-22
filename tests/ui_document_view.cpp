@@ -307,6 +307,14 @@ std::uint64_t navigationSerial(Fixture &fixture) {
   }));
   return serial;
 }
+
+void selectDocumentRange(Fixture &fixture, std::uint64_t begin, std::uint64_t end, bool reveal = false) {
+  const auto frame = fixture.frame();
+
+  REQUIRE(frame);
+  take(detail::setDocumentSearchSelection(*fixture.scene, fixture.node,
+                                          detail::DocumentSearchSelection{frame->status.revision, begin, end}, reveal));
+}
 } // namespace
 
 TEST_CASE("cold adapter construction failure is retained until mounting") {
@@ -3033,6 +3041,320 @@ TEST_CASE("document error caption survives deferred rendering and reentrant sink
     }
     CHECK(row.find("Unable to read document.") != std::string::npos);
   }));
+}
+
+TEST_CASE("document match maps original encoding across wide combining and escaped clusters") {
+  auto provider = std::make_shared<Provider>();
+  DocumentViewConfig config;
+  std::uint64_t begin{};
+  std::uint64_t end{};
+
+  SUBCASE("UTF8") {
+    provider->text = "A\xE7\x95\x8C"
+                     "e\xCC\x81\tB";
+    config.decoder.explicitEncoding = DocumentEncoding::UTF8;
+    begin = 1;
+    end = 8;
+  }
+  SUBCASE("UTF16LE") {
+    provider->text = std::string("\xFF\xFE"
+                                 "A\0\x4C\x75"
+                                 "e\0\x01\x03\t\0B\0",
+                                 14);
+    config.decoder.explicitEncoding = DocumentEncoding::UTF16LE;
+    begin = 4;
+    end = 12;
+  }
+
+  Fixture f(ui::document(provider), config);
+  f.size = {40, 8};
+  f.settle();
+  selectDocumentRange(f, begin, end);
+  f.settle();
+
+  const auto frame = f.frame();
+
+  REQUIRE(frame);
+  REQUIRE(frame->search);
+  REQUIRE(frame->search->runs.size() == 1);
+  CHECK(frame->rows.front().bytes() == "A\xE7\x95\x8C"
+                                       "e\xCC\x81\\u0009B");
+  const auto &run = frame->search->runs.front();
+
+  CHECK(run.row == 0);
+  CHECK(run.column == 1);
+  CHECK(run.first == 1);
+  CHECK(run.count == 8);
+  CHECK(frame->search->selection.begin == begin);
+  CHECK(frame->search->selection.end == end);
+  CHECK(frame->search->credit.usage().bytes >= detail::DOCUMENT_SEARCH_FRAME_BYTES);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("document match preserves original control and standalone extender boundaries") {
+  Fixture f(source("\t\xCC\x81X"));
+
+  f.settle();
+
+  std::size_t first{};
+  std::size_t count{};
+
+  SUBCASE("escaped control only") {
+    selectDocumentRange(f, 0, 1);
+    count = 6;
+  }
+  SUBCASE("standalone extender only") {
+    selectDocumentRange(f, 1, 3);
+    first = 6;
+    count = 1;
+  }
+
+  f.settle();
+
+  const auto frame = f.frame();
+
+  REQUIRE(frame);
+  REQUIRE(frame->search);
+  REQUIRE(frame->search->runs.size() == 1);
+  CHECK(frame->rows.front().bytes() == "\\u0009?X");
+  CHECK(frame->search->runs.front().column == static_cast<std::int32_t>(first));
+  CHECK(frame->search->runs.front().first == first);
+  CHECK(frame->search->runs.front().count == count);
+}
+
+TEST_CASE("document match wraps with layout and clear only repaints") {
+  auto provider = std::make_shared<Provider>();
+
+  provider->text = "abcdefghij";
+  Fixture f(ui::document(provider));
+
+  f.size = {7, 7};
+  f.settle();
+  selectDocumentRange(f, 3, 8);
+  f.settle();
+
+  const auto frame = f.frame();
+
+  REQUIRE(frame);
+  REQUIRE(frame->search);
+  REQUIRE(frame->search->runs.size() == 2);
+  CHECK(frame->search->runs[0].row == 0);
+  CHECK(frame->search->runs[0].column == 3);
+  CHECK(frame->search->runs[0].count == 2);
+  CHECK(frame->search->runs[1].row == 1);
+  CHECK(frame->search->runs[1].column == 0);
+  CHECK(frame->search->runs[1].count == 3);
+
+  take(f.scene->theme(take(parsePss("DocumentView{role-match-foreground:#010203;role-match-background:#AABBCC;}"))));
+  const auto sink = paint(f);
+
+  CHECK(std::count_if(sink.texts.begin(), sink.texts.end(), [](const PartSink::Text &text) {
+          return text.style.foreground == RgbColor{1, 2, 3} && text.style.background == RgbColor{0xAA, 0xBB, 0xCC};
+        }) == 2);
+  const auto reads = provider->reads.load();
+  const auto submissions = f.executor.submissions;
+
+  take(detail::setDocumentSearchSelection(*f.scene, f.node, std::nullopt, false));
+  const auto cleared = paint(f);
+
+  CHECK(std::none_of(cleared.texts.begin(), cleared.texts.end(), [](const PartSink::Text &text) {
+    return text.style.background == RgbColor{0xAA, 0xBB, 0xCC};
+  }));
+  f.settle(2);
+  CHECK(provider->reads.load() == reads);
+  CHECK(f.executor.submissions == submissions);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("document HEX match covers both digits and ASCII without gutter separators") {
+  Fixture f(source("ABCD"), {.mode = DocumentViewMode::HEX});
+
+  f.size = {100, 6};
+  f.settle();
+  selectDocumentRange(f, 1, 3);
+  f.settle();
+
+  const auto frame = f.frame();
+
+  REQUIRE(frame);
+  REQUIRE(frame->search);
+  std::string selected;
+
+  for (const auto &run : frame->search->runs) {
+    const auto graphemes = frame->rows[run.row].graphemes();
+    const auto begin = graphemes[run.first].byte_begin;
+    const auto end = graphemes[run.first + run.count - 1].byte_end;
+
+    selected.append(frame->rows[run.row].bytes().substr(begin, end - begin));
+  }
+
+  CHECK(selected == "42B43C");
+}
+
+TEST_CASE("document match retains bounded ASCII tail navigation with an offscreen or final selection") {
+  constexpr std::size_t SOURCE_BYTES = 128 * 1024;
+  auto provider = std::make_shared<Provider>();
+
+  provider->text.assign(SOURCE_BYTES, 'x');
+  Fixture f(ui::document(provider), {.workBytes = 32 * 1024});
+
+  f.size = {20, 8};
+  f.settle();
+
+  std::size_t selected{};
+
+  SUBCASE("offscreen match") {
+    selectDocumentRange(f, 0, 1);
+  }
+  SUBCASE("final match") {
+    selectDocumentRange(f, SOURCE_BYTES - 3, SOURCE_BYTES);
+    selected = 3;
+  }
+
+  f.settle();
+  take(f.reference.goEnd());
+  f.settle(20);
+
+  const auto frame = f.frame();
+
+  REQUIRE(frame);
+  REQUIRE(frame->search);
+  CHECK(frame->finalEndVisible);
+  CHECK(frame->visibleByteEnd == SOURCE_BYTES);
+  std::size_t highlighted{};
+
+  for (const auto &run : frame->search->runs) {
+    highlighted += run.count;
+  }
+
+  CHECK(highlighted == selected);
+  CHECK(frame->search->runs.capacity() <=
+        static_cast<std::size_t>(frame->viewport.width) * static_cast<std::size_t>(frame->viewport.height));
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("document match rejects stale selection and snapshots paint before reentrant replacement") {
+  Fixture f(source("selected text"));
+
+  f.settle();
+  selectDocumentRange(f, 0, 8);
+  f.settle();
+  take(f.scene->theme(take(parsePss("DocumentView{role-match-background:#ABCDEF;}"))));
+
+  class ReplacingSink final : public PaintContext {
+  public:
+    Fixture &fixture;
+    PartSink captured;
+    bool replaced{};
+
+    explicit ReplacingSink(Fixture &value) : fixture(value) {
+    }
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      take(captured.submit(commands));
+      if (!replaced) {
+        replaced = true;
+        take(fixture.reference.setModel(source("replacement")));
+      }
+
+      return {};
+    }
+  } sink(f);
+
+  take(f.app->tree().frame([&] {
+    take(f.app->tree().paint(f.node, sink));
+  }));
+  CHECK(sink.replaced);
+  CHECK(std::any_of(sink.captured.texts.begin(), sink.captured.texts.end(), [](const PartSink::Text &text) {
+    return text.first == 0 && text.count == 8 && text.style.background == RgbColor{0xAB, 0xCD, 0xEF};
+  }));
+  const auto current = paint(f);
+
+  CHECK(std::none_of(current.texts.begin(), current.texts.end(), [](const PartSink::Text &text) {
+    return text.style.background == RgbColor{0xAB, 0xCD, 0xEF};
+  }));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK_FALSE(f.frame()->search);
+}
+
+TEST_CASE("document match clears on model decoder and observed provider revision changes") {
+  auto provider = std::make_shared<Provider>();
+
+  provider->text = "selected";
+  Fixture f(ui::document(provider));
+
+  f.settle();
+  selectDocumentRange(f, 0, 8);
+  f.settle();
+  REQUIRE(f.frame()->search);
+
+  SUBCASE("source namespace") {
+    take(f.reference.setModel(source("replacement")));
+  }
+  SUBCASE("decoder interpretation") {
+    take(setDocumentEncoding(*f.scene, f.node, DocumentEncoding::WINDOWS1252));
+  }
+  SUBCASE("observed revision of the same provider") {
+    ++provider->revision;
+    take(f.reference.refresh());
+    f.settle();
+    REQUIRE(f.frame());
+    CHECK(f.frame()->status.revision.dataRevision == provider->revision);
+  }
+
+  take(f.app->tree().read(f.node, [](const DocumentView &widget) {
+    const auto &state = detail::DocumentViewAccess::state(widget);
+
+    REQUIRE(state.search);
+    CHECK_FALSE(state.search->selection);
+  }));
+  f.settle();
+  REQUIRE(f.frame());
+  CHECK_FALSE(f.frame()->search);
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("document match role is optional and visible in dark and light themes across mode changes") {
+  Fixture f(source("selected"));
+
+  SUBCASE("Nord") {
+    take(f.scene->theme(nordTheme()));
+  }
+  SUBCASE("Catppuccin Latte") {
+    take(f.scene->theme(catppuccinLatteTheme()));
+  }
+
+  f.settle();
+  take(f.app->tree().read(f.node, [](const DocumentView &widget) {
+    const auto &state = detail::DocumentViewAccess::state(widget);
+
+    CHECK_FALSE(state.search);
+    REQUIRE(state.roles.snapshot());
+    CHECK_FALSE(state.roles.snapshot()->find("match"));
+  }));
+  selectDocumentRange(f, 0, 8);
+  f.settle();
+
+  const auto checkMatch = [&] {
+    take(f.app->tree().read(f.node, [](const DocumentView &widget) {
+      const auto &state = detail::DocumentViewAccess::state(widget);
+      const auto match = state.roles.snapshot()->find("match", StyleState::FOCUSED);
+
+      REQUIRE(match);
+      CHECK(match->foreground != match->background);
+      CHECK(match->bold);
+    }));
+  };
+
+  checkMatch();
+  take(setDocumentLanguage(*f.scene, f.node, DocumentLanguage::POSTGRESQL_LEXICAL));
+  checkMatch();
+  take(setDocumentMode(*f.scene, f.node, DocumentViewMode::HEX));
+  checkMatch();
+  f.settle();
+  REQUIRE(f.frame());
+  REQUIRE(f.frame()->search);
 }
 
 TEST_CASE("document error caption counts only against its owning source budget") {

@@ -143,9 +143,10 @@ endif()
 target_link_libraries(portals_core PRIVATE portals_utf8proc)
 target_include_directories(portals_core PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/utf8proc")
 target_compile_definitions(portals_core PRIVATE UTF8PROC_STATIC)
-target_sources(portals_core PRIVATE src/models/document_source.cpp src/text/document_encoding.cpp src/text/document_hex.cpp src/text/document_highlight.cpp
+target_sources(portals_core PRIVATE src/models/document_export.cpp src/models/document_search.cpp src/models/document_source.cpp src/text/document_encoding.cpp src/text/document_hex.cpp src/text/document_highlight.cpp
   src/widgets/document_view.cpp src/widgets/document_view_preparation.cpp src/widgets/document_view_hex.cpp
-  src/widgets/document_view_highlight.cpp src/widgets/ui_document_view.cpp)
+  src/widgets/document_view_highlight.cpp src/widgets/document_view_search.cpp src/widgets/ui_document_view.cpp
+  src/widgets/ui_document_export.cpp src/widgets/ui_document_search.cpp src/widgets/ui_log_search.cpp)
 target_sources(portals_core PRIVATE src/models/source_budget.cpp src/models/window_source.cpp
   src/models/log_file.cpp src/models/model_position.cpp src/widgets/external_log_view.cpp
   src/widgets/managed_navigation.cpp)
@@ -1611,6 +1612,34 @@ if(PORTALS_BUILD_TESTS)
   portals_enable_warnings(portals_document_highlight)
   add_test(NAME portals.document-highlight COMMAND portals_document_highlight)
   set_tests_properties(portals.document-highlight PROPERTIES TIMEOUT 30)
+
+  add_executable(portals_document_export tests/document_export.cpp)
+  target_include_directories(portals_document_export SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_document_export PRIVATE portals::core)
+  portals_enable_warnings(portals_document_export)
+  add_test(NAME portals.document-export COMMAND portals_document_export)
+  set_tests_properties(portals.document-export PROPERTIES TIMEOUT 60)
+
+  add_executable(portals_ui_document_export tests/ui_document_export.cpp)
+  target_include_directories(portals_ui_document_export SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_ui_document_export PRIVATE portals::core)
+  portals_enable_warnings(portals_ui_document_export)
+  add_test(NAME portals.ui-document-export COMMAND portals_ui_document_export)
+  set_tests_properties(portals.ui-document-export PROPERTIES TIMEOUT 60)
+
+  add_executable(portals_ui_document_search tests/ui_document_search.cpp)
+  target_include_directories(portals_ui_document_search SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_ui_document_search PRIVATE portals::core)
+  portals_enable_warnings(portals_ui_document_search)
+  add_test(NAME portals.ui-document-search COMMAND portals_ui_document_search)
+  set_tests_properties(portals.ui-document-search PROPERTIES TIMEOUT 60)
+
+  add_executable(portals_document_search tests/document_search.cpp)
+  target_include_directories(portals_document_search SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_document_search PRIVATE portals::core)
+  portals_enable_warnings(portals_document_search)
+  add_test(NAME portals.document-search COMMAND portals_document_search)
+  set_tests_properties(portals.document-search PROPERTIES TIMEOUT 60)
 
   add_executable(portals_document_source tests/document_source.cpp)
   target_include_directories(portals_document_source SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")

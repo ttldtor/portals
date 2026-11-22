@@ -87,10 +87,28 @@ void appendHexRow(DocumentScan &scan, const DocumentPrepareIntent &intent, std::
       mark(*cell.asciiColumn, 1, byteRole(cell.byteClass));
     }
   }
+  if (scan.search) {
+    const auto map = [&](std::size_t column, std::size_t length, std::uint64_t sourceOffset) {
+      const auto begin = std::max(first, column);
+      const auto end = std::min(first + count, column + length);
+
+      if (begin < end) {
+        mapDocumentSearch(scan, offset, begin - first, end - first, sourceOffset, sourceOffset + 1);
+      }
+    };
+
+    for (std::size_t index = 0; index < cells.size(); ++index) {
+      map(cells[index].hexColumn, 2, offset + index);
+      if (cells[index].asciiColumn) {
+        map(*cells[index].asciiColumn, 1, offset + index);
+      }
+    }
+  }
   if (scan.rows.size() == static_cast<std::size_t>(intent.viewport.height)) {
     scan.payload -= scan.rows.front().bytes.size();
     scan.rows.erase(scan.rows.begin());
     hex.roles.erase(hex.roles.begin());
+    trimDocumentSearch(scan, scan.rows.empty() ? offset : scan.rows.front().offset);
   }
   if (count > intent.config.maxFrameBytes - std::min(scan.payload, intent.config.maxFrameBytes)) {
     failHex(SourceError::PAGE_TOO_LARGE);
@@ -108,8 +126,9 @@ void appendHexRow(DocumentScan &scan, const DocumentPrepareIntent &intent, std::
 
 std::shared_ptr<const DocumentPreparedFrame> hexFrame(ByteDocumentSource &source, const DocumentPrepareIntent &intent,
                                                       const DocumentScan &scan) {
-  const auto amount =
-    documentPreparationBytes(intent.viewport, intent.config, {.hexRows = scan.hex->rawRows.size(), .frame = true});
+  const auto amount = documentPreparationBytes(
+    intent.viewport, intent.config,
+    {.hexRows = scan.hex->rawRows.size(), .frame = true, .search = intent.searchSelection.has_value()});
   if (!amount) {
     failHex(amount.error());
   }
@@ -172,6 +191,12 @@ std::shared_ptr<const DocumentPreparedFrame> hexFrame(ByteDocumentSource &source
       first = end;
     }
   }
+  const auto search = projectDocumentSearch(*frame, scan);
+
+  if (!search) {
+    throw HexFailure{search.error()};
+  }
+
   frame->finalEndVisible = scan.done && !scan.waiting && frame->visibleByteEnd == scan.offset;
   std::array<char, 96> caption{};
   const auto progress = documentProgress(frame->status, frame->finalEndVisible, frame->visibleByteEnd);
@@ -208,7 +233,9 @@ std::shared_ptr<const DocumentPreparation> prepareHexDocument(std::shared_ptr<By
       throw HexFailure{metadata.error()};
     }
     const auto bytes = fittedBytes(intent);
-    const bool resume = intent.resume && previous && previous->hex &&
+    const auto previousSelection =
+      previous && previous->search ? std::optional(previous->search->selection) : std::nullopt;
+    const bool resume = intent.resume && previous && previous->hex && previousSelection == intent.searchSelection &&
                         previous->metadata.revision == metadata->revision &&
                         previous->requestedAnchor == intent.anchor && previous->layoutWidth == intent.viewport.width &&
                         previous->horizontal == intent.horizontal && previous->hex->options == intent.config.hex &&
@@ -222,6 +249,7 @@ std::shared_ptr<const DocumentPreparation> prepareHexDocument(std::shared_ptr<By
     if (resume) {
       scan = std::make_shared<DocumentScan>(*previous);
       scan->hex = std::make_shared<DocumentHexScan>(*previous->hex);
+      stageDocumentSearch(*scan, intent);
       // Rebuild bounded capacity by copying: relocating an owning string through
       // an implicit noexcept move can terminate under MSVC debug allocation failure.
       std::vector<DocumentPreparedRow> rows(0);
@@ -233,6 +261,7 @@ std::shared_ptr<const DocumentPreparation> prepareHexDocument(std::shared_ptr<By
     } else {
       scan = std::make_shared<DocumentScan>();
       scan->metadata = *metadata;
+      scan->decoderOptions = intent.config.decoder;
       scan->layoutWidth = intent.viewport.width;
       scan->horizontal = intent.horizontal;
       scan->requestedAnchor = intent.anchor;
@@ -240,6 +269,7 @@ std::shared_ptr<const DocumentPreparation> prepareHexDocument(std::shared_ptr<By
       scan->hex->options = intent.config.hex;
       scan->hex->bytesPerRow = bytes;
       scan->hex->height = intent.viewport.height;
+      stageDocumentSearch(*scan, intent);
       auto first = intent.anchor / bytes * bytes;
       if (intent.rowDelta) {
         const auto row = movedRow(intent.anchor / bytes, intent.rowDelta);

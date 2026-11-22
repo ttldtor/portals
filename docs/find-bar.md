@@ -2,7 +2,7 @@
 
 [Русская версия](ru/find-bar.md) · [LineEdit](line-edit.md) · [Control examples](control-examples.md)
 
-Use FindBar to navigate literal matches in a bounded document or an immutable model; it does not edit or persist the source. See [FindBar limits and API](../include/portals/find_bar.hpp). The complete examples below show both the document and model paths.
+Use FindBar to navigate literal matches in a bounded document, an immutable model, or a streaming Viewer source; it does not edit or persist the source. See [FindBar limits and API](../include/portals/find_bar.hpp). The complete examples below show both the document and model paths.
 
 `FindBar` combines a one-line query editor, Previous/Next/Clear buttons and a
 summary of the accepted query's results. The document overload owns one bounded
@@ -219,3 +219,18 @@ LineEdit.find-bar-query { min-width: 16; }
 Button.find-bar-next:focused { background: #245070; }
 Label.find-bar-summary { italic: true; }
 ```
+
+## Search a streaming Viewer source {#find-bar-viewer}
+
+Include `<portals/ui_document_search.hpp>` and bind `ui::findBar(searchRef, viewerRef)`
+to a `ui::Ref<DocumentView>`. For file-backed LogView, the same overload accepts
+`ui::Ref<LogView>`. This path retains one selected result instead of a bounded
+prefix of all hits; Previous/Next navigate the whole source. See the
+[complete Viewer example and limits](document-view.md#document-view-search).
+Other LogView model families keep their own model search capabilities and do not
+implicitly become byte-file sources.
+
+The file-backed LogView retains its existing UTF-8 record-size policy; binding
+search does not remove that view's record limits. Use DocumentView for a document
+with arbitrarily long logical lines. Both paths avoid materializing the entire
+source in memory.

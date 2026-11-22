@@ -141,6 +141,19 @@ FileDocumentProvider::create(std::filesystem::path path, std::size_t ioBlockByte
   }
 }
 
+std::expected<std::shared_ptr<FileDocumentProvider>, DocumentError>
+FileDocumentProvider::create(std::shared_ptr<FileLogModel> model) {
+  if (!model) {
+    return std::unexpected(failure(SourceError::INVALID_ARGUMENT));
+  }
+
+  try {
+    return std::shared_ptr<FileDocumentProvider>(new FileDocumentProvider(std::move(model)));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(failure(SourceError::NO_MEMORY));
+  }
+}
+
 ByteDocumentCapabilities FileDocumentProvider::capabilities() const noexcept {
   return {true, false};
 }
