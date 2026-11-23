@@ -118,11 +118,15 @@ std::expected<void, ManagedError> ManagedScene::finishDataState(Node<Widget> roo
         if (!entry || entry->viewSource.expired()) {
           return std::unexpected(error(ManagedPhase::BIND, body, TreeError::INVALID_ARGUMENT));
         }
-        probe = [weak = record->owner, source = entry->viewSource,
+        probe = [weak = record->owner, binding = std::weak_ptr(entry),
                  body]() -> std::expected<DataRangeStatus, TreeError> {
           auto owner = weak.lock();
-          auto model = source.lock();
-          if (!owner || owner->lifetime.expired() || !owner->scene || !model) {
+          auto entry = binding.lock();
+          if (!owner || owner->lifetime.expired() || !owner->scene || !entry || entry->removed) {
+            return std::unexpected(TreeError::CLOSED);
+          }
+          auto model = entry->viewSource.lock();
+          if (!model) {
             return std::unexpected(TreeError::CLOSED);
           }
           auto failure = model->dataError();
@@ -131,6 +135,17 @@ std::expected<void, ManagedError> ManagedScene::finishDataState(Node<Widget> roo
           }
           if (*failure) {
             return std::unexpected(**failure);
+          }
+          if constexpr (requires(const ManagedScene &scene) { scene.restoreStatus(body); }) {
+            auto restored = owner->scene->restoreStatus(body);
+            if (!restored) {
+              return std::unexpected(std::get<TreeError>(restored.error().cause));
+            }
+            if (*restored &&
+                (**restored == PositionResolution::UNSUPPORTED || **restored == PositionResolution::INCOMPATIBLE ||
+                 **restored == PositionResolution::UNAVAILABLE)) {
+              return DataRangeStatus{true, RangeState::FAILED, 0, 0, false};
+            }
           }
           std::optional<DataRangeStatus> status;
           auto read = owner->scene->app_.tree().read(body, [&](const Content &view) {

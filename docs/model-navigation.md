@@ -91,8 +91,9 @@ fails; retrying does not duplicate their logical notifications.
 
 This integration covers managed finite-model lists and tables plus the generic
 navigation context. [LogView source switching](log-view.md#log-view-switching-models)
-provides its own bounded reading checkpoints. General list/table model-switch
-restoration, current-record forms and persistent storage are separate integrations.
+provides its own bounded reading checkpoints. [Model switching](view-models.md)
+restores list/table positions by default. Current-record forms and persistent storage
+remain separate integrations.
 The existing low-level model and view APIs remain available.
 
 ## Complete provider-integration example

@@ -10,12 +10,33 @@
 
 namespace portals {
 class ManagedScene;
+struct ManagedError;
+template <class T> class ManagedModel;
 template <std::equality_comparable T> class ManagedSource;
 
 namespace detail {
 struct ManagedNavigationRecord;
 struct ManagedNavigationRegistry;
 } // namespace detail
+
+/** @brief Remember a resource position by default; RESET explicitly selects its initial policy. */
+enum class ModelRestorePolicy {
+  REMEMBER, ///< Restore this navigation session's saved resource position.
+  RESET     ///< Forget the target checkpoint and use its initial position/selection.
+};
+
+/** @brief Bounded history options, independent of model row count. */
+struct ModelCheckpointOptions {
+  std::size_t maxBytes{256 * 1024}; ///< Aggregate entry/selection/bookmark metadata credit.
+  BookmarkOptions bookmarks{};      ///< Existing 4096-byte per-bookmark default.
+};
+
+/** @brief Explicit rebinding policy; omitted history options inherit the session's settings. */
+struct ModelRebindOptions {
+  ModelRestorePolicy restore{ModelRestorePolicy::REMEMBER}; ///< Default return-to-resource behavior.
+  bool retainPreparedOverride{}; ///< Low-level opt-in to retaining a previous view callback across models.
+  std::optional<ModelCheckpointOptions> checkpoints; ///< Initial session capacity; immutable once history exists.
+};
 
 /** @brief Published logical position, independent of provider revisions and screen coordinates.
  * Full revision-qualified bookmarks are read separately from ManagedNavigation::bookmark().
@@ -38,8 +59,15 @@ struct NavigationPosition {
 class NavigationSelection {
 public:
   NavigationSelection() = default; ///< Empty selection, without allocating.
-  /** @return Borrowed immutable IDs valid while this value or a copy survives. */
+  /** @return Borrowed logical selected identities in resource()'s domain, valid while this value or a copy survives.
+   * IDs alone do not prove current row presence/readiness. Unresolved restoration metadata
+   * must not be applied as confirmed selection in another resource domain.
+   */
   std::span<const RowId> rows() const noexcept;
+  /** @return Domain qualifying every selected RowId, including an empty selected set. */
+  ModelResource resource() const noexcept;
+  /** @return Declared identity outcome; manual nonempty sets are EXACT, empty sets are EMPTY. */
+  PositionResolution resolution() const noexcept;
   /** @param other Selection to compare by complete identities in canonical order.
    * @return True when both selected sets match.
    */
@@ -47,13 +75,18 @@ public:
 
 private:
   friend class ManagedNavigation;
+  friend class ManagedScene;
+  friend struct detail::ManagedNavigationRecord;
+  ModelResource resource_;
+  PositionResolution resolution_{PositionResolution::EMPTY};
   std::shared_ptr<const std::vector<RowId>> rows_;
 };
 
 /** @brief Positive bounded metadata limits; no source extent or viewport is retained. */
 struct NavigationOptions {
-  std::size_t maxSelectedRows{1024}; ///< Maximum explicit selected set, independent of current/focus.
-  BookmarkOptions bookmarks{};       ///< Maximum owning metadata for each captured position.
+  std::size_t maxSelectedRows{1024};          ///< Maximum explicit selected set, independent of current/focus.
+  BookmarkOptions bookmarks{};                ///< Maximum owning metadata for each captured position.
+  std::size_t maxCheckpointBytes{256 * 1024}; ///< Aggregate remembered resource metadata for this context.
 };
 
 /** @brief Explicit projection-domain agreement; absence from a projection never proves deletion. */
@@ -77,6 +110,18 @@ struct NavigationBindingOptions {
 class ManagedNavigation {
 public:
   ManagedNavigation() = default; ///< Empty handle; operations return CLOSED.
+  /** @tparam T Immutable row type shared by the context and all participating views.
+   * @param model Same-scene destination; provider work is bounded and never performs UI I/O.
+   * @param options Remember/reset and bounded history policy.
+   * @return Atomic group admission, or a checked error preserving the installed group.
+   */
+  template <class T>
+  std::expected<void, ManagedError> setModel(ManagedModel<T> model, ModelRebindOptions options = {}) const;
+  /** @tparam T Immutable common domain row type.
+   * @param model Destination model. @param options Same policy as setModel.
+   * @return True on admission; false reports the original error once through the scene.
+   */
+  template <class T> bool model(ManagedModel<T> model, ModelRebindOptions options = {}) const;
   /** @return Read-only current channel, WRONG_THREAD, or CLOSED. */
   std::expected<ManagedSource<NavigationPosition>, TreeError> current() const;
   /** @return Read-only selected-set channel, independent of current and keyboard focus. */

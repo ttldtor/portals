@@ -132,6 +132,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 - Separate installed-package preparation and runtime verification into dependent
   CTest fixture phases, preserving complete consumer/header coverage and individual
   test limits. Package commands now report phase timestamps and elapsed time.
+- Mounted managed lists and tables remember current, selected and reading positions
+  separately for each model. Shared navigation contexts admit a whole model change
+  before replacing any participant; failed admission preserves the old group. Explicit
+  RESET abandons saved position. Pending/incompatible identity stays visible instead
+  of silently selecting row zero, while unversioned models retain ordinary local use.
+  Model-owned preparation follows the destination; callback-only changes preserve
+  navigation and outstanding requests. History metadata has bounded memory admission.
 
 - LogView source switching remembers paused reading positions and following mode
   for bookmark-capable sources. File restoration checks native identity and a

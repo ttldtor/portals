@@ -4,6 +4,9 @@
 
 #include <portals/chart.hpp>
 #include <portals/detail/managed_origin.hpp>
+#include <portals/model_position.hpp>
+
+#include <limits>
 
 namespace portals {
 namespace ui::detail {
@@ -35,6 +38,10 @@ struct ManagedModelSource {
   std::shared_ptr<ManagedOrigin> origin;
   bool retired{};
   Node<Widget> receiver;
+  ModelResource navigationResource;
+  bool navigationExplicit{};
+  PositionChangeMap navigationChanges;
+  std::uint64_t navigationRevision{};
 };
 
 template <class T> struct ManagedPreparedRegistration {
@@ -46,6 +53,7 @@ template <class T> struct ManagedModelSourceOf final : ManagedModelSource {
   std::optional<ModelFrame<T>> frame;
   NodeId scene;
   bool sinkOnly{};
+  std::shared_ptr<ManagedViewHandler<T>> preparation;
   std::function<std::expected<bool, TreeError>()> sync;
   std::vector<std::weak_ptr<ManagedPreparedRegistration<T>>> prepared =
     std::vector<std::weak_ptr<ManagedPreparedRegistration<T>>>(0);
@@ -69,6 +77,7 @@ template <class T> struct ManagedModelSourceOf final : ManagedModelSource {
       }
     }
     prepared.clear();
+    preparation.reset();
     sync = {};
     model.reset();
   }
@@ -109,6 +118,23 @@ template <class T> class ManagedModel {
 public:
   /// @brief Construct an empty handle whose operations return CLOSED.
   ManagedModel() = default;
+
+  /** @param changes Complete bounded ordering proof for a published destination revision.
+   * @return UI-affine admission, or checked access failure; this does not publish model data.
+   * Remembered positions use this proof only when its endpoint matches the current snapshot.
+   */
+  std::expected<void, TreeError> setChangeMap(PositionChangeMap changes) const {
+    auto source = lock();
+    if (!source || (*source)->retired) {
+      return std::unexpected(!source ? source.error() : TreeError::CLOSED);
+    }
+    if ((*source)->navigationRevision == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+    }
+    (*source)->navigationChanges = std::move(changes);
+    ++(*source)->navigationRevision;
+    return {};
+  }
 
   /** @brief Copy the existing worker-safe publication endpoint on UI.
    * @return Publisher for newer snapshots, WRONG_THREAD, or CLOSED after scene cleanup.
@@ -158,8 +184,7 @@ private:
 /// @cond INTERNAL
 namespace detail {
 struct ManagedModelAccess {
-  template <class T>
-  static std::expected<void, TreeError> validate(const ManagedModel<T> &model, NodeId scene) {
+  template <class T> static std::expected<void, TreeError> validate(const ManagedModel<T> &model, NodeId scene) {
     auto source = model.lock();
 
     if (!source) {
@@ -170,13 +195,12 @@ struct ManagedModelAccess {
       return std::unexpected(TreeError::CLOSED);
     }
 
-    return (*source)->scene == scene ? std::expected<void, TreeError>{}
-                                    : std::unexpected(TreeError::INVALID_ARGUMENT);
+    return (*source)->scene == scene ? std::expected<void, TreeError>{} : std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   template <class T>
-  static std::expected<std::shared_ptr<const ModelSnapshot<T>>, TreeError>
-  snapshot(const ManagedModel<T> &model, NodeId scene) {
+  static std::expected<std::shared_ptr<const ModelSnapshot<T>>, TreeError> snapshot(const ManagedModel<T> &model,
+                                                                                    NodeId scene) {
     auto source = model.lock();
 
     if (!source) {
@@ -195,6 +219,7 @@ struct ManagedModelAccess {
   }
 };
 } // namespace detail
+
 /// @endcond
 
 /** @brief Owning formatter of a borrowed visible list row into owning text.

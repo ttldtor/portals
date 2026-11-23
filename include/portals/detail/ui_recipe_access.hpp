@@ -834,12 +834,7 @@ struct Access {
     if (!installed) {
       return std::unexpected(error(node, installed.error()));
     }
-    auto attached = scene.attachView(
-      node, *owned,
-      [&scene, node](const ModelFrame<TextSegment> &frame, const LayoutSnapshot &layout) {
-        return prepareVirtualList(scene.app_.tree(), node, frame, layout);
-      },
-      std::move(prepared));
+    auto attached = scene.attachView(node, *owned, std::move(prepared));
     if (attached && graph->pending) {
       --scene.coldMountPending_;
       graph->pending = false;
