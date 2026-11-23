@@ -2491,6 +2491,18 @@ private:
   std::expected<ManagedModel<T>, ManagedError> collectionModel(ManagedState<Collection> input,
                                                                CollectionModelOptions options, MakeRows makeRows);
 
+  template <class T>
+  std::expected<void, ManagedError> applyOwnedSnapshot(ManagedModel<T> model,
+                                                       std::shared_ptr<const ModelSnapshot<T>> snapshot) {
+    auto source = modelSource(model, root_);
+    if (!source) {
+      return std::unexpected(source.error());
+    }
+    auto applied = Model<T>::applySnapshot(*(*source)->model->state_, std::move(snapshot));
+    return applied ? std::expected<void, ManagedError>{}
+                   : std::unexpected(error(ManagedPhase::STATE, root_, applied.error()));
+  }
+
   /// @cond INTERNAL
   template <class T, class W> struct ViewPreparation;
   template <class T, class W> struct PreparedViewModelChange;

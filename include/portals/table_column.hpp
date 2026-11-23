@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/text_format.hpp>
+
 #include <portals/virtual_table.hpp>
 
 #include <array>
@@ -27,6 +29,8 @@ template <class T> struct TableColumnSpec {
   std::string header;                            ///< Owning UTF-8 caption, validated when the schema is assembled.
   std::int32_t width{1};                         ///< Width in terminal cells, validated by table preparation.
   std::function<GraphemeText(const T &)> format; ///< Owning callback; reference captures remain borrowed.
+  std::function<std::function<GraphemeText(const T &)>(WidthPolicy)> prepareFormat;
+  ///< Optional cold default formatter factory; each assembly owns its independent width policy.
 };
 
 /** @brief Owning fixed-schema caption and sizing, without identity bookkeeping. */
@@ -182,6 +186,38 @@ TableColumnSpec<T> tableColumn(std::string_view header, Member T::*member, Forma
   return tableColumn<T, Member T::*, Formatter>(header, member, std::move(formatter), width);
 }
 
+/** @brief Describe a projected column with the existing default standard formatter.
+ * @tparam T Domain row; explicit for lambda projections. @tparam Projection Owned projection.
+ * @param header Owning schema caption. @param projection Member or callable taking const T&.
+ * @param width Positive cell width checked by the mounted table.
+ * @return Cold schema field whose formatter adopts each receiving table's width policy.
+ */
+template <class T, class Projection>
+  requires ColumnProjection<T, Projection> &&
+           std::formattable<std::remove_cvref_t<std::invoke_result_t<Projection &, const T &>>, char>
+TableColumnSpec<T> tableColumn(std::string_view header, Projection projection, std::int32_t width = 1) {
+  using Field = std::remove_cvref_t<std::invoke_result_t<Projection &, const T &>>;
+  return {std::string(header),
+          width,
+          {},
+          [projection = std::move(projection)](WidthPolicy policy) -> std::function<GraphemeText(const T &)> {
+            return [projection, formatter = cellFormat<Field>("{}", policy)](const T &row) mutable {
+              return formatter(std::invoke(projection, row));
+            };
+          }};
+}
+
+/** @brief Deduce the row type of a default-formatted member column.
+ * @param header Owned UTF-8 schema caption. @param member Field or const member function.
+ * @param width Width validated by the receiving table. @return Deferred typed column specification.
+ */
+template <class T, class Member>
+  requires ColumnProjection<T, Member T::*> &&
+           std::formattable<std::remove_cvref_t<std::invoke_result_t<Member T::*&, const T &>>, char>
+TableColumnSpec<T> tableColumn(std::string_view header, Member T::*member, std::int32_t width = 1) {
+  return tableColumn<T, Member T::*>(header, member, width);
+}
+
 namespace detail {
 template <class T, std::size_t N, std::size_t... I>
 std::expected<std::array<TableColumn<T>, N>, TextError>
@@ -195,8 +231,9 @@ assembleColumns(WidthPolicy policy, std::array<TableColumnSpec<T>, N> specs, std
       return std::unexpected(header.error());
     }
 
+    auto format = specs[index].prepareFormat ? specs[index].prepareFormat(policy) : std::move(specs[index].format);
     return TableColumn<T>{
-      {index + 1, INITIAL_COLUMN_GENERATION}, std::move(*header), specs[index].width, std::move(specs[index].format)};
+      {index + 1, INITIAL_COLUMN_GENERATION}, std::move(*header), specs[index].width, std::move(format)};
   }(I)...};
 
   for (const auto &column : built) {

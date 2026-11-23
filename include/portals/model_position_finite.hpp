@@ -6,6 +6,42 @@
 #include <portals/model_position.hpp>
 
 namespace portals {
+namespace detail {
+/// @cond INTERNAL
+template <class T>
+std::expected<PositionHistoryReply, SourceError> modelPositionHistory(const ModelSnapshot<T> &snapshot,
+                                                                      std::uint64_t revision) noexcept {
+  try {
+    auto owner = snapshot.positionHistory();
+    if (!owner) {
+      return PositionHistoryReply{};
+    }
+    auto reply = owner->changesFrom(revision);
+    if (!reply) {
+      return std::unexpected(reply.error());
+    }
+    if ((reply->state != PositionResolution::EXACT && reply->state != PositionResolution::UNSUPPORTED &&
+         reply->state != PositionResolution::UNAVAILABLE) ||
+        (reply->state == PositionResolution::EXACT && revision < snapshot.revision() && !reply->changes) ||
+        (reply->state != PositionResolution::EXACT && reply->changes)) {
+      return std::unexpected(SourceError::INVALID_REPLY);
+    }
+    if (reply->changes &&
+        (reply->changes.fromRevision() != revision || reply->changes.toRevision() != snapshot.revision() ||
+         reply->changes.afterCount() != snapshot.rowCount())) {
+      return std::unexpected(SourceError::INVALID_REPLY);
+    }
+    return reply;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(SourceError::NO_MEMORY);
+  } catch (...) {
+    return std::unexpected(SourceError::CALLBACK_FAILED);
+  }
+}
+
+/// @endcond
+} // namespace detail
+
 /** @brief Read-only finite model navigation without retaining the source or any row payload.
  * Snapshot ownership remains with the model/application. Each call temporarily locks
  * the weak snapshot, returning CLOSED after its last owner retires. Calls may run
@@ -109,7 +145,7 @@ public:
     }
 
     if (position.kind == PositionKind::GAP) {
-      return resolveGap(reply, position, *snapshot);
+      return resolveGap(reply, position, *snapshot, stop);
     }
 
     // Provider calls may release external owners. Retain the complete remaining
@@ -165,13 +201,29 @@ private:
   }
 
   std::expected<PositionReply, SourceError> resolveGap(PositionReply reply, ModelPosition position,
-                                                       const ModelSnapshot<T> &snapshot) const noexcept {
+                                                       const ModelSnapshot<T> &snapshot,
+                                                       std::stop_token stop) const noexcept {
+    auto changes = changes_;
     if (position.revision != snapshot.revision()) {
-      if (!changes_ || changes_.fromRevision() != position.revision) {
-        return reply;
+      if (!changes || changes.fromRevision() != position.revision) {
+        auto history = detail::modelPositionHistory(snapshot, position.revision);
+        if (stop.stop_requested()) {
+          return std::unexpected(SourceError::CANCELLED);
+        }
+        if (!history) {
+          return std::unexpected(history.error());
+        }
+        if (history->state == PositionResolution::UNAVAILABLE) {
+          reply.state = PositionResolution::UNAVAILABLE;
+          return reply;
+        }
+        changes = std::move(history->changes);
+        if (!changes) {
+          return reply;
+        }
       }
 
-      auto mapped = changes_.map(position);
+      auto mapped = changes.map(position);
 
       if (!mapped) {
         return std::unexpected(mapped.error());
@@ -193,7 +245,8 @@ private:
 
   static std::expected<PositionReply, SourceError> resolveItem(PositionReply reply, ModelPosition position,
                                                                const std::shared_ptr<const ModelSnapshot<T>> &snapshot,
-                                                               const PositionChangeMap &changes, std::stop_token stop) {
+                                                               const PositionChangeMap &provided,
+                                                               std::stop_token stop) {
     const auto found = snapshot->locateRow(position.row);
 
     if (stop.stop_requested()) {
@@ -210,8 +263,23 @@ private:
     auto outcome = PositionResolution::EXACT;
 
     if (found.state == RowLookupState::NOT_FOUND) {
+      auto changes = provided;
       if (!changes || changes.fromRevision() != position.revision) {
-        return reply;
+        auto history = detail::modelPositionHistory(*snapshot, position.revision);
+        if (stop.stop_requested()) {
+          return std::unexpected(SourceError::CANCELLED);
+        }
+        if (!history) {
+          return std::unexpected(history.error());
+        }
+        if (history->state == PositionResolution::UNAVAILABLE) {
+          reply.state = PositionResolution::UNAVAILABLE;
+          return reply;
+        }
+        changes = std::move(history->changes);
+        if (!changes) {
+          return reply;
+        }
       }
 
       auto mapped = changes.map(position);

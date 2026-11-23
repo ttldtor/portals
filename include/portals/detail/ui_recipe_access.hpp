@@ -65,9 +65,59 @@ struct Access {
     if (!source) {
       return;
     }
-    (*source)->retire();
     std::erase(scene.models_, *source);
     model = {};
+    // Retiring a user preparation callback can destroy the scene. The source
+    // is already detached, and its strong local owner needs no scene access.
+    (*source)->retire();
+  }
+
+  static bool modelSceneClosed(const ManagedScene &scene) noexcept {
+    return scene.closed_;
+  }
+
+  template <class T> static void ownedModel(ManagedModel<T> model) {
+    if (auto source = model.lock()) {
+      (*source)->sinkOnly = true;
+    }
+  }
+
+  template <class T>
+  static std::expected<void, ManagedError> applyOwnedModel(ManagedScene &scene, ManagedModel<T> model,
+                                                           std::shared_ptr<const ModelSnapshot<T>> snapshot) {
+    return scene.applyOwnedSnapshot(std::move(model), std::move(snapshot));
+  }
+
+  template <class T>
+  static std::expected<ManagedModel<T>, ManagedError> navigationModel(ManagedScene &scene,
+                                                                      const ManagedNavigation &navigation) {
+    auto record = navigation.lock();
+    auto source =
+      record ? std::dynamic_pointer_cast<portals::detail::ManagedModelSourceOf<T>>((*record)->model.lock()) : nullptr;
+    if (!source || source->retired || (*record)->scene != scene.root_.id()) {
+      return std::unexpected(ManagedError{
+        ManagedPhase::STATE, scene.root_.id(), record ? TreeError::INVALID_ARGUMENT : record.error(), {}, {}});
+    }
+    ManagedModel<T> result;
+    result.source_ = source;
+    result.owner_ = scene.owner_;
+    return result;
+  }
+
+  static void retireColdNavigation(ManagedScene &scene, ManagedNavigation navigation) noexcept {
+    auto record = navigation.record_.lock();
+    if (!record || !scene.navigation_) {
+      return;
+    }
+    auto current = record->current.model_.lock();
+    auto selection = record->selection.model_.lock();
+    auto reading = record->reading.model_.lock();
+    record->closed = true;
+    std::erase(scene.navigation_->contexts, record);
+    std::erase_if(scene.properties_, [&](const auto &property) {
+      return property == current || property == selection || property == reading;
+    });
+    record->close();
   }
 
   template <class T> static void retireChoiceState(ManagedScene &scene, ManagedState<T> &state) noexcept {

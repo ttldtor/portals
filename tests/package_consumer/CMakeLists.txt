@@ -2,6 +2,10 @@ cmake_minimum_required(VERSION 3.24)
 project(PortalsPackageConsumer LANGUAGES CXX)
 
 find_package(Portals 0.2 CONFIG REQUIRED)
+add_library(portals_ui_model_header_consumer OBJECT ui_model_header.cpp)
+target_link_libraries(portals_ui_model_header_consumer PRIVATE portals::core)
+set_target_properties(portals_ui_model_header_consumer PROPERTIES CXX_EXTENSIONS OFF)
+
 option(PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO
   "Use GCC backtrace-only Debug information; preserve assertions and the SDK producer" OFF)
 if(PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO)
