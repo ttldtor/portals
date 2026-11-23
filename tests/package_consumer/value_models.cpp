@@ -2,6 +2,8 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/ui.hpp>
 
+#include <array>
+
 using namespace portals;
 
 struct Record {
@@ -71,6 +73,49 @@ int main() {
   }
   if (!(*scene)->close()) {
     return 10;
+  }
+
+  auto rowsApp = Application::create();
+  if (!rowsApp) {
+    return 20;
+  }
+  auto rowsScene = ManagedScene::create(**rowsApp);
+  if (!rowsScene) {
+    return 21;
+  }
+  auto rows = ui::model(std::array{4, 5});
+  auto navigation = ui::navigation(rows);
+  if (!ui::mount(**rowsScene, ui::virtualList(navigation))) {
+    return 22;
+  }
+  auto current = navigation.currentRow();
+  if (!current || *current) {
+    return 23;
+  }
+  if (!(*rowsScene)->prepare(**rowsApp, {40, 10})) {
+    return 24;
+  }
+  auto handle = rows.managed();
+  if (!handle) {
+    return 25;
+  }
+  auto before = detail::ManagedModelAccess::snapshot(*handle, (*rowsScene)->root().id());
+  if (!before) {
+    return 26;
+  }
+  const auto id = (*before)->read({0, 1}).rows[0].id;
+  if (!rows.update(id, 7) || !rows.row(id, 9) ||
+      !(*rowsScene)->prepare(**rowsApp, {40, 10})) {
+    return 27;
+  }
+  auto after = detail::ManagedModelAccess::snapshot(*handle, (*rowsScene)->root().id());
+  if (!after || (*after)->read({0, 1}).rows[0].id != id ||
+      (*after)->read({0, 1}).rows[0].value != 9 ||
+      (*before)->read({0, 1}).rows[0].value != 4) {
+    return 28;
+  }
+  if (!(*rowsScene)->close() || navigation.currentRow()) {
+    return 29;
   }
 
   return 0;

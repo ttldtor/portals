@@ -120,6 +120,7 @@ Equal values remain distinct rows. After mount, its checked UI-thread operations
 | `model.erase(first, count)` | Remove a range; `count` defaults to 1. |
 | `model.move(first, count, destination)` | Preserve identities; destination is the index **after removing** the range. |
 | `model.clear()` | Remove all rows. |
+| `model.update(id, value)` | Replace one owned row value while preserving its identity and order. |
 
 Handle the result before updating dependent application state. Allocation/admission
 failure preserves the installed snapshot. Empty erases, an unchanged move and clearing
@@ -128,13 +129,71 @@ successful structural changes advance a positive revision. Owning a value preser
 its normal C++ semantics: a `string_view` or reference inside it still borrows its target.
 
 The default capacity is 4096 rows, configurable with `CollectionLimits`. The adapter
-retains the latest 1024 scalar changes by default, configurable with `PositionMapOptions`.
+retains the latest 1024 structural changes by default, configurable with `PositionMapOptions`.
 Further edits keep working. A still-present identity resolves EXACT even after its old
 revision leaves that proof window. For a missing identity older than the retained proof,
 restoration reports UNAVAILABLE and keeps the checkpoint; it does not guess a neighbor.
 Within the window a proven deletion can resolve NEAREST. This proof retention is separate
 from the view/context checkpoint budget above. Provider models do not acquire these
 owning mutations; their checked mutation calls return INVALID_ARGUMENT.
+
+### Update a row and keep your place {#view-models-update-row}
+
+Use `model.update(id, value)` for a checked replacement of an existing owned row.
+Obtain the complete `RowId` from that model or its navigation; it is local to the
+source, not a row number or a globally unique key. An unknown, erased or
+wrong-generation identity reports a typed error. The operation never writes to a
+neighbor when its target is missing.
+
+`navigation.currentRow()` reads the existing current channel as
+`expected<optional<RowId>, ManagedError>`. An empty current is a successful
+`nullopt`; a cold, closed or wrong-thread handle retains its checked error.
+It does not register a binding or load a row. Keep the navigation and mutation
+source matched. A RowId does not encode its source: equal value/generation pairs
+can be accepted by another model, and `update` cannot detect that mix-up. Use the
+key with the model currently associated with the navigation.
+
+A successful replacement keeps the row's identity, ordinal and the shared current,
+selection and reading anchor. Earlier snapshots retain their original value.
+For equality-comparable rows, replacing a value with an equal value is a no-op.
+Other copyable rows can publish a revision on each explicit replacement. A value-only
+revision does not consume the retained structural-change history.
+
+The short `model.row(id, value)` form performs the same update and reports failures
+through the scene's existing diagnostics. It returns `true` on success. Use the
+checked form when an event handler can return the result directly, or when later
+application state depends on acceptance:
+
+```cpp
+// Inside a UI handler, with an identity obtained from this model:
+stops.row(id, Stop{"Prague", 2});
+
+// An expected-returning handler can return the original checked result:
+return stops.update(id, Stop{"Vienna", 3});
+```
+
+Allocation, copy, validation or admission failure before commit preserves the
+installed snapshot. A delivery error after acceptance does not undo the accepted
+value. Provider-backed models keep their own write capabilities; this operation
+neither loads their rows nor gives a read-only source permission to write.
+
+This API edits a small owned sequence. Staging a new immutable snapshot copies its
+rows and rebuilds its index; it is not a constant-time write into an arbitrarily
+large data source. Use the provider path below for externally stored or unbounded
+models. Conditional external writes and edit sessions are separate capabilities.
+
+#### Complete itinerary example
+
+Choose a stop in either view, then press F2/F3 or use the destination buttons.
+Both views update the same row and retain their current position. Tab changes
+focus; F10 or Ctrl+C exits. A stop remains the same itinerary entry even when its
+destination changes.
+
+![Replace an itinerary stop while both views retain their place](images/owned-rows.gif)
+
+[Complete source](examples/guide_owned_rows.cpp):
+
+\include docs/examples/guide_owned_rows.cpp
 
 ### Keep the provider path for large data
 

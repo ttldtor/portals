@@ -2,6 +2,9 @@
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/ui_controls.hpp>
 
+#include <concepts>
+#include <expected>
+#include <optional>
 #include <span>
 
 template <class T>
@@ -21,6 +24,14 @@ static_assert(requires(portals::ui::Ref<portals::Label> label, portals::ui::Ref<
   portals::ui::button(button, {});
   portals::ui::label("body").framed("ascii", {});
   portals::ui::label("body").framed(frame, "ascii", {});
+});
+
+static_assert(requires(const portals::ui::Model<int> &model,
+                       const portals::ui::Navigation<int> &navigation, portals::RowId id) {
+  { model.update(id, 1) } -> std::same_as<std::expected<void, portals::ManagedError>>;
+  { model.row(id, 1) } -> std::same_as<bool>;
+  { navigation.currentRow() }
+    -> std::same_as<std::expected<std::optional<portals::RowId>, portals::ManagedError>>;
 });
 
 void constructValueCaptions() {

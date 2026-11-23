@@ -7,6 +7,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Owned sequence models support checked `update(RowId, value)` and collected
+  `row(RowId, value)`. Replacement keeps the row identity and navigation position;
+  equal comparable values are silent. `navigation.currentRow()` reads the existing
+  current identity without registering another binding. Value-only revisions preserve structural
+  history retention. The list/table guide includes a complete itinerary example.
+
 - Scalar values use cold `ui::model` declarations with typed `.value()` and `.field(...)`
   access. Labels, buttons and ordinary Border titles share value projections, live
   formatting and checked source replacement. Compatible projected bindings retain

@@ -1265,7 +1265,7 @@ if(WIN32)
   target_sources(portals_docs_view_models_consumer PRIVATE no_dialogs.cpp)
 endif()
 
-foreach(guide IN ITEMS value_models value_captions)
+foreach(guide IN ITEMS value_models value_captions owned_rows)
   add_executable(portals_docs_${guide}_consumer docs/examples/guide_${guide}.cpp)
   target_link_libraries(portals_docs_${guide}_consumer PRIVATE portals::core)
   set_target_properties(portals_docs_${guide}_consumer PROPERTIES CXX_EXTENSIONS OFF)

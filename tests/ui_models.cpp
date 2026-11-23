@@ -260,6 +260,271 @@ TEST_CASE("owned sequence operations preserve duplicate-valued identities and ne
   CHECK(original->read({0, 3}).rows[1].value == 10);
 }
 
+TEST_CASE("current row reads the existing navigation channel without mounting an alias") {
+  Fixture fixture;
+  auto model = ui::model(std::array{10, 20});
+  auto navigation = ui::navigation(model);
+  const auto cold = navigation.currentRow();
+  REQUIRE_FALSE(cold);
+  CHECK(std::get<TreeError>(cold.error().cause) == TreeError::CLOSED);
+  take(ui::mount(*fixture.scene, ui::virtualList(navigation)));
+  CHECK_FALSE(take(navigation.currentRow()));
+  const auto before = snapshot(fixture, model);
+  const auto id = before->read({1, 1}).rows[0].id;
+  auto context = take(navigation.managed());
+  take(context.navigate(id));
+  CHECK(take(navigation.currentRow()) == id);
+  take(model.update(*take(navigation.currentRow()), 25));
+  CHECK(snapshot(fixture, model)->read({1, 1}).rows[0].value == 25);
+  std::expected<std::optional<RowId>, ManagedError> wrongThread;
+  std::thread worker([&] { wrongThread = navigation.currentRow(); });
+  worker.join();
+  REQUIRE_FALSE(wrongThread);
+  CHECK(std::get<TreeError>(wrongThread.error().cause) == TreeError::WRONG_THREAD);
+  take(context.clearCurrent());
+  CHECK_FALSE(take(navigation.currentRow()));
+  take(fixture.scene->close());
+  const auto closed = navigation.currentRow();
+  REQUIRE_FALSE(closed);
+  CHECK(std::get<TreeError>(closed.error().cause) == TreeError::CLOSED);
+}
+
+TEST_CASE("owned row update keeps its identity and previous snapshot") {
+  Fixture fixture;
+  auto model = ui::model(std::array{10, 20});
+  take(ui::mount(*fixture.scene, ui::virtualList(model)));
+  const auto before = snapshot(fixture, model);
+  const auto id = before->read({1, 1}).rows[0].id;
+  take(model.update(id, 25));
+  const auto after = snapshot(fixture, model);
+  CHECK(after->revision() == before->revision() + 1);
+  CHECK(after->read({1, 1}).rows[0].id == id);
+  CHECK(after->read({1, 1}).rows[0].value == 25);
+  CHECK(before->read({1, 1}).rows[0].value == 20);
+}
+
+TEST_CASE("owned row update validates exact keys and collects the same failure once") {
+  Fixture fixture;
+  auto model = ui::model(std::array{10, 20});
+  CHECK_FALSE(model.update({1, 1}, 30));
+  take(ui::mount(*fixture.scene, ui::virtualList(model)));
+  const auto before = snapshot(fixture, model);
+  const auto id = before->read({0, 1}).rows[0].id;
+  take(model.update(id, 10));
+  CHECK(snapshot(fixture, model) == before);
+
+  for (const auto key : std::array{RowId{}, RowId{999, 1}, RowId{id.value, id.generation + 1}}) {
+    const auto rejected = model.update(key, 30);
+    REQUIRE_FALSE(rejected);
+    CHECK(std::get<TreeError>(rejected.error().cause) == TreeError::INVALID_ARGUMENT);
+    CHECK(snapshot(fixture, model) == before);
+  }
+
+  CHECK_FALSE(model.row({999, 1}, 30));
+  const auto diagnostics = take(fixture.scene->diagnostics());
+  REQUIRE(diagnostics.errors.size() == 1);
+  CHECK(std::get<TreeError>(diagnostics.errors[0].error.cause) == TreeError::INVALID_ARGUMENT);
+  take(model.erase(0));
+  take(model.insert(0, 10));
+  const auto reused = snapshot(fixture, model);
+  CHECK(reused->read({0, 1}).rows[0].id != id);
+  CHECK_FALSE(model.update(id, 30));
+  CHECK(snapshot(fixture, model) == reused);
+  CHECK(model.row(reused->read({0, 1}).rows[0].id, 40));
+  take(fixture.scene->close());
+  const auto closed = model.update(id, 30);
+  REQUIRE_FALSE(closed);
+  CHECK(std::get<TreeError>(closed.error().cause) == TreeError::CLOSED);
+}
+
+TEST_CASE("owned update preserves thread admission and read-only provider capabilities") {
+  Fixture fixture;
+  auto model = ui::model(std::array{1});
+  auto provider = std::make_shared<CountingRows>();
+  auto readOnly = ui::model<int>(provider);
+  take(ui::mount(*fixture.scene, ui::row(ui::virtualList(model), ui::virtualList(readOnly))));
+  const auto before = snapshot(fixture, model);
+  const auto id = before->read({0, 1}).rows[0].id;
+  std::expected<void, ManagedError> rejected;
+  std::thread worker([&] {
+    rejected = model.update(id, 2);
+  });
+  worker.join();
+  REQUIRE_FALSE(rejected);
+  CHECK(std::get<TreeError>(rejected.error().cause) == TreeError::WRONG_THREAD);
+  CHECK(snapshot(fixture, model) == before);
+  const auto unavailable = readOnly.update(id, 2);
+  REQUIRE_FALSE(unavailable);
+  CHECK(std::get<TreeError>(unavailable.error().cause) == TreeError::INVALID_ARGUMENT);
+  CHECK(provider->reads == 0);
+}
+
+TEST_CASE("later view delivery failure keeps an accepted owned row replacement") {
+  Fixture fixture;
+  auto model = ui::model(std::array{1});
+  bool rejectDelivery{};
+  ManagedViewHandler<int> prepared = [&](const auto &, const auto &) -> std::expected<void, TreeError> {
+    return rejectDelivery ? std::unexpected(TreeError::CALLBACK_FAILED) : std::expected<void, TreeError>{};
+  };
+  ui::Ref<VirtualList<int>> list;
+  take(ui::mount(*fixture.scene, ui::virtualList(model).reference(list)));
+  take(fixture.scene->setModel(list.node(), take(model.managed()), std::optional(prepared)));
+  const auto before = snapshot(fixture, model);
+  const auto id = before->read({0, 1}).rows[0].id;
+  rejectDelivery = true;
+  take(model.update(id, 2));
+  const auto accepted = snapshot(fixture, model);
+  CHECK(accepted->revision() == before->revision() + 1);
+  CHECK(accepted->read({0, 1}).rows[0].value == 2);
+  const auto bounds = take(CellRect::from({}, {40, 12}));
+  std::optional<LayoutSnapshot> layout;
+  take(fixture.app->tree().frame([&] {
+    take(layoutTree(fixture.app->tree(), fixture.app->root(), bounds, bounds));
+    layout = take(LayoutSnapshot::capture(fixture.app->tree(), fixture.app->root()));
+  }));
+  const auto failedDelivery = fixture.scene->prepareViews(*fixture.app, *layout);
+  REQUIRE_FALSE(failedDelivery);
+  CHECK(failedDelivery.error() == TreeError::CALLBACK_FAILED);
+  const auto retained =
+    take(portals::detail::ManagedModelAccess::snapshot(take(model.managed()), fixture.scene->root().id()));
+  CHECK(retained == accepted);
+  CHECK(before->read({0, 1}).rows[0].value == 1);
+}
+
+TEST_CASE("opaque owned rows publish a replacement without an equality requirement") {
+  Fixture fixture;
+  auto model = ui::model(std::array{Item{"A", 1}});
+  take(ui::mount(*fixture.scene, ui::virtualList(model, &Item::name)));
+  const auto before = snapshot(fixture, model);
+  const auto id = before->read({0, 1}).rows[0].id;
+  take(model.update(id, Item{"A", 1}));
+  const auto after = snapshot(fixture, model);
+  CHECK(after->revision() == before->revision() + 1);
+  CHECK(after->read({0, 1}).rows[0].id == id);
+}
+
+TEST_CASE("value revisions preserve navigation channels and structural proof retention") {
+  Fixture fixture;
+  auto model =
+    ui::model(std::array{10, 20, 30}, CollectionLimits{}, ModelOptions{}, PositionMapOptions{.maxChanges = 2});
+  auto navigation = ui::navigation(model, {.readingAnchor = true});
+  ui::Ref<VirtualList<int>> list;
+  take(ui::mount(*fixture.scene, ui::virtualList(navigation).reference(list)));
+  const auto before = snapshot(fixture, model);
+  const auto rows = before->read({0, 3}).rows;
+  auto context = take(navigation.managed());
+  const auto resource = take(take(context.current()).snapshot())->value.resource;
+  const auto deleted = take(ModelBookmark::create(resource, {PositionKind::ITEM, rows[1].id, 1, before->revision()}));
+  take(context.navigate(rows[0].id));
+  take(context.setSelection(std::array{rows[0].id, rows[2].id}));
+  take(context.setReadingAnchor(
+    take(ModelBookmark::create(resource, {PositionKind::ITEM, rows[2].id, 2, before->revision()}))));
+  fixture.prepare();
+
+  for (int value = 11; value < 16; ++value) {
+    take(model.update(rows[0].id, value));
+  }
+
+  const auto identity = snapshot(fixture, model);
+  const auto originalAnchor =
+    take(ModelBookmark::create(resource, {PositionKind::ITEM, rows[2].id, 2, before->revision()}));
+  const auto identityResolver = take(FinitePositionResolver<int>::create(resource, resource.identity, identity));
+  const auto resolvedAnchor = take(identityResolver.resolve({resource.identity, identity->revision(), 1, originalAnchor}));
+  CHECK(resolvedAnchor.state == PositionResolution::EXACT);
+  CHECK(resolvedAnchor.position.row == rows[2].id);
+  const auto identityProof = take(identity->positionHistory()->changesFrom(before->revision()));
+  CHECK(identityProof.state == PositionResolution::EXACT);
+  CHECK(identityProof.proofFloor == before->revision());
+  const auto gap = take(identityProof.changes.map({PositionKind::GAP, {}, 1, before->revision()}));
+  CHECK(gap.offset == 1);
+  CHECK_FALSE(gap.removed);
+  fixture.prepare();
+  CHECK(take(take(context.current()).snapshot())->value.row == rows[0].id);
+  const auto selection = take(take(context.selection()).snapshot())->value;
+  REQUIRE(selection.rows().size() == 2);
+  CHECK(selection.rows()[0] == rows[0].id);
+  CHECK(selection.rows()[1] == rows[2].id);
+  REQUIRE(take(context.readingBookmark()));
+  CHECK(take(context.readingBookmark())->position().row == rows[2].id);
+  CHECK(selection.resolution() == PositionResolution::EXACT);
+
+  take(model.erase(1));
+  const auto afterErase = snapshot(fixture, model);
+  const auto gapRevision = afterErase->revision();
+
+  for (int value = 16; value < 21; ++value) {
+    take(model.update(rows[0].id, value));
+  }
+
+  auto current = snapshot(fixture, model);
+  auto resolver = take(FinitePositionResolver<int>::create(resource, resource.identity, current));
+  CHECK(take(resolver.resolve({resource.identity, current->revision(), 1, deleted})).state ==
+        PositionResolution::NEAREST);
+  take(model.move(0, 1, 1));
+  take(model.move(0, 1, 1));
+  current = snapshot(fixture, model);
+  CHECK(take(current->positionHistory()->changesFrom(before->revision())).state == PositionResolution::UNAVAILABLE);
+  const auto retained = take(current->positionHistory()->changesFrom(gapRevision));
+  CHECK(retained.state == PositionResolution::EXACT);
+  CHECK(retained.proofFloor == gapRevision);
+  const auto mapped = take(retained.changes.map({PositionKind::GAP, {}, 1, gapRevision}));
+  CHECK_FALSE(mapped.removed);
+}
+
+struct EqualityValue {
+  int number;
+  std::shared_ptr<LifetimeHookState> state;
+
+  bool operator==(const EqualityValue &other) const {
+    if (state->onCopy) {
+      auto action = std::move(state->onCopy);
+      action();
+    }
+
+    return number == other.number;
+  }
+};
+
+TEST_CASE("owned update equality runs under the mutation lifetime and reentry boundary") {
+  Fixture fixture;
+  auto state = std::make_shared<LifetimeHookState>();
+  auto model = ui::model(std::array{EqualityValue{1, state}});
+  take(ui::mount(*fixture.scene, ui::virtualList(model, &EqualityValue::number)));
+  const auto before = snapshot(fixture, model);
+  const auto id = before->read({0, 1}).rows[0].id;
+  const EqualityValue replacement{2, state};
+
+  SUBCASE("equality failure rejects before publication") {
+    state->onCopy = [] {
+      throw std::runtime_error("comparison failed");
+    };
+    const auto rejected = model.update(id, replacement);
+    REQUIRE_FALSE(rejected);
+    CHECK(std::get<TreeError>(rejected.error().cause) == TreeError::CALLBACK_FAILED);
+    CHECK(snapshot(fixture, model) == before);
+  }
+
+  SUBCASE("nested mutation is rejected and the outer update succeeds") {
+    state->onCopy = [&] {
+      const auto nested = model.update(id, replacement);
+      REQUIRE_FALSE(nested);
+      CHECK(std::get<TreeError>(nested.error().cause) == TreeError::WOULD_BLOCK);
+    };
+    take(model.update(id, replacement));
+    CHECK(snapshot(fixture, model)->revision() == before->revision() + 1);
+  }
+
+  SUBCASE("scene close also wins over an equality no-op") {
+    state->onCopy = [&] {
+      take(fixture.scene->close());
+    };
+    const auto rejected = model.update(id, EqualityValue{1, state});
+    REQUIRE_FALSE(rejected);
+    CHECK(std::get<TreeError>(rejected.error().cause) == TreeError::CLOSED);
+    CHECK(before->read({0, 1}).rows[0].value.number == 1);
+  }
+}
+
 TEST_CASE("owned sequence admission and no-ops preserve its installed revision") {
   Fixture fixture;
   auto model = ui::model(std::array{1, 2}, {.maxRows = 2});
@@ -402,9 +667,36 @@ struct CopyValue {
   }
 
   CopyValue(CopyValue &&) noexcept = default;
+
+  ~CopyValue() {
+    if (state && state->onDestroy) {
+      auto action = std::move(state->onDestroy);
+      action();
+    }
+  }
   int value;
   std::shared_ptr<LifetimeHookState> state;
 };
+
+TEST_CASE("collected row failure keeps its original scene after a copy rebinds the descriptor") {
+  Fixture fixture;
+  auto state = std::make_shared<LifetimeHookState>();
+  auto model = ui::model(std::array{CopyValue(1, state)});
+  take(ui::mount(*fixture.scene, ui::virtualList(model, &CopyValue::value)));
+  const auto retainedModel = model;
+  const auto before = snapshot(fixture, retainedModel);
+  const auto id = before->read({0, 1}).rows[0].id;
+  const CopyValue replacement(2, state);
+  state->onCopy = [&] {
+    model = {};
+    throw std::runtime_error("copy rebound its descriptor");
+  };
+  CHECK_FALSE(model.row(id, replacement));
+  CHECK(snapshot(fixture, retainedModel) == before);
+  const auto diagnostics = take(fixture.scene->diagnostics());
+  REQUIRE(diagnostics.errors.size() == 1);
+  CHECK(std::get<TreeError>(diagnostics.errors[0].error.cause) == TreeError::CALLBACK_FAILED);
+}
 
 TEST_CASE("a mutation copy allocation failure retains the previous immutable source") {
   Fixture fixture;
@@ -416,7 +708,15 @@ TEST_CASE("a mutation copy allocation failure retains the previous immutable sou
     throw std::bad_alloc();
   };
   const CopyValue extra(3, state);
-  const auto rejected = model.insert(0, extra);
+  std::expected<void, ManagedError> rejected;
+
+  SUBCASE("insert copy") {
+    rejected = model.insert(0, extra);
+  }
+
+  SUBCASE("replacement copy") {
+    rejected = model.update(before->read({0, 1}).rows[0].id, extra);
+  }
   REQUIRE_FALSE(rejected);
   CHECK(std::get<TreeError>(rejected.error().cause) == TreeError::NO_MEMORY);
   CHECK(snapshot(fixture, model) == before);
@@ -426,6 +726,44 @@ TEST_CASE("a mutation copy allocation failure retains the previous immutable sou
   CHECK(after->read({0, 1}).rows[0].value.value == 3);
 }
 
+TEST_CASE("owned replacement row copies reject nested mutation before publication") {
+  Fixture fixture;
+  auto state = std::make_shared<LifetimeHookState>();
+  auto model = ui::model(std::array{CopyValue(1, state)});
+  take(ui::mount(*fixture.scene, ui::virtualList(model, &CopyValue::value)));
+  const auto before = snapshot(fixture, model);
+  const auto id = before->read({0, 1}).rows[0].id;
+  const CopyValue replacement(2, state);
+  state->onCopy = [&] {
+    const auto nested = model.update(id, replacement);
+    REQUIRE_FALSE(nested);
+    CHECK(std::get<TreeError>(nested.error().cause) == TreeError::WOULD_BLOCK);
+  };
+  take(model.update(id, replacement));
+  CHECK(snapshot(fixture, model)->read({0, 1}).rows[0].value.value == 2);
+}
+
+TEST_CASE("replacement staging destruction observes committed owner metadata before reentry") {
+  Fixture fixture;
+  auto state = std::make_shared<LifetimeHookState>();
+  auto model = ui::model(std::array{CopyValue(1, state)});
+  take(ui::mount(*fixture.scene, ui::virtualList(model, &CopyValue::value)));
+  const auto before = snapshot(fixture, model);
+  const auto id = before->read({0, 1}).rows[0].id;
+  const CopyValue replacement(2, state);
+  const CopyValue nested(3, state);
+  bool called{};
+  state->onDestroy = [&] {
+    called = true;
+    take(model.update(id, nested));
+  };
+  take(model.update(id, replacement));
+  CHECK(called);
+  const auto after = snapshot(fixture, model);
+  CHECK(after->revision() == before->revision() + 2);
+  CHECK(after->read({0, 1}).rows[0].value.value == 3);
+  CHECK(before->read({0, 1}).rows[0].value.value == 1);
+}
 TEST_CASE("a mutation row copy may destroy the scene before publication") {
   auto app = take(Application::create());
   auto scene = take(ManagedScene::create(*app));
@@ -438,7 +776,15 @@ TEST_CASE("a mutation row copy may destroy the scene before publication") {
     scene.reset();
   };
   const CopyValue extra(2, state);
-  const auto rejected = model.insert(0, extra);
+  std::expected<void, ManagedError> rejected;
+
+  SUBCASE("insert copy") {
+    rejected = model.insert(0, extra);
+  }
+
+  SUBCASE("replacement copy") {
+    rejected = model.update(retained->read({0, 1}).rows[0].id, extra);
+  }
   REQUIRE_FALSE(rejected);
   CHECK_FALSE(scene);
   CHECK(std::get<TreeError>(rejected.error().cause) == TreeError::CLOSED);
@@ -473,7 +819,8 @@ TEST_CASE("a large provider keeps noncopyable domain rows and no implicit regist
   CHECK(provider->reads == 0);
   CHECK(model.managed());
   const MoveOnly value;
-  for (const auto &rejected : std::array{model.clear(), model.erase(0), model.move(0, 1, 0), model.insert(0, value)}) {
+  for (const auto &rejected : std::array{model.clear(), model.erase(0), model.move(0, 1, 0), model.insert(0, value),
+                                         model.update({1, 1}, value)}) {
     REQUIRE_FALSE(rejected);
     CHECK(std::get<TreeError>(rejected.error().cause) == TreeError::INVALID_ARGUMENT);
   }
