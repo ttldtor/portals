@@ -22,7 +22,7 @@ Read [current limitations](limitations.md) for qualified platforms and runtime b
 
 - [Declarative composition](declarative-ui.md), [scene and recipe reference](declarative-reference.md), [application runner](application.md), [managed controls](managed-controls.md).
 - [Command-line startup](cli.md): parse arguments before opening the terminal and read process snapshots.
-- [Bindings and events](bindings-guide.md), [properties](property.md), [control references](text-property.md).
+- [Bindings and events](bindings-guide.md), [value models](value-models.md), [properties](property.md), [control references](text-property.md).
 - [Input](input.md), [focus and routing](focus.md), [diagnostics](diagnostics.md).
 - [Scene loading](scene-loading-guide.md).
 

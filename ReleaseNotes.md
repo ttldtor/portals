@@ -7,6 +7,21 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Scalar values use cold `ui::model` declarations with typed `.value()` and `.field(...)`
+  access. Labels, buttons and ordinary Border titles share value projections, live
+  formatting and checked source replacement. Compatible projected bindings retain
+  their projection; computed captions replace their complete expression. Optional
+  bindings own their observation state without adding storage to unbound controls.
+  Localized live expressions accept explicit resource resolvers and language
+  dependencies. Native ScrollArea-owned frame titles remain static.
+
+- `navigation.current()` is available as a read-only scalar source. The owning
+  `ui::bySource` projection maps its accepted resource to bounded domain metadata
+  without reading rows or registering unselected sources. The model-switching guide
+  now derives its region caption from accepted navigation instead of assigning a
+  separate caption after a switch. Use matching headers and library when rebuilding
+  consumers; managed caption binding payloads have changed internally.
+
 - End preparation for long wrapped text reuses one bounded working state across
   capped background quanta and skips printable ASCII rows that cannot remain
   visible. `DocumentViewConfig.workBytes` now describes one preparation quantum;

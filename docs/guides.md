@@ -22,6 +22,7 @@ The [first application](first-application.md) develops a quick-note form in four
 | Change the palette | [Themes](themes-guide.md) |
 | Load a scene from text or a file | [Scene loading](scene-loading-guide.md) |
 | Connect events and state | [Bindings and events](bindings-guide.md) |
+| Bind numbers, records and live captions | [Value models](value-models.md) |
 | Arrange controls | [Layout](layout.md) |
 | Place controls in cells | [Grid and overlay](grid.md) |
 | Change a control through a reference | [Control references](text-property.md) |

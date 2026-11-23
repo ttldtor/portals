@@ -22,7 +22,7 @@
 
 - [Декларативная композиция](declarative-ui.md), [справка по сценам и рецептам](declarative-reference.md), [запуск приложения](application.md), [управляемые контролы](managed-controls.md).
 - [Командная строка](cli.md): разбор аргументов до открытия терминала и снимки данных процесса.
-- [Привязки и события](bindings-guide.md), [свойства](property.md), [ссылки на контролы](text-property.md).
+- [Привязки и события](bindings-guide.md), [модели значений](value-models.md), [свойства](property.md), [ссылки на контролы](text-property.md).
 - [Ввод](input.md), [фокус и маршрутизация](focus.md), [диагностика](diagnostics.md).
 - [Загрузка сцен](scene-loading-guide.md).
 
