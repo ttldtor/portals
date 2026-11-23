@@ -666,6 +666,69 @@ TEST_CASE("wrapped ASCII tail matches the scalar path through Unicode and source
   }
 }
 
+TEST_CASE("ASCII tail discards hidden rows with exact wrap phase and sparse checkpoints") {
+  constexpr std::uint64_t SOURCE_BYTES = 80 * 1024 + 37;
+  constexpr std::uint64_t CHECKPOINT_BYTES = 64 * 1024;
+  constexpr std::size_t VIEWPORT_ROWS = 4;
+  const std::string pattern = "abCde123";
+
+  for (const int width : {1, 2, 17, 31}) {
+    for (const bool lineNumbers : {false, true}) {
+      CAPTURE(width);
+      CAPTURE(lineNumbers);
+      Fixture f(pattern);
+      f.provider->syntheticExtent = SOURCE_BYTES;
+      f.intent.viewport = {width + (lineNumbers ? detail::DOCUMENT_GUTTER_CELLS : 0), VIEWPORT_ROWS};
+      f.intent.config.workBytes = 256 * 1024;
+      f.intent.config.lineNumbers = lineNumbers;
+      f.intent.anchor = SOURCE_BYTES;
+      f.intent.tail = true;
+
+      const auto result = f.finish();
+
+      REQUIRE_FALSE(result->error);
+      REQUIRE(result->frame);
+      REQUIRE(result->scan);
+      REQUIRE(result->frame->rows.size() == VIEWPORT_ROWS);
+      CHECK(result->frame->finalEndVisible);
+      CHECK(result->frame->visibleByteEnd == SOURCE_BYTES);
+      CHECK(result->frame->status.logicalLine == 1);
+      CHECK_FALSE(result->frame->status.fragmentedCluster);
+      const auto last = (SOURCE_BYTES - 1) / static_cast<std::uint64_t>(width) * width;
+      const auto first = last - (VIEWPORT_ROWS - 1) * static_cast<std::uint64_t>(width);
+
+      CHECK(result->frame->status.visibleByteOffset == first);
+
+      for (std::size_t row = 0; row < VIEWPORT_ROWS; ++row) {
+        const auto begin = first + row * static_cast<std::uint64_t>(width);
+        const auto end = std::min(SOURCE_BYTES, begin + width);
+        std::string expected;
+
+        for (auto offset = begin; offset < end; ++offset) {
+          expected += pattern[offset % pattern.size()];
+        }
+
+        CHECK(result->frame->anchors[row] == begin);
+        CHECK(result->frame->rows[row].bytes() == expected);
+        CHECK(result->scan->rows[row].offset == begin);
+        CHECK(result->scan->rows[row].end == end);
+      }
+
+      REQUIRE(result->scan->checkpointCount > 0);
+      std::uint64_t previous{};
+
+      for (const auto &point : std::span(result->scan->checkpoints).first(result->scan->checkpointCount)) {
+        CHECK(point.offset % static_cast<std::uint64_t>(width) == 0);
+        CHECK(point.offset - previous >= CHECKPOINT_BYTES);
+        CHECK(point.offset - previous < CHECKPOINT_BYTES + static_cast<std::uint64_t>(width));
+        CHECK(point.line == 1);
+        CHECK(point.lineKnown);
+        previous = point.offset;
+      }
+    }
+  }
+}
+
 TEST_CASE("ASCII tail checkpoints preserve small decoder work and narrow encoding seams") {
   for (const auto encoding : {DocumentEncoding::UTF8, DocumentEncoding::WINDOWS1251, DocumentEncoding::WINDOWS1252}) {
     const auto edge = encoding == DocumentEncoding::UTF8 ? "\xF0\x9F\x98\x80" : "\xE9";

@@ -7,6 +7,21 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- End preparation for long wrapped text reuses one bounded working state across
+  capped background quanta and skips printable ASCII rows that cannot remain
+  visible. `DocumentViewConfig.workBytes` now describes one preparation quantum;
+  `tailWorkTurns` defaults to 32 per managed seekable text-tail job, with 1 keeping
+  the previous single-quantum granularity. An 8 ms soft slice is checked between
+  quanta; provider calls can exceed it. Retained-memory limits and per-page
+  cancellation/revision checks remain in place. The new setting is also accepted
+  in loaded scenes. DocumentViewConfig and ControlDocumentSettings have changed
+  binary layouts; rebuild consumers with the library. File-backed text-tail jobs
+  reuse a worker-local native handle, validate each page against its captured
+  generation/extent, and validate the path before publishing any continuation or
+  frame. Optional provisional read sessions reserve 4 KiB only while active;
+  `ByteDocumentProvider` has an appended virtual operation, so adapters must also
+  be rebuilt. Ordinary reads and gzip source semantics are unchanged.
+
 - Native document qualification tools exercise one or four visible viewers on
   generated SQL/Markdown and gzip sources, verify sampled text and exact colors,
   and report process memory separately from shared source credits. Small CLI

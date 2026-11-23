@@ -1022,9 +1022,9 @@ private:
       return {};
     }
 
-    if (path == "maxAutoHighlightBytes" || path == "hex.bytesPerRow" || path == "hex.groupSize" ||
-        path == "fastScroll" || path == "keyStep" || path == "pageOverlap" || path == "pageSteps" ||
-        path == "spinnerInterval" || path == "interval" || path == "radioInitial.index") {
+    if (path == "maxAutoHighlightBytes" || path == "tailWorkTurns" || path == "hex.bytesPerRow" ||
+        path == "hex.groupSize" || path == "fastScroll" || path == "keyStep" || path == "pageOverlap" ||
+        path == "pageSteps" || path == "spinnerInterval" || path == "interval" || path == "radioInitial.index") {
       const auto value = capacity<std::uint64_t>();
 
       if (!value) {
@@ -1041,6 +1041,13 @@ private:
         } else {
           document->hexGroupSize = static_cast<std::size_t>(*value);
         }
+        settings.document = std::move(document);
+      } else if (path == "tailWorkTurns") {
+        if (!*value || *value > std::numeric_limits<std::uint8_t>::max()) {
+          return std::unexpected(document_.propertyFailure(Code::INVALID_VALUE, offset, type, path));
+        }
+        auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
+        document->tailWorkTurns = static_cast<std::uint8_t>(*value);
         settings.document = std::move(document);
       } else if (path == "maxAutoHighlightBytes") {
         if (!*value || *value > std::numeric_limits<std::size_t>::max() / 1024) {

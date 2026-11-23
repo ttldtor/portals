@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #include "document_view_state.hpp"
 #include <algorithm>
+#include <chrono>
 #include <cstdio>
 #include <limits>
 #include <stdexcept>
@@ -385,6 +386,23 @@ bool asciiTailEligible(const DocumentScan &scan, const DocumentPrepareIntent &in
          (!scan.clusterBytes || (scan.havePrevious && pendingAscii)) && scan.decoder.checkpoint().has_value();
 }
 
+std::size_t asciiTailDiscardBytes(const DocumentScan &scan, const DocumentPrepareIntent &intent, std::size_t count,
+                                  std::size_t mappedBegin, std::uint64_t width) noexcept {
+  // A following full screen plus one row evicts every predecessor. Discard only
+  // complete rows before that suffix, and retain every scalar the preview feeds.
+  const auto retained = (static_cast<std::uint64_t>(intent.viewport.height) + 1) * width;
+
+  if (intent.rowDelta || count <= retained) {
+    return 0;
+  }
+
+  const auto prefix = scan.highlight ? std::min<std::uint64_t>(count - retained, mappedBegin) : count - retained;
+  const auto firstBoundary = width - std::min(scan.column, width);
+
+  return prefix < firstBoundary ? 0
+                                : static_cast<std::size_t>(firstBoundary + (prefix - firstBoundary) / width * width);
+}
+
 std::size_t consumeAsciiTail(DocumentScan &scan, const DocumentPrepareIntent &intent,
                              std::span<const std::byte> input) {
   if (input.size() < 2 || !asciiTailEligible(scan, intent)) {
@@ -436,7 +454,45 @@ std::size_t consumeAsciiTail(DocumentScan &scan, const DocumentPrepareIntent &in
   for (std::size_t index = 0; index < scan.checkpointCount; ++index) {
     latestCheckpoint = std::max(latestCheckpoint, scan.checkpoints[index].offset);
   }
-  std::size_t consumed{};
+  std::size_t consumed = asciiTailDiscardBytes(scan, intent, count, mappedBegin, width);
+
+  if (consumed) {
+    // Preserve the same checkpoint cadence at real wrap boundaries without
+    // constructing the rows that the retained printable suffix will replace.
+    auto boundary = width - std::min(scan.column, width);
+
+    while (boundary <= consumed) {
+      const auto position = offset + boundary;
+
+      if (position > latestCheckpoint && position - latestCheckpoint >= CHECKPOINT_DISTANCE) {
+        saveCheckpoint(scan, checkpoint(static_cast<std::size_t>(boundary)));
+        latestCheckpoint = position;
+      }
+
+      const auto distance = position > latestCheckpoint ? position - latestCheckpoint : 0;
+      const auto needed = CHECKPOINT_DISTANCE - std::min<std::uint64_t>(distance, CHECKPOINT_DISTANCE);
+      const auto rows = std::max<std::uint64_t>(1, (needed + width - 1) / width);
+
+      if (rows > (consumed - boundary) / width) {
+        break;
+      }
+
+      boundary += rows * width;
+    }
+
+    scan.rows.clear();
+    scan.payload = 0;
+    scan.row.clear();
+    scan.rowOffset = offset + consumed;
+    scan.rowEnd = scan.rowOffset;
+    scan.column = 0;
+    scan.rowTouched = false;
+    trimDocumentSearch(scan, scan.rowOffset);
+
+    if (scan.highlight) {
+      trimDocumentHighlightMaps(*scan.highlight, scan.rowOffset);
+    }
+  }
 
   while (consumed < count) {
     if (scan.rowTouched && scan.column >= width) {
@@ -583,7 +639,8 @@ std::shared_ptr<DocumentScan> initialScan(const DocumentPrepareIntent &intent, D
 }
 
 bool readLocalProbe(DocumentScan &scan, ByteDocumentSource &source, const DocumentPrepareIntent &intent,
-                    std::uint64_t base, std::uint64_t generation, std::size_t &work, std::stop_token stop) {
+                    std::uint64_t base, std::uint64_t generation, std::size_t &work, std::stop_token stop,
+                    DocumentReadBatch *batch) {
   if (scan.localProbeOffset != base) {
     scan.localProbeOffset = base;
     scan.localProbeSize = 0;
@@ -603,7 +660,7 @@ bool readLocalProbe(DocumentScan &scan, ByteDocumentSource &source, const Docume
     }
 
     auto page = readDocumentInput(source, {scan.metadata.revision, base + scan.localProbeSize, count, generation},
-                                  scan.highlight.get(), stop);
+                                  scan.highlight.get(), stop, true, batch);
 
     if (!page) {
       if (page.error().code == SourceError::NO_PROGRESS) {
@@ -674,7 +731,7 @@ char32_t tailUnitValue(const DocumentTailSearch &tail, DocumentEncoding encoding
 }
 
 bool findTailBoundary(DocumentScan &scan, ByteDocumentSource &source, const DocumentPrepareIntent &intent,
-                      std::uint64_t generation, std::size_t &work, std::stop_token stop) {
+                      std::uint64_t generation, std::size_t &work, std::stop_token stop, DocumentReadBatch *batch) {
   auto &tail = *scan.tail;
   const auto encoding = DocumentDecoder::restore(*scan.origin).encoding();
   const auto width = tailUnitWidth(encoding);
@@ -687,7 +744,7 @@ bool findTailBoundary(DocumentScan &scan, ByteDocumentSource &source, const Docu
     const auto count = static_cast<std::size_t>(std::min<std::uint64_t>(
       std::min({source.maxPageBytes(), tail.readLimit, intent.config.workBytes - work}), tail.cursor));
     auto page = readDocumentInput(source, {scan.metadata.revision, tail.cursor - count, count, generation},
-                                  scan.highlight.get(), stop);
+                                  scan.highlight.get(), stop, true, batch);
 
     if (!page) {
       if (page.error().code == SourceError::NO_PROGRESS) {
@@ -746,14 +803,14 @@ bool findTailBoundary(DocumentScan &scan, ByteDocumentSource &source, const Docu
 }
 
 bool prepareTailStart(DocumentScan &scan, ByteDocumentSource &source, const DocumentPrepareIntent &intent,
-                      std::uint64_t generation, std::size_t &work, std::stop_token stop) {
+                      std::uint64_t generation, std::size_t &work, std::stop_token stop, DocumentReadBatch *batch) {
   if (!scan.tail || scan.tail->phase == DocumentTailPhase::DECODE) {
     return true;
   }
 
   if (scan.tail->phase == DocumentTailPhase::ORIGIN) {
     if (!scan.origin) {
-      if (!readLocalProbe(scan, source, intent, 0, generation, work, stop)) {
+      if (!readLocalProbe(scan, source, intent, 0, generation, work, stop, batch)) {
         return false;
       }
 
@@ -776,7 +833,7 @@ bool prepareTailStart(DocumentScan &scan, ByteDocumentSource &source, const Docu
   }
 
   if (scan.tail->phase == DocumentTailPhase::SEARCH) {
-    if (!findTailBoundary(scan, source, intent, generation, work, stop)) {
+    if (!findTailBoundary(scan, source, intent, generation, work, stop, batch)) {
       return false;
     }
 
@@ -791,7 +848,7 @@ bool prepareTailStart(DocumentScan &scan, ByteDocumentSource &source, const Docu
   const auto start = scan.tail->start;
   const auto base = start > LOCAL_LOOKBEHIND_BYTES ? start - LOCAL_LOOKBEHIND_BYTES : 0;
 
-  if (!readLocalProbe(scan, source, intent, base, generation, work, stop)) {
+  if (!readLocalProbe(scan, source, intent, base, generation, work, stop, batch)) {
     return false;
   }
 
@@ -815,7 +872,7 @@ bool prepareTailStart(DocumentScan &scan, ByteDocumentSource &source, const Docu
 }
 
 bool prepareLocalStart(DocumentScan &scan, ByteDocumentSource &source, const DocumentPrepareIntent &intent,
-                       std::uint64_t generation, std::size_t &work, std::stop_token stop) {
+                       std::uint64_t generation, std::size_t &work, std::stop_token stop, DocumentReadBatch *batch) {
   if (!scan.localPending) {
     return true;
   }
@@ -827,7 +884,7 @@ bool prepareLocalStart(DocumentScan &scan, ByteDocumentSource &source, const Doc
     const auto base =
       scan.origin && restartTarget > LOCAL_LOOKBEHIND_BYTES ? restartTarget - LOCAL_LOOKBEHIND_BYTES : 0;
 
-    if (!readLocalProbe(scan, source, intent, base, generation, work, stop)) {
+    if (!readLocalProbe(scan, source, intent, base, generation, work, stop, batch)) {
       return false;
     }
 
@@ -1038,6 +1095,111 @@ std::shared_ptr<const DocumentPreparedFrame> makeFrame(std::shared_ptr<ByteDocum
   frame->footer = std::make_unique<GraphemeText>(std::move(*caption));
   return frame;
 }
+
+void prepareTextQuantum(DocumentScan &scan, ByteDocumentSource &source, const DocumentPrepareIntent &intent,
+                        std::uint64_t generation, std::stop_token stop, DocumentReadBatch *batch) {
+  std::size_t work{};
+  bool drain{};
+  const bool tailReady = prepareTailStart(scan, source, intent, generation, work, stop, batch);
+  const bool localReady = tailReady && prepareLocalStart(scan, source, intent, generation, work, stop, batch);
+
+  while (localReady && !scan.done && !scan.waiting && (!enoughRows(scan, intent) || needsCrLfLookahead(scan, intent)) &&
+         work < intent.config.workBytes) {
+    if (stop.stop_requested()) {
+      fail(SourceError::CANCELLED);
+    }
+    const auto remaining = std::numeric_limits<std::uint64_t>::max() - scan.offset;
+    const auto requested = static_cast<std::size_t>(
+      std::min<std::uint64_t>(std::min(source.maxPageBytes(), intent.config.workBytes - work), remaining));
+    if (!requested) {
+      fail(SourceError::POSITION_EXHAUSTED);
+    }
+    auto page = readDocumentInput(source, {scan.metadata.revision, scan.offset, requested, generation},
+                                  scan.highlight.get(), stop, !scan.skipRows, batch);
+    if (!page) {
+      if (page.error().code == SourceError::NO_PROGRESS) {
+        // Source222 classifies an empty non-final read as NO_PROGRESS.
+        // The viewport waits for explicit refresh instead of treating it as EOF.
+        scan.waiting = true;
+        break;
+      }
+      throw PreparationFailure{page.error()};
+    }
+    auto input = page->bytes();
+    work += input.size();
+    if (input.empty() && !page->finalEnd()) {
+      scan.waiting = true;
+      break;
+    }
+
+    do {
+      if (const auto consumed = consumeAsciiTail(scan, intent, input)) {
+        input = input.subspan(consumed);
+
+        continue;
+      }
+
+      const auto before = scan.scalarCheckpoint;
+      std::array<DecodedScalar, 1> output{};
+      const auto decoded = scan.decoder.feed(input, scan.offset, page->finalEnd(), output);
+      scan.offset += decoded.inputConsumed;
+      input = input.subspan(decoded.inputConsumed);
+      drain = decoded.status == DocumentDecodeStatus::OUTPUT_FULL;
+
+      if (decoded.status == DocumentDecodeStatus::MALFORMED ||
+          decoded.status == DocumentDecodeStatus::ENCODING_UNRESOLVED ||
+          decoded.status == DocumentDecodeStatus::INVALID_OFFSET ||
+          decoded.status == DocumentDecodeStatus::UNSUPPORTED_POLICY) {
+        fail(SourceError::INVALID_REPLY);
+      }
+      if (decoded.outputProduced) {
+        if (scan.highlight && output[0].byteOffset >= scan.highlight->previewOriginalByteCutoff) {
+          feedDocumentPreview(*scan.highlight, std::span(output).first(decoded.outputProduced));
+        }
+        addScalar(scan, intent, output[0], before);
+        if (scan.highlight && scan.highlight->sequential) {
+          scan.highlight->offset = scan.offset;
+          feedDocumentHighlight(*scan.highlight, std::span(output).first(decoded.outputProduced));
+        }
+        if (auto checkpoint = scan.decoder.checkpoint()) {
+          if (!scan.origin) {
+            scan.origin = checkpoint;
+          }
+          scan.scalarCheckpoint = {scan.metadata.revision, checkpoint, scan.offset,    scan.line,
+                                   scan.afterCR,           false,      scan.lineKnown, scan.regionalContextUnknown};
+          if (output[0].scalar == U'\n' || output[0].scalar == U'\r') {
+            saveCheckpoint(scan, scan.scalarCheckpoint);
+          }
+        }
+      }
+      if (decoded.status == DocumentDecodeStatus::DONE) {
+        flushCluster(scan, intent);
+        if (scan.highlight && scan.highlight->sequential) {
+          scan.highlight->offset = scan.offset;
+          feedDocumentHighlight(*scan.highlight, {}, true);
+        }
+        scan.totalLines = scan.lineKnown ? std::optional(scan.line) : std::nullopt;
+        // A terminal separator ends the last row; it does not create a
+        // new display row in a read-only viewer. Keep the empty document.
+        if (scan.rowTouched || (scan.rows.empty() && scan.line == 1)) {
+          finishRow(scan, intent, scan.offset);
+        }
+        scan.done = true;
+        break;
+      }
+      // A final page may leave only the decoder's bounded empty-input drain.
+      // Prove DONE now instead of requiring another scroll past a final LF.
+      if (enoughRows(scan, intent) && !needsCrLfLookahead(scan, intent) &&
+          !(input.empty() && page->finalEnd() && drain)) {
+        break;
+      }
+      if (!decoded.inputConsumed && !decoded.outputProduced && !drain) {
+        break;
+      }
+    } while (!input.empty() || drain);
+  }
+}
+
 } // namespace
 
 std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteDocumentSource> source,
@@ -1055,13 +1217,34 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
   if (previous && previous->hex) {
     previous.reset();
   }
+  constexpr auto TAIL_JOB_SLICE = std::chrono::milliseconds(8);
+  const bool batchTail =
+    intent.managedTailBurst && intent.tail && intent.config.tailWorkTurns > 1 && source->capabilities().seekable;
+  // Include initial inspection/staging in the soft slice. A blocking provider
+  // quantum can exceed it; cancellation is still checked at each source page.
+  const auto started = batchTail ? std::chrono::steady_clock::now() : std::chrono::steady_clock::time_point{};
   auto result = std::make_shared<DocumentPreparation>();
   result->credit = std::move(credit);
   result->generation = generation;
   std::shared_ptr<DocumentScan> scan;
+  bool provisionalBatch{};
 
   try {
-    auto metadata = (intent.tail ? source->inspectEnd(stop) : source->inspect(stop));
+    std::optional<DocumentReadBatch> batch;
+    if (intent.tail && source->capabilities().seekable && source->capabilities().readSessions) {
+      auto opened = DocumentReadBatch::create(source, stop);
+      if (!opened) {
+        throw PreparationFailure{opened.error()};
+      }
+      // A session need not discover an unknown end. Preserve the provider's
+      // explicit extent-discovery path instead of scanning its whole prefix.
+      if (opened->metadata().byteExtent.has_value()) {
+        batch.emplace(std::move(*opened));
+        provisionalBatch = true;
+      }
+    }
+    auto metadata = batch ? std::expected<DocumentMetadata, DocumentError>(batch->metadata())
+                          : (intent.tail ? source->inspectEnd(stop) : source->inspect(stop));
     if (!metadata) {
       throw PreparationFailure{metadata.error()};
     }
@@ -1106,116 +1289,37 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
     }
     scan->reservation = std::move(reservation);
     previous.reset();
-    std::size_t work{};
-    bool drain{};
-    const bool tailReady = prepareTailStart(*scan, *source, intent, generation, work, stop);
-    const bool localReady = tailReady && prepareLocalStart(*scan, *source, intent, generation, work, stop);
-
-    while (localReady && !scan->done && !scan->waiting &&
-           (!enoughRows(*scan, intent) || needsCrLfLookahead(*scan, intent)) && work < intent.config.workBytes) {
+    std::size_t turns{};
+    do {
       if (stop.stop_requested()) {
         fail(SourceError::CANCELLED);
       }
-      const auto remaining = std::numeric_limits<std::uint64_t>::max() - scan->offset;
-      const auto requested = static_cast<std::size_t>(
-        std::min<std::uint64_t>(std::min(source->maxPageBytes(), intent.config.workBytes - work), remaining));
-      if (!requested) {
-        fail(SourceError::POSITION_EXHAUSTED);
-      }
-      auto page = readDocumentInput(*source, {scan->metadata.revision, scan->offset, requested, generation},
-                                    scan->highlight.get(), stop, !scan->skipRows);
-      if (!page) {
-        if (page.error().code == SourceError::NO_PROGRESS) {
-          // Source222 classifies an empty non-final read as NO_PROGRESS.
-          // The viewport waits for explicit refresh instead of treating it as EOF.
-          scan->waiting = true;
-          break;
-        }
-        throw PreparationFailure{page.error()};
-      }
-      auto input = page->bytes();
-      work += input.size();
-      if (input.empty() && !page->finalEnd()) {
-        scan->waiting = true;
+      prepareTextQuantum(*scan, *source, intent, generation, stop, batch ? &*batch : nullptr);
+      ++turns;
+
+      // A complete horizontal window need not decode the remainder of its line.
+      const bool horizontalReady = !intent.config.wrap && scan->reached && !scan->skipRows &&
+                                   scan->column >= intent.horizontal + static_cast<std::uint64_t>(contentWidth(intent));
+      result->continueWork = !scan->done && !scan->waiting &&
+                             (!enoughRows(*scan, intent) || needsCrLfLookahead(*scan, intent)) && !horizontalReady;
+      if (!result->continueWork || !batchTail || turns >= intent.config.tailWorkTurns ||
+          std::chrono::steady_clock::now() - started >= TAIL_JOB_SLICE) {
         break;
       }
-
-      do {
-        if (const auto consumed = consumeAsciiTail(*scan, intent, input)) {
-          input = input.subspan(consumed);
-
-          continue;
-        }
-
-        const auto before = scan->scalarCheckpoint;
-        std::array<DecodedScalar, 1> output{};
-        const auto decoded = scan->decoder.feed(input, scan->offset, page->finalEnd(), output);
-        scan->offset += decoded.inputConsumed;
-        input = input.subspan(decoded.inputConsumed);
-        drain = decoded.status == DocumentDecodeStatus::OUTPUT_FULL;
-
-        if (decoded.status == DocumentDecodeStatus::MALFORMED ||
-            decoded.status == DocumentDecodeStatus::ENCODING_UNRESOLVED ||
-            decoded.status == DocumentDecodeStatus::INVALID_OFFSET ||
-            decoded.status == DocumentDecodeStatus::UNSUPPORTED_POLICY) {
-          fail(SourceError::INVALID_REPLY);
-        }
-        if (decoded.outputProduced) {
-          if (scan->highlight && output[0].byteOffset >= scan->highlight->previewOriginalByteCutoff) {
-            feedDocumentPreview(*scan->highlight, std::span(output).first(decoded.outputProduced));
-          }
-          addScalar(*scan, intent, output[0], before);
-          if (scan->highlight && scan->highlight->sequential) {
-            scan->highlight->offset = scan->offset;
-            feedDocumentHighlight(*scan->highlight, std::span(output).first(decoded.outputProduced));
-          }
-          if (auto checkpoint = scan->decoder.checkpoint()) {
-            if (!scan->origin) {
-              scan->origin = checkpoint;
-            }
-            scan->scalarCheckpoint = {
-              scan->metadata.revision, checkpoint, scan->offset,    scan->line,
-              scan->afterCR,           false,      scan->lineKnown, scan->regionalContextUnknown};
-            if (output[0].scalar == U'\n' || output[0].scalar == U'\r') {
-              saveCheckpoint(*scan, scan->scalarCheckpoint);
-            }
-          }
-        }
-        if (decoded.status == DocumentDecodeStatus::DONE) {
-          flushCluster(*scan, intent);
-          if (scan->highlight && scan->highlight->sequential) {
-            scan->highlight->offset = scan->offset;
-            feedDocumentHighlight(*scan->highlight, {}, true);
-          }
-          scan->totalLines = scan->lineKnown ? std::optional(scan->line) : std::nullopt;
-          // A terminal separator ends the last row; it does not create a
-          // new display row in a read-only viewer. Keep the empty document.
-          if (scan->rowTouched || (scan->rows.empty() && scan->line == 1)) {
-            finishRow(*scan, intent, scan->offset);
-          }
-          scan->done = true;
-          break;
-        }
-        // A final page may leave only the decoder's bounded empty-input drain.
-        // Prove DONE now instead of requiring another scroll past a final LF.
-        if (enoughRows(*scan, intent) && !needsCrLfLookahead(*scan, intent) &&
-            !(input.empty() && page->finalEnd() && drain)) {
-          break;
-        }
-        if (!decoded.inputConsumed && !decoded.outputProduced && !drain) {
-          break;
-        }
-      } while (!input.empty() || drain);
+      // Keep the unpublished mutable scan and its one reservation. No UI owner,
+      // credit handoff or new allocation envelope is needed between quanta.
+    } while (true);
+    // A retained continuation is evidence too. Validate the current path before
+    // handing either a partial scan or a complete frame back to the UI owner.
+    if (batch) {
+      auto sealed = batch->seal(stop);
+      if (!sealed) {
+        throw PreparationFailure{sealed.error()};
+      }
+      batch.reset();
+      provisionalBatch = false;
     }
-
     result->scan = scan;
-    // Once a horizontal window is available, a very long unwrapped line need
-    // not be scanned to its end merely to open the first screen. Navigation
-    // that asks to skip that line continues bounded turns until it finds LF/EOF.
-    const bool horizontalReady = !intent.config.wrap && scan->reached && !scan->skipRows &&
-                                 scan->column >= intent.horizontal + static_cast<std::uint64_t>(contentWidth(intent));
-    result->continueWork = !scan->done && !scan->waiting &&
-                           (!enoughRows(*scan, intent) || needsCrLfLookahead(*scan, intent)) && !horizontalReady;
     if (!result->continueWork) {
       if (scan->highlight) {
         feedDocumentPreview(*scan->highlight, {}, true);
@@ -1230,7 +1334,11 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
       }
     }
   } catch (const PreparationFailure &failure) {
-    if (failure.error.code == SourceError::WOULD_BLOCK && !failure.error.budgetDemand) {
+    if (provisionalBatch) {
+      scan.reset();
+    }
+    if (failure.error.code == SourceError::NO_PROGRESS ||
+        (failure.error.code == SourceError::WOULD_BLOCK && !failure.error.budgetDemand)) {
       if (scan) {
         scan->waiting = true;
       }
@@ -1240,8 +1348,14 @@ std::shared_ptr<const DocumentPreparation> prepareDocument(std::shared_ptr<ByteD
       result->error = failure.error;
     }
   } catch (const std::bad_alloc &) {
+    if (provisionalBatch) {
+      scan.reset();
+    }
     result->error = DocumentError{SourceError::NO_MEMORY, {}, {}};
   } catch (...) {
+    if (provisionalBatch) {
+      scan.reset();
+    }
     result->error = DocumentError{SourceError::CALLBACK_FAILED, {}, {}};
   }
   if (!result->scan && scan) {

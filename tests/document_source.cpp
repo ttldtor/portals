@@ -161,6 +161,7 @@ struct FileFixture {
     std::error_code ignored;
 
     std::filesystem::remove(path, ignored);
+    std::filesystem::remove(path.string() + ".old", ignored);
   }
 
   void write(std::string_view value, bool append = false) {
@@ -820,4 +821,270 @@ TEST_CASE("providers without end discovery retain optional unknown metadata") {
   }));
   CHECK_FALSE(end.byteExtent);
   CHECK(provider->readCalls == 0);
+}
+
+TEST_CASE("read batches retain explicit source ownership and return metadata credit after sealing") {
+  FileFixture fixture;
+  fixture.write("abcdef");
+  auto budget = take(SourceBudget::create());
+  auto provider = take(FileDocumentProvider::create(fixture.path));
+  auto source = take(ByteDocumentSource::create(provider, budget));
+  std::weak_ptr<ByteDocumentSource> weak = source;
+  const auto initial = budget->usage();
+  CHECK(source->capabilities().readSessions);
+  CHECK(DocumentReadBatch::create(source).error().code == SourceError::WRONG_THREAD);
+  auto page = worker([source = std::move(source), budget, initial, weak]() mutable {
+    auto opened = DocumentReadBatch::create(std::move(source));
+    REQUIRE(opened);
+    auto batch = std::move(*opened);
+    CHECK_FALSE(weak.expired());
+    CHECK(budget->usage().bytes == initial.bytes + DocumentReadBatch::READ_BATCH_METADATA_BYTES);
+    CHECK(budget->usage().work == initial.work);
+    auto replacement = take(DocumentReadBatch::create(weak.lock()));
+    batch = std::move(replacement);
+    CHECK(budget->usage().bytes == initial.bytes + DocumentReadBatch::READ_BATCH_METADATA_BYTES);
+    const auto metadata = batch.metadata();
+    CHECK(metadata.byteExtent == 6);
+    const auto wrongThread = worker([&] {
+      return batch.seal();
+    });
+    REQUIRE_FALSE(wrongThread);
+    CHECK(wrongThread.error().code == SourceError::WRONG_THREAD);
+    auto first = take(batch.read({metadata.revision, 0, 3, 19}));
+    auto last = take(batch.read({metadata.revision, 3, 3, 19}));
+    CHECK(text(first) == "abc");
+    CHECK(text(last) == "def");
+    CHECK(last.finalEnd());
+    CHECK(last.generation() == 19);
+    REQUIRE(batch.seal());
+    CHECK(batch.seal().error().code == SourceError::INVALID_ARGUMENT);
+    CHECK(batch.read({metadata.revision, 0, 1, 20}).error().code == SourceError::INVALID_ARGUMENT);
+    return last;
+  });
+  CHECK(weak.expired());
+  CHECK(text(page) == "def");
+  CHECK(budget->usage().work == 0);
+  CHECK(budget->usage().consumers == 0);
+  page = {};
+  CHECK(budget->usage().pages == 0);
+  CHECK(budget->usage().bytes == 4096);
+}
+
+TEST_CASE("read batches reject unsupported backends stale requests and cancellation without leaked credits") {
+  auto budget = take(SourceBudget::create());
+  auto memory = memorySource(budget, "memory");
+  const auto before = budget->usage();
+  const auto unsupported = worker([&] {
+    return DocumentReadBatch::create(memory);
+  });
+  REQUIRE_FALSE(unsupported);
+  CHECK(unsupported.error().code == SourceError::UNSUPPORTED);
+  CHECK(budget->usage().bytes == before.bytes);
+  FileFixture fixture;
+  fixture.write("abcdef");
+  auto source = take(ByteDocumentSource::create(take(FileDocumentProvider::create(fixture.path)), budget));
+  const auto owned = budget->usage();
+  worker([&] {
+    auto batch = take(DocumentReadBatch::create(source));
+    auto request = DocumentReadRequest{batch.metadata().revision, 0, 1, 1};
+    ++request.revision.dataRevision;
+    auto rejected = batch.read(request);
+    REQUIRE_FALSE(rejected);
+    CHECK(rejected.error().code == SourceError::REVISION_CHANGED);
+    CHECK(batch.seal().error().code == SourceError::REVISION_CHANGED);
+  });
+  CHECK(budget->usage().bytes == owned.bytes);
+  worker([&] {
+    auto batch = take(DocumentReadBatch::create(source));
+    auto request = DocumentReadRequest{batch.metadata().revision, 0, 1, 1};
+    ++request.revision.source.epoch;
+    CHECK(batch.read(request).error().code == SourceError::STALE_SOURCE);
+    CHECK(batch.seal().error().code == SourceError::STALE_SOURCE);
+  });
+  worker([&] {
+    std::stop_source stop;
+    stop.request_stop();
+    CHECK(DocumentReadBatch::create(source, stop.get_token()).error().code == SourceError::CANCELLED);
+    auto batch = take(DocumentReadBatch::create(source));
+    CHECK(batch.seal(stop.get_token()).error().code == SourceError::CANCELLED);
+    CHECK(batch.seal().error().code == SourceError::CANCELLED);
+  });
+  CHECK(budget->usage().bytes == owned.bytes);
+  CHECK(budget->usage().work == 0);
+}
+
+TEST_CASE("read batch pages remain provisional across append truncate and atomic path replacement") {
+  for (const unsigned change : {0, 1, 2, 3}) {
+    CAPTURE(change);
+    FileFixture fixture;
+    fixture.write("abcdef");
+    auto budget = take(SourceBudget::create());
+    auto source = take(ByteDocumentSource::create(take(FileDocumentProvider::create(fixture.path)), budget));
+    worker([&] {
+      auto batch = take(DocumentReadBatch::create(source));
+      const auto metadata = batch.metadata();
+      auto retained = take(batch.read({metadata.revision, 0, 6, 1}));
+      CHECK(text(retained) == "abcdef");
+      if (change == 0) {
+        fixture.write("more", true);
+      } else if (change == 1) {
+        fixture.write("a");
+      } else if (change == 2) {
+        std::filesystem::rename(fixture.path, fixture.path.string() + ".old");
+        fixture.write("ghijkl");
+      } else {
+        const auto previous = std::filesystem::last_write_time(fixture.path);
+        fixture.write("ghijkl");
+        std::filesystem::last_write_time(fixture.path, previous + std::chrono::seconds(1));
+      }
+      auto sealed = batch.seal();
+      REQUIRE_FALSE(sealed);
+      CHECK(sealed.error().code == SourceError::REVISION_CHANGED);
+      CHECK(text(retained) == "abcdef");
+    });
+    CHECK(budget->usage().pages == 0);
+    CHECK(budget->usage().work == 0);
+  }
+}
+
+TEST_CASE("read batches reject changed handle contents before returning a new page") {
+  FileFixture fixture;
+  fixture.write("abcdef");
+  auto budget = take(SourceBudget::create());
+  auto source = take(ByteDocumentSource::create(take(FileDocumentProvider::create(fixture.path)), budget));
+  worker([&] {
+    auto batch = take(DocumentReadBatch::create(source));
+    const auto metadata = batch.metadata();
+    const auto previous = std::filesystem::last_write_time(fixture.path);
+    fixture.write("ghijkl");
+    std::filesystem::last_write_time(fixture.path, previous + std::chrono::seconds(1));
+    auto page = batch.read({metadata.revision, 0, 6, 1});
+    REQUIRE_FALSE(page);
+    CHECK(page.error().code == SourceError::REVISION_CHANGED);
+    CHECK(batch.seal().error().code == SourceError::REVISION_CHANGED);
+  });
+  CHECK(budget->usage().pages == 0);
+  CHECK(budget->usage().work == 0);
+}
+
+TEST_CASE("scoped provider retry peaks include held metadata exactly once without changing demand") {
+  class Session final : public ByteDocumentReadSession {
+  public:
+    explicit Session(DocumentError error) : error_(error) {
+    }
+
+    ByteDocumentMetadata metadata() const noexcept override {
+      return {1, 1024};
+    }
+
+    std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &, std::span<std::byte>,
+                                                      std::stop_token) override {
+      return std::unexpected(error_);
+    }
+
+    std::expected<void, DocumentError> seal(std::stop_token) override {
+      return std::unexpected(error_);
+    }
+
+  private:
+    DocumentError error_;
+  };
+
+  class Provider final : public ByteDocumentProvider {
+  public:
+    DocumentError error;
+    bool failOpen{};
+
+    ByteDocumentCapabilities capabilities() const noexcept override {
+      return {true, true, true};
+    }
+
+    std::expected<ByteDocumentMetadata, DocumentError> metadata(std::stop_token) override {
+      return ByteDocumentMetadata{1, 1024};
+    }
+
+    std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &, std::span<std::byte>,
+                                                      std::stop_token) override {
+      return std::unexpected(error);
+    }
+
+    std::expected<std::unique_ptr<ByteDocumentReadSession>, DocumentError> openReadSession(std::stop_token) override {
+      if (failOpen) {
+        return std::unexpected(error);
+      }
+      return std::unique_ptr<ByteDocumentReadSession>(new Session(error));
+    }
+  };
+
+  constexpr std::size_t PROVIDER_PEAK_BYTES = 127;
+  constexpr std::size_t READ_BYTES = 17;
+  auto budget = take(SourceBudget::create());
+  auto provider = std::make_shared<Provider>();
+  provider->error = {SourceError::WOULD_BLOCK, {}, {}};
+  provider->error.budgetPeak = SourceBudgetUsage{PROVIDER_PEAK_BYTES, 2, 3, 0};
+  provider->error.budgetDemand = SourceBudgetUsage{37, 1, 0, 0};
+  auto source = take(ByteDocumentSource::create(provider, budget));
+  const auto initial = budget->usage();
+
+  for (const unsigned stage : {0, 1, 2}) {
+    CAPTURE(stage);
+    provider->failOpen = stage == 0;
+    const auto error = worker([&]() -> DocumentError {
+      auto batch = DocumentReadBatch::create(source);
+      if (stage == 0) {
+        REQUIRE_FALSE(batch);
+        return batch.error();
+      }
+      REQUIRE(batch);
+      if (stage == 1) {
+        auto page = batch->read({batch->metadata().revision, 0, READ_BYTES, 1});
+        REQUIRE_FALSE(page);
+        return page.error();
+      }
+      auto sealed = batch->seal();
+      REQUIRE_FALSE(sealed);
+      return sealed.error();
+    });
+    REQUIRE(error.budgetPeak);
+    CHECK(error.code == SourceError::WOULD_BLOCK);
+    CHECK(error.budgetPeak->bytes == PROVIDER_PEAK_BYTES + source->envelopeBytes() +
+                                       DocumentReadBatch::READ_BATCH_METADATA_BYTES +
+                                       (stage == 1 ? READ_BYTES + SourceArena::METADATA_BYTES : 0));
+    CHECK(error.budgetPeak->pages == 2 + (stage == 1 ? 1 : 0));
+    CHECK(error.budgetPeak->work == 4);
+    REQUIRE(error.budgetDemand);
+    CHECK(error.budgetDemand->bytes == 37);
+    CHECK(error.budgetDemand->pages == 1);
+    CHECK(error.budgetDemand->work == 0);
+    CHECK(budget->usage().bytes == initial.bytes);
+    CHECK(budget->usage().work == initial.work);
+  }
+
+  provider->failOpen = false;
+  const auto metadata = inspect(*source);
+  auto ordinary = worker([&] {
+    return source->read({metadata.revision, 0, READ_BYTES, 1});
+  });
+  REQUIRE_FALSE(ordinary);
+  REQUIRE(ordinary.error().budgetPeak);
+  CHECK(ordinary.error().budgetPeak->bytes ==
+        PROVIDER_PEAK_BYTES + source->envelopeBytes() + READ_BYTES + SourceArena::METADATA_BYTES);
+
+  provider->failOpen = true;
+  constexpr auto MAX = std::numeric_limits<std::size_t>::max();
+  const auto enclosing = source->envelopeBytes() + DocumentReadBatch::READ_BATCH_METADATA_BYTES;
+  provider->error.budgetPeak->bytes = MAX - enclosing;
+  auto boundary = worker([&] {
+    return DocumentReadBatch::create(source);
+  });
+  REQUIRE_FALSE(boundary);
+  REQUIRE(boundary.error().budgetPeak);
+  CHECK(boundary.error().budgetPeak->bytes == MAX);
+  ++provider->error.budgetPeak->bytes;
+  auto overflow = worker([&] {
+    return DocumentReadBatch::create(source);
+  });
+  REQUIRE_FALSE(overflow);
+  CHECK(overflow.error().code == SourceError::PAGE_TOO_LARGE);
+  CHECK_FALSE(overflow.error().budgetPeak);
 }

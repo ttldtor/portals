@@ -359,7 +359,8 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"hex.autoFit", Kind::BOOLEAN, 2, {}},
    {"language", Kind::LITERAL_STRING, 1, {}},
    {"syntax", Kind::ENUMERATION, 1, DOCUMENT_SYNTAX_NAMES},
-   {"maxAutoHighlightBytes", Kind::UNSIGNED_INTEGER, 1, {}}}};
+   {"maxAutoHighlightBytes", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"tailWorkTurns", Kind::UNSIGNED_INTEGER, 1, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -392,7 +393,7 @@ constexpr Mask SCROLL_COMMON_MASK =
   SIZE_MASK | SCROLLBAR_MASK | propertyMask(8, 38, 39, 44, 45, 46, 47, 48, 231, 232, 233);
 constexpr Mask SCROLL_AREA_MASK = SCROLL_COMMON_MASK | propertyMask(49, 50, 51, 53, 54, 55);
 constexpr Mask DOCUMENT_VIEW_MASK =
-  SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279);
+  SCROLL_AREA_MASK | propertyMask(264, 265, 266, 267, 268, 269, 270, 271, 272, 273, 274, 275, 276, 277, 278, 279, 280);
 constexpr Mask SCROLL_BAR_MASK = SCROLL_COMMON_MASK | propertyMask(52);
 constexpr Mask LOG_VIEW_MASK = SIZE_MASK | TEXT_MASK | propertyMask(8, 225, 226, 227, 228, 229);
 constexpr Mask OVERLAY_MASK = SIZE_MASK | propertyMask(22, 23, 24, 25, 56, 57);
@@ -1110,7 +1111,8 @@ ControlContextError exceptionError() noexcept {
   X(documentSettings().hexAutoFit, 276)                                                                                \
   X(documentSettings().language, 277)                                                                                  \
   X(documentSettings().syntax, 278)                                                                                    \
-  X(documentSettings().maxAutoHighlightBytes, 279)
+  X(documentSettings().maxAutoHighlightBytes, 279)                                                                     \
+  X(documentSettings().tailWorkTurns, 280)
 
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES =
@@ -1234,6 +1236,7 @@ void merge(ControlSettings &target, const ControlSettings &patch) {
     assign(document->language, source.language, 277);
     assign(document->syntax, source.syntax, 278);
     assign(document->maxAutoHighlightBytes, source.maxAutoHighlightBytes, 279);
+    assign(document->tailWorkTurns, source.tailWorkTurns, 280);
     assign(document->fastScroll, source.fastScroll, 268);
     assign(document->fastKeyModifier, source.fastKeyModifier, 269);
     assign(document->fastWheelModifier, source.fastWheelModifier, 270);
@@ -1523,6 +1526,7 @@ void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &
     apply(document->language, source.language);
     apply(document->syntax, source.syntax);
     apply(document->maxAutoHighlightBytes, source.maxAutoHighlightBytes);
+    apply(document->tailWorkTurns, source.tailWorkTurns);
     apply(document->fastScroll, source.fastScroll);
     apply(document->fastKeyModifier, source.fastKeyModifier);
     apply(document->fastWheelModifier, source.fastWheelModifier);
@@ -1561,6 +1565,7 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"syntax", patch.documentSettings().syntax.has_value()},
       std::pair<std::string_view, bool>{"maxAutoHighlightBytes",
                                         patch.documentSettings().maxAutoHighlightBytes.has_value()},
+      std::pair<std::string_view, bool>{"tailWorkTurns", patch.documentSettings().tailWorkTurns.has_value()},
       std::pair<std::string_view, bool>{"file", patch.documentSettings().file.has_value()},
       std::pair<std::string_view, bool>{"lineNumbers", patch.documentSettings().lineNumbers.has_value()},
       std::pair<std::string_view, bool>{"wrap", patch.documentSettings().wrap.has_value()},

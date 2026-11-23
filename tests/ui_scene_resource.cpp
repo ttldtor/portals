@@ -6914,6 +6914,7 @@ TEST_CASE("configuration loads a cold native DocumentView and validates its docu
       CHECK(config.lineNumbers);
       CHECK(config.wrap);
       CHECK(config.decoder.explicitEncoding == DocumentEncoding::UTF16LE);
+      CHECK(config.tailWorkTurns == DocumentViewConfig{}.tailWorkTurns);
       const auto *frame = detail::scrollFrameOptions(detail::ScrollWidgetAccess::state(widget));
       REQUIRE(frame);
       CHECK(frame->pattern == FramePattern::ROUNDED);
@@ -6933,6 +6934,55 @@ TEST_CASE("configuration loads a cold native DocumentView and validates its docu
     CAPTURE(invalid);
     const auto failure = rejected(invalid, options);
     CHECK(failure.sceneResource);
+  }
+}
+
+TEST_CASE("legacy positional document settings preserve HEX auto-fit") {
+  ui::ControlDocumentSettings legacy{{}, {}, {}, {}, {}, {}, {}, {}, true};
+
+  CHECK(legacy.hexAutoFit == true);
+  CHECK_FALSE(legacy.tailWorkTurns);
+}
+
+TEST_CASE("loaded Viewer tail work limit is sparse inherited and range checked") {
+  ui::SceneResourceOptions options;
+  options.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto owner = ui::scene(R"(
+    defaults { DocumentView { tailWorkTurns=8 } }
+    definitions { Reader = DocumentView { tailWorkTurns=4 } }
+    scene { VBox {
+      Reader#inherited { file="missing-cold-file.txt" }
+      Reader#single { file="missing-cold-file.txt" tailWorkTurns=1 }
+      Reader#maximum { file="missing-cold-file.txt" tailWorkTurns=255 }
+    } }
+  )",
+                         options);
+  const auto inherited = owner.get<DocumentView>("inherited");
+  const auto single = owner.get<DocumentView>("single");
+  const auto maximum = owner.get<DocumentView>("maximum");
+  bool observed{};
+  owner.configure([&](ManagedScene &, Application &application) {
+    for (const auto &[reader, expected] : {std::pair{inherited, 4}, std::pair{single, 1}, std::pair{maximum, 255}}) {
+      REQUIRE(application.tree().read(reader.node(), [&](const DocumentView &widget) {
+        CHECK(detail::DocumentViewAccess::state(widget).config.tailWorkTurns == expected);
+      }));
+    }
+    observed = true;
+  });
+  REQUIRE(owner.prepareChecked());
+  CHECK(observed);
+  REQUIRE(owner.close());
+
+  for (const auto &source : {"scene { DocumentView { file=\"x\" tailWorkTurns=0 } }",
+                             "scene { DocumentView { file=\"x\" tailWorkTurns=256 } }",
+                             "scene { DocumentView { file=\"x\" tailWorkTurns=-1 } }",
+                             "scene { DocumentView { file=\"x\" tailWorkTurns=18446744073709551616 } }"}) {
+    CAPTURE(source);
+    const auto failure = rejected(source, options);
+    REQUIRE(failure.sceneResource);
+    CHECK(failure.sceneResource->code == Code::INVALID_VALUE);
+    REQUIRE(failure.sceneResource->propertyPath);
+    CHECK(*failure.sceneResource->propertyPath == "DocumentView.tailWorkTurns");
   }
 }
 

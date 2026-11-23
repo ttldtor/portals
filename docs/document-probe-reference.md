@@ -64,6 +64,7 @@ terminal transcript is involved.
 | `--budget-mib N` | Shared source credit limit, 1–4096 MiB; excludes unrelated process allocations | 128 |
 | `--timeout-ms N` | Whole-workload deadline, 1–3,600,000 ms | 60,000 |
 | `--samples N` | Retained prefix samples per measured phase, 1–1,000,000 | 8192 |
+| `--tail-work-turns N` | Managed text-tail quanta per job, 1–255; 1 disables batching | 32 |
 | `--idle` | Same Application facade with no DocumentViews, for a separate memory baseline run | Off |
 | `--help` | Show help without file I/O, Application construction or terminal work | Off |
 
@@ -103,6 +104,8 @@ changes the input or creates result files. Exit 0 means complete/help, 2 means
 invalid CLI/input or unavailable requested gzip support, and 1 means incomplete
 execution, timeout or runtime failure. Inspect `complete`, `workload_failed`,
 stage observations and errors together with the exit status.
+
+The JSON records `preparation_quantum_bytes` and `tail_work_turns` for the actual tested policy.
 
 ## Worker source-window and syntax oracle
 

@@ -2,13 +2,48 @@
 
 [Русская версия](ru/document-qualification.md) · [DocumentView](document-view.md) · [Reproduce the tools](document-probe-reference.md)
 
-This profile measures the existing native Viewer with generated SQL and Markdown
-files. It does not change the SDK or establish a performance guarantee for arbitrary
-files. The production files match revision `56bcaa8`; the linked data records the
-qualification tool hashes and individual process results.
+This page records bounded viewing and a separate End optimization profile.
+Results apply to the stated workloads rather than arbitrary files.
 
+## Faster End on a file-sized line {#document-end-optimization}
 
-Single-line End remains slow in the stress case below; the ordinary table uses many short records.
+The updated runtime batches bounded text-tail preparation, avoids constructing
+invisible printable ASCII rows, and reuses a native file handle within each
+worker job. No client-code change is required. The following profile uses one
+generated SQL line occupying the entire 64 MiB or 1 GiB file, AUTO coloring,
+one/four visible viewers sharing a source and a 128 MiB credit root, and a total
+120×40 viewport. Windows and WSL/ext4 use three independent alternating
+before/after pairs. WSL/NTFS is a separate `n=1` storage control.
+
+| Platform / storage | MiB | Views | Before, s | After, s | Speedup | After peak RSS, MiB |
+|---|---:|---:|---:|---:|---:|---:|
+| Windows / NTFS | 64 | 1 | 7.927 | 0.433 | 18.3× | 12.91 |
+| Windows / NTFS | 64 | 4 | 7.925 | 0.582 | 13.6× | 13.52 |
+| Windows / NTFS | 1024 | 1 | 126.268 | 6.230 | 20.3× | 12.84 |
+| Windows / NTFS | 1024 | 4 | 126.177 | 8.470 | 14.9× | 13.38 |
+| WSL Ubuntu / ext4 | 64 | 1 | 5.265 | 0.234 | 22.5× | 26.90 |
+| WSL Ubuntu / ext4 | 64 | 4 | 5.295 | 0.395 | 13.4× | 26.90 |
+| WSL Ubuntu / ext4 | 1024 | 1 | 83.417 | 3.316 | 25.2× | 26.90 |
+| WSL Ubuntu / ext4 | 1024 | 4 | 83.548 | 5.106 | 16.4× | 26.90 |
+| WSL Ubuntu / NTFS | 1024 | 1 | — | 36.844 | — | 25.80 |
+| WSL Ubuntu / NTFS | 1024 | 4 | — | 99.301 | — | 25.80 |
+
+Times are medians where `n=3`; memory is the largest process peak. The
+[complete reports](measurements/document-end-qualification.json) retain individual
+ranges, private commit where available, source-credit peaks, CPU, phases, source
+hashes and completion/cleanup results. The source credit limit and byte quantum
+were not raised. The process does not retain the entire file; kernel file-cache
+memory is outside these process counters. Linux's reported high-water mark can
+already be present at the pre-Application baseline; the individual reports retain
+current and highest sampled RSS separately. End still scans relevant source data,
+and admitted bytes are not physical disk traffic. Unicode fallback, storage
+latency and exact-color recovery can have different costs. These headless
+observations do not measure physical Windows Terminal presentation.
+
+### Original qualification baseline
+
+The tables below retain the earlier production qualification and its failed
+stress observation. They are historical results, not reruns of the updated SDK.
 
 ## Workload and results
 
@@ -115,7 +150,7 @@ storage-path cost from host cadence; they are not a native Linux/Windows ranking
 The native terminal uses the same synchronous processing path, but its physical
 latency and input wakeups were not measured by these headless observations.
 
-The slow long-line End remains an open performance limitation. Bounded memory
+The slow long-line End above is the original baseline; the updated profile is recorded earlier on this page. Bounded memory
 and live UI timers do not imply fast completion of every navigation request.
 
 ## Exact role checks

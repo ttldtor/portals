@@ -384,6 +384,7 @@ struct ControlDocumentSettings {
     fastScroll{}; ///< Positive absolute modified step; absence preserves disabled/default policy.
   std::optional<key::Modifier> fastKeyModifier{};   ///< Exact modified-arrow tag.
   std::optional<key::Modifier> fastWheelModifier{}; ///< Exact modified-wheel tag.
+  std::optional<std::uint8_t> tailWorkTurns{};      ///< Positive managed TEXT-tail quanta per job, from 1 through 255.
 };
 
 /** @brief Owning sparse literals only; never contains IDs, models, handlers or live history. */

@@ -54,7 +54,7 @@ struct DocumentViewConfig {
   DocumentDecoderOptions decoder{.hint = DocumentEncoding::UTF8}; ///< UTF-8 hint; explicit encoding takes precedence.
   std::size_t maxFrameCells{16384};     ///< Maximum actual viewport area; larger views report PAGE_TOO_LARGE.
   std::size_t maxFrameBytes{64 * 1024}; ///< Rendered payload cap, including escaped controls and cluster continuations.
-  std::size_t workBytes{256 * 1024};    ///< Maximum source bytes admitted per worker turn.
+  std::size_t workBytes{256 * 1024};    ///< Maximum source bytes admitted per preparation quantum.
   bool wrap{true};                      ///< Wrap complete ordinary graphemes at the viewport edge.
   DocumentViewMode mode{DocumentViewMode::TEXT}; ///< Active projection; text settings remain retained in HEX.
   DocumentHexOptions hex{};                      ///< Raw-byte row options, used only by HEX.
@@ -64,6 +64,7 @@ struct DocumentViewConfig {
     DocumentLanguage::PLAIN}; ///< Optional source highlighting; plain allocates no lexical cache.
   DocumentSyntaxPolicy syntax{DocumentSyntaxPolicy::AUTO}; ///< Recovery policy; full-prefix work is explicit.
   std::size_t maxAutoHighlightBytes{512 * 1024}; ///< Positive extra source-admission cap per AUTO viewport intent.
+  std::uint8_t tailWorkTurns{32}; ///< Maximum quanta per managed seekable TEXT-tail job; 1 disables batching.
 };
 
 /** @brief Owning scalar observation; no source I/O or preparation is performed by status commands. */

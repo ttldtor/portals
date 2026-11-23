@@ -156,10 +156,9 @@ private:
   bool final_{};
 };
 
-std::expected<DocumentInputPage, DocumentError> readDocumentInput(ByteDocumentSource &source,
-                                                                  DocumentReadRequest request,
-                                                                  DocumentHighlightScan *highlight,
-                                                                  std::stop_token stop, bool protectWindow = true);
+std::expected<DocumentInputPage, DocumentError>
+readDocumentInput(ByteDocumentSource &source, DocumentReadRequest request, DocumentHighlightScan *highlight,
+                  std::stop_token stop, bool protectWindow = true, DocumentReadBatch *batch = nullptr);
 
 // Worker-only helpers. The current layout scan owns all mutable state and its
 // precharged reservation; prepared ranges borrow only immutable frame text.

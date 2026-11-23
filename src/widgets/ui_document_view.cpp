@@ -159,7 +159,7 @@ bool validConfig(const DocumentViewConfig &config) noexcept {
   };
   return config.language >= DocumentLanguage::PLAIN && config.language <= DocumentLanguage::MARKDOWN_SOURCE &&
          config.syntax >= DocumentSyntaxPolicy::AUTO && config.syntax <= DocumentSyntaxPolicy::EXACT &&
-         config.maxAutoHighlightBytes && config.maxAutoHighlightBytes <= SAFE_LIMIT &&
+         config.maxAutoHighlightBytes && config.maxAutoHighlightBytes <= SAFE_LIMIT && config.tailWorkTurns &&
          (config.mode == DocumentViewMode::TEXT || config.mode == DocumentViewMode::HEX) &&
          hexRowWidth({config.hex.bytesPerRow, config.hex.groupSize, config.hex.uppercase, config.hex.showAscii}) &&
          validEncoding(config.decoder.explicitEncoding) && validEncoding(config.decoder.hint) &&
@@ -188,6 +188,7 @@ public:
     fallback_->kind = intent_.kind;
     fallback_->baseFrame = previous_ && previous_->highlight ? previous_->highlight->plain : nullptr;
     try {
+      intent_.managedTailBurst = true;
       completion_ = prepareDocument(source_, intent_, std::move(previous_), generation_, std::move(credit_), stop);
     } catch (...) {
       // The precharged result envelope itself may fail to allocate. Publication
@@ -1311,7 +1312,14 @@ private:
     if (!frame) {
       return std::unexpected(frame.error());
     }
-    const auto extra = std::max({*frame, envelope + page, waitingDemand_.bytes});
+    const auto batchBytes = intent_.tail && state.config.mode != DocumentViewMode::HEX &&
+                                state.source->capabilities().seekable && state.source->capabilities().readSessions
+                              ? DocumentReadBatch::READ_BATCH_METADATA_BYTES
+                              : 0;
+    if (batchBytes > MAX - envelope - page) {
+      return std::unexpected(SourceError::PAGE_TOO_LARGE);
+    }
+    const auto extra = std::max({*frame, envelope + page + batchBytes, waitingDemand_.bytes});
     if (work > MAX - extra) {
       return std::unexpected(SourceError::PAGE_TOO_LARGE);
     }
@@ -1708,6 +1716,7 @@ Description<DocumentView> viewer(DocumentSource source, DocumentViewConfig confi
       effectiveConfig.language = document.language.value_or(config.language);
       effectiveConfig.syntax = document.syntax.value_or(config.syntax);
       effectiveConfig.maxAutoHighlightBytes = document.maxAutoHighlightBytes.value_or(config.maxAutoHighlightBytes);
+      effectiveConfig.tailWorkTurns = document.tailWorkTurns.value_or(config.tailWorkTurns);
       effectiveConfig.lineNumbers = document.lineNumbers.value_or(config.lineNumbers);
       effectiveConfig.wrap = document.wrap.value_or(config.wrap);
       effectiveConfig.mode = document.mode.value_or(config.mode);
