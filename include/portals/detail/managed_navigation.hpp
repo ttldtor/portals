@@ -32,6 +32,11 @@ struct ManagedNavigationRecord {
   std::uint64_t frameRevision{};
   bool finite{};
   bool closed{};
+  bool admittingEdit{};
+  bool editVetoed{};
+  std::unique_ptr<std::vector<std::weak_ptr<EditNavigationParticipant>>> editors;
+  std::expected<void, TreeError> beforeEditTransition(const NavigationPosition *next = nullptr,
+                                                      const std::shared_ptr<ManagedModelSource> &source = {});
   using Capture =
     std::function<std::expected<ModelBookmark, TreeError>(const std::shared_ptr<ManagedNavigationRecord> &, RowId)>;
   using Synchronize = std::function<std::expected<void, TreeError>(const std::shared_ptr<ManagedNavigationRecord> &)>;
@@ -104,6 +109,7 @@ struct LogNavigationSession {
   LogRestoreStatus status;
   std::unique_ptr<LogCheckpointEntry> entries;
   bool closed{};
+
   bool implicit{};
 
   LogCheckpointEntry *find(ModelResource resource) const noexcept;

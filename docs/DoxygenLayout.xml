@@ -91,6 +91,7 @@
         <tab type="user" title="Model bookmarks" url="@ref docs/model-positions.md" />
         <tab type="user" title="Shared model navigation" url="@ref docs/model-navigation.md" />
         <tab type="user" title="Switch models" url="@ref docs/view-models.md" />
+        <tab type="user" title="Edit current record" url="@ref docs/record-edit.md" />
         <tab type="user" title="Bounded queries" url="@ref docs/model-queries.md" />
         <tab type="user" title="UI coroutines" url="@ref docs/ui-coroutines.md" />
         <tab type="user" title="Prepare views from layout" url="@ref docs/virtual-preparation.md" />
@@ -253,6 +254,7 @@
       <tab type="user" title="Закладки модели" url="@ref docs/ru/model-positions.md" />
       <tab type="user" title="Общая навигация модели" url="@ref docs/ru/model-navigation.md" />
       <tab type="user" title="Смена модели" url="@ref docs/ru/view-models.md" />
+      <tab type="user" title="Редактирование записи" url="@ref docs/ru/record-edit.md" />
       <tab type="user" title="Запросы" url="@ref docs/ru/model-queries.md" />
       <tab type="user" title="Подготовка представлений" url="@ref docs/ru/virtual-preparation.md" />
       <tab type="user" title="Прокрутка" url="@ref docs/ru/scroll.md" />

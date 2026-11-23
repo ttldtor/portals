@@ -1,5 +1,6 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include <portals/detail/model_edit.hpp>
 #include <portals/managed.hpp>
 
 namespace portals {
@@ -671,6 +672,14 @@ void ManagedNavigationRecord::cancel() noexcept {
 }
 
 void ManagedNavigationRecord::close() noexcept {
+  if (editors) {
+    for (const auto &weak : *editors) {
+      if (auto participant = weak.lock()) {
+        participant->closed();
+      }
+    }
+  }
+
   closed = true;
   auto oldCapture = std::move(capture);
   auto oldSynchronize = std::move(synchronize);
@@ -779,37 +788,53 @@ std::expected<std::optional<ModelBookmark>, TreeError> ManagedNavigation::readin
 
 std::expected<void, TreeError> ManagedNavigation::navigate(RowId id) const {
   auto record = lock();
-
   if (!record) {
     return std::unexpected(record.error());
   }
   if (!(*record)->capture) {
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
-
   auto capture = (*record)->capture;
   auto value = (*capture)(*record, id);
-
   if (!value) {
     return std::unexpected(value.error());
   }
-
-  record = lock();
-
-  return record ? (*record)->setPosition(std::move(*value), PositionResolution::EXACT)
-                : std::unexpected(record.error());
+  return setCurrent(std::move(*value));
 }
 
 std::expected<void, TreeError> ManagedNavigation::setCurrent(ModelBookmark bookmark) const {
   auto record = lock();
-
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+  const auto position = bookmark.position();
+  NavigationPosition next{bookmark.resource(),
+                          position.kind,
+                          position.kind == PositionKind::ITEM ? std::optional(position.row) : std::nullopt,
+                          position.kind == PositionKind::ITEM ? 0 : position.offset,
+                          position.affinity,
+                          PositionResolution::EXACT};
+  auto admitted = (*record)->beforeEditTransition(&next);
+  if (!admitted) {
+    return std::unexpected(admitted.error());
+  }
+  record = lock();
   return record ? (*record)->setPosition(std::move(bookmark), PositionResolution::EXACT)
                 : std::unexpected(record.error());
 }
 
 std::expected<void, TreeError> ManagedNavigation::clearCurrent() const {
   auto record = lock();
-
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+  NavigationPosition next;
+  next.resource = (*record)->resource;
+  auto admitted = (*record)->beforeEditTransition(&next);
+  if (!admitted) {
+    return std::unexpected(admitted.error());
+  }
+  record = lock();
   return record ? (*record)->setPosition({}, PositionResolution::EMPTY) : std::unexpected(record.error());
 }
 
@@ -1192,3 +1217,53 @@ void ManagedScene::retireNavigation() noexcept {
   navigation_->logSessions.clear();
 }
 } // namespace portals
+
+namespace portals::detail {
+std::expected<void, TreeError>
+ManagedNavigationRecord::beforeEditTransition(const NavigationPosition *next,
+                                              const std::shared_ptr<ManagedModelSource> &nextSource) {
+  try {
+    editVetoed = false;
+    if (!editors) {
+      return {};
+    }
+    if (admittingEdit) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
+    }
+    const auto previousOperation = operation;
+    const auto previousSession = session;
+
+    struct Admission {
+      bool &active;
+
+      ~Admission() {
+        active = false;
+      }
+    } guard{admittingEdit};
+
+    admittingEdit = true;
+    for (std::size_t index = 0; index < editors->size(); ++index) {
+      auto participant = (*editors)[index].lock();
+      if (!participant) {
+        continue;
+      }
+      auto accepted = participant->beforeTransition(next, nextSource ? nextSource : model.lock());
+      if (!accepted) {
+        editVetoed = accepted.error() == TreeError::WOULD_BLOCK || accepted.error() == TreeError::NODE_LIMIT;
+        return accepted;
+      }
+      if (closed || lifetime.expired()) {
+        return std::unexpected(TreeError::CLOSED);
+      }
+      if (operation != previousOperation || session != previousSession) {
+        return std::unexpected(TreeError::WOULD_BLOCK);
+      }
+    }
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  } catch (...) {
+    return std::unexpected(TreeError::CALLBACK_FAILED);
+  }
+}
+} // namespace portals::detail

@@ -17,12 +17,14 @@ template <std::equality_comparable T> class ManagedSource;
 /// @cond INTERNAL
 namespace ui::detail {
 struct Access;
+struct EditAccess;
 } // namespace ui::detail
 
 /// @endcond
 
 namespace detail {
 struct ManagedNavigationRecord;
+struct EditNavigationParticipant;
 struct ManagedNavigationRegistry;
 } // namespace detail
 
@@ -178,6 +180,7 @@ public:
 private:
   friend class ManagedScene;
   friend struct ui::detail::Access;
+  friend struct ui::detail::EditAccess;
   std::expected<std::shared_ptr<detail::ManagedNavigationRecord>, TreeError> lock() const;
   std::weak_ptr<detail::ManagedNavigationRecord> record_;
   std::thread::id owner_{};

@@ -13,11 +13,13 @@ struct SearchItem;
 
 namespace detail {
 struct FindExternalBinding;
-}
+struct EditTextBinding;
+} // namespace detail
 } // namespace portals
 
 namespace portals::ui {
 struct FormFieldConfig;
+struct LineEditConfig;
 struct FindBarConfig;
 struct SuggestionsConfig;
 
@@ -100,6 +102,12 @@ struct Access {
     }
 
     return {};
+  }
+
+  template <class T> static void editDeclaration(ManagedModel<T> model, std::shared_ptr<void> declaration) {
+    if (auto source = model.lock()) {
+      (*source)->editDeclaration = std::move(declaration);
+    }
   }
 
   template <class T> static void ownedModel(ManagedModel<T> model) {
@@ -474,6 +482,15 @@ struct Access {
     portals::detail::MoveOnlyFunction<std::expected<Description<Widget>, ManagedError>(const ControlSettings &)> editor,
     FormFieldOptions options, std::shared_ptr<RecipeLayout> layout = {},
     std::shared_ptr<std::weak_ptr<portals::detail::FormFieldRecord>> bridge = {});
+  static std::expected<void, ManagedError> connectEditValidation(ManagedScene &, Node<FormField>,
+                                                                 std::shared_ptr<portals::detail::EditTextBinding>);
+  static std::expected<Subscription, TreeError> observeEditNavigation(ManagedNavigation, Node<LineEdit>,
+                                                                      std::function<void()>);
+  static std::expected<void, ManagedError>
+  bindEditText(ManagedScene &, Node<LineEdit>, std::shared_ptr<portals::detail::EditTextBinding>, LineEditConfig);
+  static Description<FormField> formField(std::string caption,
+                                          std::function<Description<Widget>(LineEditConfig, ControlSettings)> editor,
+                                          FormFieldConfig config);
   static Description<FormField> formField(std::string caption, std::string initial, FormFieldConfig config);
   static Description<FormField> formField(std::string caption, Description<Widget> editor, FormFieldOptions options);
   static std::expected<std::shared_ptr<portals::detail::FormFieldRecord>, ManagedError> fieldRecord(ManagedScene &scene,

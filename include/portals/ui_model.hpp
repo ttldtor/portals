@@ -19,6 +19,7 @@ namespace detail {
 /// @cond INTERNAL
 struct ModelAccess;
 struct ValueModelAccess;
+struct EditAccess;
 
 struct ModelDeclarationBase {
   enum class Kind {
@@ -169,6 +170,7 @@ public:
 
 private:
   friend struct detail::ModelAccess;
+  friend struct detail::EditAccess;
   friend struct detail::ValueModelAccess;
   template <class> friend class ModelValue;
   template <class, class> friend class ModelField;
@@ -178,6 +180,8 @@ private:
   struct Replacement {
     RowId id;
     const T &value;
+    std::optional<std::uint64_t> expectedVersion;
+    std::uint64_t *acceptedVersion{};
   };
 
   template <class Build>
@@ -272,6 +276,7 @@ public:
 
 private:
   friend struct detail::ModelAccess;
+  friend struct detail::EditAccess;
   std::shared_ptr<detail::NavigationDeclaration<T>> data_;
   TreeError failure_{TreeError::INVALID_ARGUMENT};
 };
@@ -457,6 +462,7 @@ struct ModelAccess {
       if (lifetime.expired()) {
         return fail(TreeError::CLOSED);
       }
+      Access::editDeclaration(*created, data);
       if (data->sequence) {
         Access::ownedModel(*created);
       }
@@ -719,7 +725,11 @@ std::expected<void, ManagedError> Navigation<T>::setModel(Model<T> target, Model
     return std::unexpected(existing.error());
   }
   if (*existing) {
-    return data->handle.setModel(**existing, options);
+    auto result = data->handle.setModel(**existing, options);
+    if (result) {
+      data->initial = target;
+    }
+    return result;
   }
   try {
     detail::MountContext context;
@@ -732,6 +742,7 @@ std::expected<void, ManagedError> Navigation<T>::setModel(Model<T> target, Model
       return changed;
     }
     detail::ModelAccess::publish(context);
+    data->initial = target;
     return {};
   } catch (const std::bad_alloc &) {
     return std::unexpected(ManagedError{ManagedPhase::INPUT, {}, TreeError::NO_MEMORY, {}, {}});
@@ -794,6 +805,23 @@ std::expected<void, ManagedError> Model<T>::mutate(PositionChange change, bool i
     } guard{*sequence};
 
     sequence->editing = true;
+    std::shared_ptr<detail::OwnedEditVersion> editVersion;
+    if (replacement && sequence->editVersions) {
+      for (const auto &weak : *sequence->editVersions) {
+        auto entry = weak.lock();
+        if (entry && entry->row == replacement->id) {
+          editVersion = std::move(entry);
+          break;
+        }
+      }
+    }
+    if (replacement && replacement->expectedVersion &&
+        (!editVersion || editVersion->version != *replacement->expectedVersion)) {
+      return fail(TreeError::WOULD_BLOCK);
+    }
+    if (editVersion && editVersion->version == std::numeric_limits<std::uint64_t>::max()) {
+      return fail(TreeError::IDENTITY_EXHAUSTED);
+    }
     try {
       if (replacement) {
         const auto found = previous->locateRow(replacement->id);
@@ -810,6 +838,9 @@ std::expected<void, ManagedError> Model<T>::mutate(PositionChange change, bool i
           }
 
           if (equal) {
+            if (replacement->acceptedVersion) {
+              *replacement->acceptedVersion = editVersion->version;
+            }
             return {};
           }
         }
@@ -839,6 +870,12 @@ std::expected<void, ManagedError> Model<T>::mutate(PositionChange change, bool i
       }
       // All fallible work precedes the existing model transaction. Publish owner
       // metadata before releasing old rows, whose user destructors may reenter.
+      if (editVersion) {
+        ++editVersion->version;
+      }
+      if (replacement && replacement->acceptedVersion) {
+        *replacement->acceptedVersion = editVersion->version;
+      }
       sequence->current = std::move(next);
       if (inserts) {
         ++sequence->nextId;

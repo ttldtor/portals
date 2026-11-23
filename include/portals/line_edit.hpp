@@ -15,6 +15,7 @@ namespace detail {
 struct LineEditValidationAccess;
 struct LineEditSourceAccess;
 struct LineEditValidationGate;
+struct EditTextDraft;
 } // namespace detail
 
 namespace ui::detail {
@@ -270,10 +271,22 @@ private:
   friend struct detail::LineEditSourceAccess;
   friend class ManagedScene;
   friend struct ui::detail::RefAccess;
+  GraphemeText &editText() noexcept;
+  const GraphemeText &editText() const noexcept;
+  std::unique_ptr<GraphemeText> &editMask() noexcept;
+  const std::unique_ptr<GraphemeText> &editMask() const noexcept;
+  std::size_t &editCursor() noexcept;
+  std::size_t editCursor() const noexcept;
+  std::size_t &editAnchor() noexcept;
+  std::size_t editAnchor() const noexcept;
+  std::int32_t &editScroll() noexcept;
+  std::int32_t editScroll() const noexcept;
+  bool &editDirty() noexcept;
+  bool editDirty() const noexcept;
   void revealCursor();
   std::int32_t cellAt(std::size_t byte) const;
   LineEditOptions options_;
-  std::weak_ptr<detail::LineEditValidationGate> validationGate_;
+  std::shared_ptr<detail::LineEditValidationGate> validationGate_;
   GraphemeText text_;
   std::unique_ptr<GraphemeText> placeholder_;
   std::unique_ptr<GraphemeText> masked_;

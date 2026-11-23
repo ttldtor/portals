@@ -12,6 +12,9 @@
 #include <vector>
 
 namespace portals {
+namespace detail {
+struct EditStorageAccess;
+}
 
 /** @brief Terminal policy for printable East Asian Ambiguous scalars. */
 enum class AmbiguousWidth {
@@ -218,6 +221,7 @@ public:
   [[nodiscard]] TextClip clipPrefix(std::int32_t max_cells) const noexcept;
 
 private:
+  friend struct detail::EditStorageAccess;
   GraphemeText() = default;
   // Count constructors let MSVC Debug iterator-proxy allocation failures propagate.
   std::string bytes_ = std::string(0, '\0');

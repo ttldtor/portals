@@ -4,9 +4,31 @@
 #include <portals/line_edit.hpp>
 
 namespace portals::detail {
+struct LineEditValidationGate;
+
 // Private seam for the numeric editor. No second text Property or editor policy is retained.
 struct LineEditSource {
   virtual ~LineEditSource() = default;
+
+  virtual LineEditStatus failedPublication() const noexcept {
+    return LineEditStatus::FAILED;
+  }
+
+  virtual std::shared_ptr<LineEditValidationGate> gate() {
+    return {};
+  }
+
+  virtual std::expected<std::optional<PropertyUpdate<std::string>>, TreeError> publish(const std::string &value) {
+    auto result = set(value);
+    return result ? std::expected<std::optional<PropertyUpdate<std::string>>, TreeError>(std::move(*result))
+                  : std::unexpected(result.error());
+  }
+
+  // Cancel requires an admitted baseline; display snapshots may intentionally retain an older value.
+  virtual std::expected<std::shared_ptr<const PropertyChange<std::string>>, TreeError> cancelSnapshot() {
+    return snapshot();
+  }
+
   virtual std::expected<std::shared_ptr<const PropertyChange<std::string>>, TreeError> snapshot() = 0;
   virtual std::expected<PropertyUpdate<std::string>, TreeError> set(const std::string &) = 0;
   virtual std::expected<Subscription, TreeError> observe(Node<LineEdit>, std::function<void()>) = 0;
@@ -25,6 +47,9 @@ struct LineEditSourceAccess {
   bind(WidgetTree &, EventRouter &, Node<LineEdit>, std::shared_ptr<LineEditSource>,
        std::function<void(LineEditResult)>, std::function<bool(std::string_view)>, LineEditEvents = {},
        std::shared_ptr<Property<std::string>> legacy = {}, std::shared_ptr<Clipboard> clipboard = {});
+
+  static std::function<std::expected<LineEditResult, TreeError>(bool)> completion(LineEditBinding &);
+  static std::function<std::expected<LineEditResult, TreeError>(const std::string &)> setter(LineEditBinding &);
 
   static LineEditOptions options(const LineEdit &edit) {
     return edit.options_;

@@ -43,6 +43,7 @@ public:
       }
     }
   }
+
   std::expected<PositionHistoryReply, SourceError> changesFrom(std::uint64_t revision) const override {
     if (!revision || revision > revision_) {
       return std::unexpected(SourceError::REVISION_CHANGED);
@@ -123,12 +124,18 @@ private:
   std::shared_ptr<const OwnedHistory> history_;
 };
 
+struct OwnedEditVersion {
+  RowId row;
+  std::uint64_t version{1};
+};
+
 template <class T> struct OwnedSequence {
   std::shared_ptr<const OwnedRows<T>> current;
   std::size_t capacity{CollectionLimits{}.maxRows};
   PositionMapOptions history;
   std::uint64_t nextId{1};
   bool editing{};
+  std::shared_ptr<std::vector<std::weak_ptr<OwnedEditVersion>>> editVersions;
 };
 
 /// @endcond
