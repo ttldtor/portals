@@ -6,3 +6,5 @@
 #include <concepts>
 
 static_assert(std::same_as<decltype(portals::ui::model(std::array{1, 2, 3})), portals::ui::Model<int>>);
+static_assert(std::same_as<decltype(portals::ui::model(42)), portals::ui::Model<int>>);
+static_assert(std::same_as<decltype(portals::ui::model("owned")), portals::ui::Model<std::string>>);

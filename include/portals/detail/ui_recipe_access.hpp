@@ -6,6 +6,8 @@
 #include <portals/detail/ui_recipe_context.hpp>
 #include <portals/ui_action.hpp>
 
+#include <format>
+
 namespace portals {
 struct SearchItem;
 
@@ -76,6 +78,24 @@ struct Access {
     return scene.closed_;
   }
 
+  template <std::equality_comparable T> static ManagedState<T> valueState(const ManagedSource<T> &source) {
+    return source.state_;
+  }
+
+  template <std::equality_comparable T>
+  static std::expected<void, TreeError> validateValueState(ManagedScene &scene, const ManagedState<T> &state) {
+    // lock preserves the original source's affinity, lifetime and origin qualification.
+    auto property = state.lock();
+    if (!property) {
+      return std::unexpected(property.error());
+    }
+    if (state.scene_ != scene.root_.id()) {
+      return std::unexpected(TreeError::WRONG_SESSION);
+    }
+
+    return {};
+  }
+
   template <class T> static void ownedModel(ManagedModel<T> model) {
     if (auto source = model.lock()) {
       (*source)->sinkOnly = true;
@@ -126,6 +146,270 @@ struct Access {
       std::erase(scene.properties_, std::shared_ptr<void>(std::move(property)));
     }
     state = {};
+  }
+
+  template <std::equality_comparable T>
+  static void retireValueState(ManagedScene &scene, ManagedState<T> &state) noexcept {
+    auto property = state.model_.lock();
+
+    // Detach every weak declaration handle before a last value destructor can reenter.
+    state = {};
+    if (property) {
+      std::erase(scene.properties_, std::shared_ptr<void>(property));
+    }
+    // Releasing the pinned property may destroy the scene. Do not access it again.
+  }
+
+  static void reportValueError(const std::shared_ptr<RefTarget> &target, ManagedError &failure,
+                               std::source_location origin, const char *operation = "model.value",
+                               const char *control = "Model") noexcept {
+    failure.operation = operation;
+    failure.operationOrigin = origin;
+
+    if (target && target->owner == std::this_thread::get_id() && !target->lifetime.expired()) {
+      target->scene->reportShortError(failure, operation, {}, control, origin);
+    } else {
+      const auto ticket = SetupFailureScope::latch(failure);
+    }
+  }
+
+  template <class T>
+  static std::expected<ModelResource, TreeError> registeredModelResource(const ManagedModel<T> &model) {
+    auto source = model.lock();
+    if (!source || (*source)->retired || !(*source)->model) {
+      return std::unexpected(source ? TreeError::CLOSED : source.error());
+    }
+
+    return (*source)->navigationResource;
+  }
+
+  template <class T> static std::expected<std::string, TreeError> formatValueCaption(const T &value) {
+    if constexpr (std::same_as<T, GraphemeText>) {
+      return std::expected<std::string, TreeError>(std::in_place, value.bytes());
+    } else if constexpr (std::same_as<T, std::string>) {
+      return std::expected<std::string, TreeError>(std::in_place, value.data(), value.size());
+    } else {
+      const auto text = std::format("{}", value);
+
+      // Copy directly into the checked result: a debug string move can allocate inside noexcept.
+      return std::expected<std::string, TreeError>(std::in_place, text.data(), text.size());
+    }
+  }
+
+  // Optional ownership lives only on captions using value sources. Pins keep every erased callback/value
+  // alive until all scene containers are consistent; their final destructors may retire the scene.
+  struct ValueCaptionGraph {
+    ManagedScene *scene{};
+    std::weak_ptr<const void> lifetime;
+    std::shared_ptr<void> output;
+    std::vector<std::shared_ptr<ManagedScene::ObserverRecord>> observers =
+      std::vector<std::shared_ptr<ManagedScene::ObserverRecord>>(
+        std::initializer_list<std::shared_ptr<ManagedScene::ObserverRecord>>{});
+    std::shared_ptr<void> payload;
+
+    ~ValueCaptionGraph() {
+      if (lifetime.expired()) {
+        return;
+      }
+
+      for (const auto &observer : observers) {
+        observer->retired = true;
+      }
+
+      for (const auto &observer : observers) {
+        observer->subscription = {};
+        std::erase(scene->observers_, observer);
+      }
+
+      if (output) {
+        std::erase(scene->properties_, output);
+      }
+      // No scene access after member destruction starts releasing user captures.
+    }
+  };
+
+  static std::expected<ManagedState<std::string>, ManagedError>
+  valueTextState(ManagedScene &scene, const std::string &initial, const std::shared_ptr<ValueCaptionGraph> &graph) {
+    auto state = scene.state(initial);
+    if (!state) {
+      return std::unexpected(state.error());
+    }
+
+    graph->output = *state->lock();
+
+    return *state;
+  }
+
+  template <class Compute> static auto computeValueText(ManagedScene &scene, Compute &&compute) {
+    struct Computing {
+      std::size_t &count;
+
+      ~Computing() {
+        --count;
+      }
+    } guard{scene.observerCallbacks_};
+
+    ++scene.observerCallbacks_;
+
+    return std::invoke(std::forward<Compute>(compute));
+  }
+
+  template <std::equality_comparable T>
+  static std::expected<void, ManagedError> observeValueText(ManagedScene &scene, Node<Widget> node,
+                                                            ManagedState<T> source,
+                                                            std::function<std::expected<void, TreeError>()> callback,
+                                                            const std::shared_ptr<ValueCaptionGraph> &graph) {
+    auto observed = scene.observe(node, source, [callback = std::move(callback)](const T &) {
+      return callback();
+    });
+    if (!observed) {
+      return observed;
+    }
+
+    const auto record = scene.observers_.back();
+    auto snapshot = source.snapshot();
+    if (!snapshot) {
+      record->retired = true;
+      record->subscription = {};
+      std::erase(scene.observers_, record);
+
+      return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), snapshot.error(), {}, {}});
+    }
+
+    record->successful = (*snapshot)->revision;
+    record->initialPending = false;
+    record->operation = "text.compute";
+    graph->observers.push_back(record);
+
+    return {};
+  }
+
+  static std::expected<void, ManagedError> admitValueTextObservers(ManagedScene &scene, Node<Widget> node,
+                                                                   std::size_t count) {
+    auto admitted = scene.observerAdmission(node);
+    if (!admitted) {
+      return admitted;
+    }
+
+    const auto boundModels = std::ranges::count_if(scene.models_, [](const auto &source) {
+      return source->bound();
+    });
+    const auto nodeObservers = std::ranges::count(scene.observers_, Node<Widget>(node), [](const auto &record) {
+      return record->node;
+    });
+    const auto captures = std::ranges::count_if(scene.liveText_, [&](const auto &record) {
+      return record->origin->node == node;
+    });
+    const auto used = scene.observers_.size() + scene.liveText_.size() + static_cast<std::size_t>(boundModels);
+    const auto nodeUsed = static_cast<std::size_t>(nodeObservers + captures);
+
+    if (count > scene.options_.maxObservers - used || count > scene.options_.maxObserversPerNode - nodeUsed) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), TreeError::NODE_LIMIT, {}, {}});
+    }
+
+    return {};
+  }
+
+  struct ValueCaptionSlot {
+    const void *identity{};
+    std::shared_ptr<ValueCaptionBinding> source;
+  };
+
+  static std::expected<ValueCaptionSlot, ManagedError> valueCaptionSlot(ManagedScene &scene, Node<Widget> node) {
+    auto allowed = scene.boundary(ManagedPhase::BIND, node);
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
+
+    auto entry = scene.find(node);
+    if (!entry) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), TreeError::INVALID_ARGUMENT, {}, {}});
+    }
+
+    return ValueCaptionSlot{entry->caption.get(), entry->caption ? entry->caption->source : nullptr};
+  }
+
+  template <class Receiver>
+  static std::expected<void, ManagedError>
+  installValueCaption(ManagedScene &scene, Node<Receiver> node, ManagedState<std::string> text,
+                      std::shared_ptr<ValueCaptionBinding> source, const void *previous, MountContext &context) {
+    auto slot = valueCaptionSlot(scene, node);
+    if (!slot) {
+      return std::unexpected(slot.error());
+    }
+    if (slot->identity != previous) {
+      return std::unexpected(ManagedError{ManagedPhase::BIND, node.id(), TreeError::WOULD_BLOCK, {}, {}});
+    }
+
+    auto candidate = std::make_unique<ManagedScene::CaptionBinding>();
+
+    if constexpr (std::same_as<Receiver, Border>) {
+      candidate->node = node;
+    } else {
+      candidate->node = Node<Control>(node);
+    }
+    candidate->model = text;
+    candidate->source = std::move(source);
+
+    auto retired = std::make_shared<std::unique_ptr<ManagedScene::CaptionBinding>>();
+
+    context.release.emplace_back([retired] {
+    });
+
+    // syncCaption validates and allocates text before setControlText. Publication after that is a swap
+    // and has no allocation/callout. A failed candidate therefore cannot leave the old source detached.
+    auto synced = scene.syncCaption(node, *candidate, ManagedPhase::BIND);
+    if (!synced) {
+      return synced;
+    }
+
+    auto entry = scene.find(node);
+    entry->caption.swap(candidate);
+    retired->swap(candidate);
+
+    // The transaction keeps the previous graph until descriptor publication has finished. Its final
+    // callable destructor may destroy the scene, so retirement must follow the last scene access.
+
+    return {};
+  }
+
+  template <std::equality_comparable T, class Projection>
+  static std::expected<ManagedState<std::string>, ManagedError>
+  projectValueCaption(ManagedScene &scene, Node<Widget> node, ManagedState<T> source,
+                      const std::shared_ptr<Projection> &projection, const std::shared_ptr<ValueCaptionGraph> &graph) {
+    auto admitted = scene.observerAdmission(node);
+    if (!admitted) {
+      return std::unexpected(admitted.error());
+    }
+
+    graph->observers.reserve(1);
+    // Only shared ownership is copied inside derive. Constructing the user's callable happens before
+    // entering it; its pure invocation follows the existing derive non-reentry contract.
+    auto text = scene.derive(source, [projection](const T &value) -> std::expected<std::string, TreeError> {
+      if constexpr (std::is_member_pointer_v<Projection> || std::is_pointer_v<Projection>) {
+        if (!*projection) {
+          return std::unexpected(TreeError::INVALID_ARGUMENT);
+        }
+      }
+
+      decltype(auto) projected = std::invoke(*projection, value);
+
+      if constexpr (portals::detail::IS_DERIVED_EXPECTED<std::remove_cvref_t<decltype(projected)>>) {
+        return projected ? formatValueCaption(*projected)
+                         : std::expected<std::string, TreeError>(std::unexpected(projected.error()));
+      } else {
+        return formatValueCaption(projected);
+      }
+    });
+    if (!text) {
+      return std::unexpected(text.error());
+    }
+
+    graph->output = *text->state_.lock();
+    graph->observers.push_back(scene.observers_.back());
+    graph->observers.back()->node = node;
+
+    return text->state_;
   }
 
   static bool choiceWithin(ManagedScene &scene, Node<Widget> root, Node<Widget> node) {

@@ -22,6 +22,7 @@ class PopupMenu;
 namespace portals::ui {
 class LogSource;
 class DocumentSource;
+class ValueText;
 template <class T> class Description;
 template <class T> class Ref;
 template <class T> class Model;
@@ -32,6 +33,11 @@ class DialogCommandResult;
 namespace detail {
 struct SceneAnchor;
 struct RefTarget;
+
+/// @cond INTERNAL
+void reportCaptionModelError(const std::shared_ptr<RefTarget> &target, ManagedError &failure,
+                             std::source_location origin, const char *control) noexcept;
+/// @endcond
 
 /** @brief Owning request identity; the facade and its widgets remain weakly observed. */
 struct LookupSource {
@@ -1124,6 +1130,53 @@ public:
 
     return result;
   }
+
+  /** @brief Replace a scalar caption source while preserving its original projection.
+   * @tparam Value Owning scalar root, required to match an installed projection's root type.
+   * @param source Cold or same-scene scalar; a plain label accepts a default-formattable value.
+   * @param origin Diagnostic registration site.
+   * @return Checked admission; rejection preserves the previous source and caption. Same source is silent.
+   * Computed text roots accept a whole ValueText instead of an individual input model.
+   */
+  template <class Value>
+    requires(std::same_as<T, Label> || std::same_as<T, Button> || std::same_as<T, Border>) &&
+            std::equality_comparable<Value> && std::copy_constructible<Value>
+  std::expected<void, ManagedError> setModel(Model<Value> source,
+                                             std::source_location origin = std::source_location::current()) const;
+
+  /** @tparam Value Owning scalar root accepted by setModel.
+   * @param source Replacement scalar. @param origin Public command site.
+   * @return Admission success; a checked rejection is collected through the existing facade.
+   */
+  template <class Value>
+    requires(std::same_as<T, Label> || std::same_as<T, Button> || std::same_as<T, Border>) &&
+            std::equality_comparable<Value> && std::copy_constructible<Value>
+  bool model(Model<Value> source, std::source_location origin = std::source_location::current()) const {
+    const auto observation = target();
+    auto result = setModel(std::move(source), origin);
+
+    if (!result) {
+      detail::reportCaptionModelError(observation, result.error(), origin,
+                                      std::same_as<T, Label>    ? "Label"
+                                      : std::same_as<T, Button> ? "Button"
+                                                                : "Border");
+    }
+
+    return static_cast<bool>(result);
+  }
+
+  /** @param source Complete owning formatted expression; never redirects one of its input fields.
+   * @param origin Public command site. @return Checked admission preserving the old binding on rejection.
+   */
+  std::expected<void, ManagedError> setModel(const ValueText &source,
+                                             std::source_location origin = std::source_location::current()) const
+    requires(std::same_as<T, Label> || std::same_as<T, Button> || std::same_as<T, Border>);
+
+  /** @param source Complete replacement expression. @param origin Public command site.
+   * @return Admission success, collecting a checked rejection once through the existing facade.
+   */
+  bool model(const ValueText &source, std::source_location origin = std::source_location::current()) const
+    requires(std::same_as<T, Label> || std::same_as<T, Button> || std::same_as<T, Border>);
 
   /** @tparam Row Immutable row type of this list or table.
    * @param source Cold single-scene model. @param options Existing restore/reset policy.

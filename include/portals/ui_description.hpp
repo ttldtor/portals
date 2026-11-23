@@ -1383,6 +1383,7 @@ public:
       frame.options = std::move(options);
       frame.hasOptions = true;
       frame.invalidPattern = false;
+      frame.titleBinding = {};
     }
 
     return std::move(*this);
@@ -1441,6 +1442,7 @@ public:
       frame.options = {};
       frame.hasOptions = true;
       frame.invalidPattern = !selected;
+      frame.titleBinding = {};
 
       if (selected) {
         frame.options.pattern = *selected;
@@ -1465,6 +1467,24 @@ public:
 
     return std::move(*this);
   }
+
+  /** @param pattern Checked compact frame preset.
+   * @param title Owning live text expression using the same scalar dependencies as label/button captions.
+   * @return Consuming ordinary framed recipe. Native ScrollArea-owned frames use their static title API.
+   * Errors reject mount; changed titles preserve frame style, decoration, allocation and size policy.
+   */
+  Description &&framed(std::string_view pattern, ValueText title) &&
+    requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>);
+
+  /** @tparam Value Owning scalar accepted by the standard formatter.
+   * @param pattern Checked compact preset. @param title Cold scalar title source.
+   * @return Same live-title recipe as framed(pattern, text("{}", title)).
+   */
+  template <class Value>
+    requires std::formattable<Value, char> && std::equality_comparable<Value> &&
+             std::copy_constructible<Value>
+             Description &&framed(std::string_view pattern, Model<Value> title) &&
+               requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>);
 
   /** @param outer Empty observer published for the retained Border only after complete mount success.
    * @param options Owning advanced frame settings.
@@ -1515,6 +1535,24 @@ public:
 
     return std::move(*this);
   }
+
+  /** @param outer Empty observing slot for this frame, published after the complete subtree mounts.
+   * @param pattern Checked compact preset. @param title Owning live formatted title.
+   * @return Same consuming child recipe; outer.model(...) may replace the complete title expression.
+   */
+  Description &&framed(Ref<Border> outer, std::string_view pattern, ValueText title) &&
+    requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>);
+
+  /** @tparam Value Copyable owning scalar accepted by the standard formatter.
+   * @param outer Empty observing slot for this frame. @param pattern Checked compact preset.
+   * @param title Cold scalar root; compatible outer.model(...) preserves its default formatter.
+   * @return Same consuming child recipe with a dynamically bound ordinary Border title.
+   */
+  template <class Value>
+    requires std::formattable<Value, char> && std::equality_comparable<Value> &&
+             std::copy_constructible<Value>
+             Description &&framed(Ref<Border> outer, std::string_view pattern, Model<Value> title) &&
+               requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>);
 
   /** @param cells Nonnegative fixed width; replaces only the horizontal bounds/mode.
    * @return Consuming recipe; invalid cells fail at mount without publishing refs.
@@ -2463,6 +2501,12 @@ private:
 
         state->frame->mounted = *mounted;
         mountParent = *mounted;
+        if (state->frame->titleBinding) {
+          auto bound = state->frame->titleBinding(scene, *mounted, context);
+          if (!bound) {
+            return std::unexpected(bound.error());
+          }
+        }
       }
     }
 

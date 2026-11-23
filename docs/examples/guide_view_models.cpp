@@ -25,7 +25,7 @@ int main() {
 
   // clang-format off
   return ui::scene(ui::vbox(
-    ui::label(region, "Europe | F2: Europe | F3: Asia | F10: quit"),
+    ui::label(region, navigation.current(), ui::bySource<City>({{europe, "Europe"}, {asia, "Asia"}})),
     ui::hbox(
       ui::virtualList(navigation, &City::name).width(22).framed("rounded", "Cities"),
       ui::virtualTable(navigation,
@@ -33,14 +33,11 @@ int main() {
         tableColumn("Orders", &City::orders, 8))
           .framed("rounded", "Orders"))
         .height(8),
-    ui::label("Tab: focus | arrows: current | both models remember their own place")))
+    ui::label("F2: Europe | F3: Asia | F10: quit | both models remember their own place")))
     | ui::theme(nordTheme())
     | ui::onKey("F2 | F3", [&](const KeyEvent &event) {
         const bool europeSelected = event.key == InputKey::F2;
-        if (navigation.model(europeSelected ? europe : asia)) {
-          region.text() = europeSelected ? "Europe | F2: Europe | F3: Asia | F10: quit"
-                                         : "Asia | F2: Europe | F3: Asia | F10: quit";
-        }
+        navigation.model(europeSelected ? europe : asia);
       })
     | ui::onKey("F10 | Ctrl+C", ui::quit)
     | ui::runApp();

@@ -63,6 +63,20 @@ struct ActionAccess;
 struct ActionStore;
 struct ActionRegistry;
 struct AsyncAccess;
+struct MountContext;
+
+/// @cond INTERNAL
+struct ValueCaptionBinding {
+  using Bind = std::function<std::expected<void, ManagedError>(ManagedScene &, std::shared_ptr<void>, MountContext &,
+                                                               const void *)>;
+  const void *type{};
+  std::shared_ptr<void> source;
+  std::shared_ptr<const Bind> bind;
+  std::shared_ptr<void> graph;
+  std::shared_ptr<ValueCaptionBinding> retiredNext;
+};
+
+/// @endcond
 
 /// @cond INTERNAL
 struct SceneActivity {
@@ -2388,9 +2402,10 @@ private:
   std::vector<std::weak_ptr<detail::SpinnerState>> spinners_ = std::vector<std::weak_ptr<detail::SpinnerState>>(0);
 
   struct CaptionBinding {
-    Node<Control> node;
+    std::variant<Node<Control>, Node<Border>> node;
     ManagedState<std::string> model;
     std::optional<std::uint64_t> revision;
+    std::shared_ptr<ui::detail::ValueCaptionBinding> source;
   };
 
   std::expected<Node<DataStateView>, ManagedError> beginDataState(Node<Widget> parent, DataPresentation initial,
@@ -2481,7 +2496,7 @@ private:
   std::expected<void, TreeError> prepareScrollFrame(const LayoutSnapshot &snapshot);
   void completeScrollFrame() noexcept;
 
-  std::expected<void, ManagedError> syncCaption(Node<Control> node, CaptionBinding &binding, ManagedPhase phase);
+  std::expected<void, ManagedError> syncCaption(Node<Widget> node, CaptionBinding &binding, ManagedPhase phase);
 
   template <class T>
   std::expected<std::shared_ptr<detail::ManagedModelSourceOf<T>>, ManagedError> modelSource(ManagedModel<T> model,

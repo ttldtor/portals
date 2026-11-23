@@ -6,6 +6,18 @@ add_library(portals_ui_model_header_consumer OBJECT ui_model_header.cpp)
 target_link_libraries(portals_ui_model_header_consumer PRIVATE portals::core)
 set_target_properties(portals_ui_model_header_consumer PROPERTIES CXX_EXTENSIONS OFF)
 
+add_library(portals_ui_value_headers_consumer OBJECT ui_value_headers.cpp)
+target_link_libraries(portals_ui_value_headers_consumer PRIVATE portals::core)
+set_target_properties(portals_ui_value_headers_consumer PROPERTIES CXX_EXTENSIONS OFF)
+add_executable(portals_value_models_consumer value_models.cpp)
+target_link_libraries(portals_value_models_consumer PRIVATE portals::core)
+set_target_properties(portals_value_models_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_value_models_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.value-models COMMAND portals_value_models_consumer)
+set_tests_properties(consumer.value-models PROPERTIES TIMEOUT 15)
+
 option(PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO
   "Use GCC backtrace-only Debug information; preserve assertions and the SDK producer" OFF)
 if(PORTALS_PACKAGE_CONSUMER_MINIMAL_DEBUG_INFO)
@@ -1252,6 +1264,15 @@ set_target_properties(portals_docs_view_models_consumer PROPERTIES CXX_EXTENSION
 if(WIN32)
   target_sources(portals_docs_view_models_consumer PRIVATE no_dialogs.cpp)
 endif()
+
+foreach(guide IN ITEMS value_models value_captions)
+  add_executable(portals_docs_${guide}_consumer docs/examples/guide_${guide}.cpp)
+  target_link_libraries(portals_docs_${guide}_consumer PRIVATE portals::core)
+  set_target_properties(portals_docs_${guide}_consumer PROPERTIES CXX_EXTENSIONS OFF)
+  if(WIN32)
+    target_sources(portals_docs_${guide}_consumer PRIVATE no_dialogs.cpp)
+  endif()
+endforeach()
 
 add_executable(portals_document_source_consumer document_source.cpp)
 add_library(portals_document_source_headers OBJECT document_source_header.cpp
