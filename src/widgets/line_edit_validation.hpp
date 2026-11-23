@@ -22,6 +22,29 @@ enum class EditorValidationDecision {
 // service and the weak widget retirement hook provide the final cancellation boundary.
 struct LineEditValidationGate {
   virtual ~LineEditValidationGate() = default;
+
+  virtual EditTextDraft *draft() const noexcept {
+    return nullptr;
+  }
+
+  virtual void painted() noexcept {
+  }
+
+  virtual bool writable() const noexcept {
+    return true;
+  }
+
+  virtual std::expected<void, TreeError> admit(std::size_t, bool) {
+    return {};
+  }
+
+  virtual void accepted() noexcept {
+  }
+
+  virtual bool attach(std::shared_ptr<LineEditValidationGate>) {
+    return false;
+  }
+
   virtual std::expected<EditorValidationDecision, TreeError> check(std::string_view, EditorValidationIdentity) = 0;
   virtual void retire() noexcept = 0;
   virtual void hold() noexcept = 0;

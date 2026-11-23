@@ -7,6 +7,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Current-record edit sessions retain drafts and editor history by exact record and
+  field. They reuse the existing editing modes and distinguish pending submission
+  from source acceptance. A complete declarative city-directory guide demonstrates
+  navigation, explicit save and cancel; source capabilities qualify conditional
+  writes and partial results.
+
 - Owned sequence models support checked `update(RowId, value)` and collected
   `row(RowId, value)`. Replacement keeps the row identity and navigation position;
   equal comparable values are silent. `navigation.currentRow()` reads the existing

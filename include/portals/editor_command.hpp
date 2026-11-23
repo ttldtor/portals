@@ -13,7 +13,8 @@ namespace ui::detail {
 struct RefAccess;
 struct ActionAccess;
 struct AsyncAccess;
-}
+struct EditAccess;
+} // namespace ui::detail
 
 /** @brief Owning checked editor command, preserving exactly its collector reporting receipt.
  * Construction is private: adapters cannot mistake an unrelated failure for an already reported command.
@@ -36,6 +37,7 @@ private:
   friend struct ui::detail::RefAccess;
   friend struct ui::detail::ActionAccess;
   friend struct ui::detail::AsyncAccess;
+  friend struct ui::detail::EditAccess;
 
   EditorCommandResult(std::expected<void, TreeError> result, std::weak_ptr<const void> collector, bool reported)
       : result_(result), collector_(std::move(collector)), reported_(reported) {

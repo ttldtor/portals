@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "form_field_async.hpp"
+#include <portals/detail/model_edit.hpp>
 #include <portals/ui_form_field.hpp>
 
 namespace portals {
@@ -489,6 +490,18 @@ Description<FormField> detail::Access::formField(std::string caption, Descriptio
 }
 
 Description<FormField> detail::Access::formField(std::string caption, std::string initial, FormFieldConfig config) {
+  return formField(
+    std::move(caption),
+    [initial = std::move(initial)](LineEditConfig editor, ControlSettings settings) {
+      return erase(lineEdit(initial, std::move(editor)).settings(std::move(settings)));
+    },
+    std::move(config));
+}
+
+Description<FormField>
+detail::Access::formField(std::string caption,
+                          std::function<Description<Widget>(LineEditConfig, ControlSettings)> editor,
+                          FormFieldConfig config) {
   auto async = std::move(config.validateAsync);
   const auto limits = config.validationLimits;
   auto bridge = std::make_shared<std::weak_ptr<portals::detail::FormFieldRecord>>();
@@ -554,7 +567,7 @@ Description<FormField> detail::Access::formField(std::string caption, std::strin
                            .required = config.required,
                            .requiredMessage = std::move(config.requiredMessage),
                            .appearance = std::move(config.appearance)};
-  auto factory = [initial = std::move(initial), config = std::move(config.editor)](
+  auto factory = [editor = std::move(editor), config = std::move(config.editor)](
                    const ControlSettings &settings) mutable -> std::expected<Description<Widget>, ManagedError> {
     ControlSettings patch{.text = settings.text,
                           .editMode = settings.editMode,
@@ -565,7 +578,7 @@ Description<FormField> detail::Access::formField(std::string caption, std::strin
                           .history = settings.history,
                           .limits = settings.limits};
 
-    return erase(lineEdit(initial, std::move(config)).settings(std::move(patch)));
+    return editor(std::move(config), std::move(patch));
   };
   auto recipe = formFieldComposition(std::move(caption), std::move(factory), std::move(options), {}, bridge);
 
@@ -657,3 +670,32 @@ std::expected<void, ManagedError> detail::displayField(const std::shared_ptr<Ref
   return scene ? Access::displayField(**scene, target->node, std::move(value)) : std::unexpected(scene.error());
 }
 } // namespace portals::ui
+
+namespace portals::ui::detail {
+std::expected<void, ManagedError>
+Access::connectEditValidation(ManagedScene &scene, Node<FormField> field,
+                              std::shared_ptr<portals::detail::EditTextBinding> source) {
+  auto record = fieldRecord(scene, field);
+  if (!record) {
+    return std::unexpected(record.error());
+  }
+  source->validation =
+    [weak = std::weak_ptr(*record)]() -> std::expected<std::shared_ptr<const FieldValidation>, TreeError> {
+    auto value = weak.lock();
+    if (!value || !value->active) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+    return value->presentation;
+  };
+  source->displayValidation = [weak = std::weak_ptr(*record)](
+                                std::shared_ptr<const FieldValidation> presentation) -> std::expected<void, TreeError> {
+    auto value = weak.lock();
+    if (!value || !value->active) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+    value->pending = std::move(presentation);
+    return publish(value);
+  };
+  return {};
+}
+} // namespace portals::ui::detail

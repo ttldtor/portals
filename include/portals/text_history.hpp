@@ -105,6 +105,8 @@ public:
    * @return False for a regular equal-text edit; true for reset and traversal.
    */
   [[nodiscard]] bool changed() const noexcept;
+  /** @return Owning history bytes after this prepared operation commits; no mutation or allocation. */
+  [[nodiscard]] std::size_t retainedBytes() const noexcept;
   /** @brief Return the validated target cursor.
    * @return Byte offset of the active selection end, or zero for an empty handle.
    */

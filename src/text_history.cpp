@@ -372,3 +372,9 @@ std::size_t TextHistory::retainedBytes() const noexcept {
 }
 
 } // namespace portals
+
+namespace portals {
+std::size_t PreparedTextHistory::retainedBytes() const noexcept {
+  return state_ && state_->next ? state_->next->retained : 0;
+}
+} // namespace portals

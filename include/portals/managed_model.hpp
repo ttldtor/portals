@@ -36,6 +36,7 @@ struct ManagedModelSource {
   virtual std::expected<bool, TreeError> synchronize() = 0;
   virtual void retire() noexcept = 0;
   std::shared_ptr<ManagedOrigin> origin;
+  std::shared_ptr<void> editDeclaration;
   bool retired{};
   Node<Widget> receiver;
   ModelResource navigationResource;
@@ -80,6 +81,7 @@ template <class T> struct ManagedModelSourceOf final : ManagedModelSource {
     preparation.reset();
     sync = {};
     model.reset();
+    editDeclaration.reset();
   }
 
   std::expected<bool, TreeError> synchronize() override {

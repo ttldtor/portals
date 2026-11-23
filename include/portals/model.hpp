@@ -16,6 +16,10 @@
 namespace portals {
 class PositionChangeHistory;
 
+namespace ui::detail {
+struct EditAccess;
+}
+
 /** @brief Provider-assigned column identity; typed row accessors define column values. */
 struct ColumnId {
   std::uint64_t value{};      ///< Nonzero identity within one model.
@@ -1083,6 +1087,7 @@ public:
 
 private:
   friend class ManagedScene;
+  friend struct ui::detail::EditAccess;
 
   // Both queued provider delivery and managed UI collection adapters use this same transaction.
   static std::expected<void, TreeError> applySnapshot(detail::ModelState<T> &state,

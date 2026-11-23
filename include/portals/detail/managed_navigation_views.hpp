@@ -609,6 +609,11 @@ std::expected<void, ManagedError> ManagedScene::bindNavigationView(Node<W> node,
         auto updated = navigation.navigate(*selected);
 
         if (!updated) {
+          if (owner->editVetoed && !lifetime.expired() && !closed_) {
+            navigation_->refreshAfterLayout = true;
+            auto invalidated = app_.tree().invalidate(node, Invalidation::LAYOUT);
+            return finish(invalidated);
+          }
           return finish(updated);
         }
         auto live = stillBound();
@@ -897,6 +902,13 @@ ManagedScene::replaceNavigationModel(const std::shared_ptr<detail::ManagedNaviga
     return std::unexpected(
       error(ManagedPhase::INPUT, root_, previousModel ? TreeError::INVALID_ARGUMENT : TreeError::CLOSED));
   }
+  auto editAdmission = record->beforeEditTransition();
+  if (!editAdmission) {
+    return std::unexpected(error(ManagedPhase::INPUT, root_, editAdmission.error()));
+  }
+  if (record->closed || record->lifetime.expired()) {
+    return std::unexpected(error(ManagedPhase::INPUT, root_, TreeError::CLOSED));
+  }
   const bool sameModel = previousModel == *source;
   if (sameModel && !prepared && options.restore == ModelRestorePolicy::REMEMBER) {
     return {};
@@ -1075,8 +1087,16 @@ ManagedScene::replaceNavigationModel(const std::shared_ptr<detail::ManagedNaviga
       }
       return value;
     };
-    auto publication = record->preparePublication(logical(target.current, target.currentResolution), target.selection,
-                                                  logical(target.reading, target.readingResolution));
+    const auto nextCurrent = logical(target.current, target.currentResolution);
+    auto editTarget = record->beforeEditTransition(&nextCurrent, *source);
+    if (!editTarget) {
+      return fail(editTarget.error());
+    }
+    if (record->closed || lifetime.expired() || record->operation != operation || record->sequence != sequence) {
+      return fail(record->closed || lifetime.expired() ? TreeError::CLOSED : TreeError::WOULD_BLOCK);
+    }
+    auto publication =
+      record->preparePublication(nextCurrent, target.selection, logical(target.reading, target.readingResolution));
     if (!publication) {
       return fail(publication.error());
     }

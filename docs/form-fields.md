@@ -9,6 +9,8 @@ message. The scene owns the composition. Ordinary text fields create their
 internal editor state; applications do not keep binding tokens or synchronize
 the captions manually.
 
+For fields of the selected model record, use a [record edit session](record-edit.md) so drafts and history follow their original records.
+
 ## Account settings example
 
 The complete program edits a display name and an email address, demonstrates a
