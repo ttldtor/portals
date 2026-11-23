@@ -133,6 +133,21 @@ public:
    * Existing identities survive; failure preserves the installed snapshot.
    */
   std::expected<void, ManagedError> insert(std::uint64_t index, const T &value) const;
+  /** @brief Replace one owned row value while preserving its model-local identity and order.
+   * @param id Exact live key from this model; missing or stale generations report INVALID_ARGUMENT.
+   * @param value Copy-constructible replacement, copied before publication; no assignment is required.
+   * @return Success or typed capability, lifetime, reentry, key, revision or allocation failure.
+   * Equality-comparable values that compare equal are a no-op; other values publish a revision.
+   * Precommit failure preserves the snapshot. Later delivery errors do not roll back an accepted update.
+   */
+  std::expected<void, ManagedError> update(RowId id, const T &value) const;
+  /** @brief Replace an owned row value and collect a checked failure in the existing event diagnostics.
+   * @param id Exact model-local row key, with the same validation as update().
+   * @param value Replacement copied under update() admission.
+   * @param origin Caller location retained by collected diagnostics.
+   * @return True on acceptance or equality no-op; false after reporting the update() failure.
+   */
+  bool row(RowId id, const T &value, std::source_location origin = std::source_location::current()) const;
   /** @brief Erase a range from a mounted owned sequence on its UI thread.
    * @param first Range start; the end boundary is valid for an empty range.
    * @param count Erased count, defaulting to one; zero is a no-op.
@@ -159,8 +174,15 @@ private:
   template <class, class> friend class ModelField;
   std::shared_ptr<detail::ModelDeclarationBase> data_;
   TreeError failure_{TreeError::INVALID_ARGUMENT};
+
+  struct Replacement {
+    RowId id;
+    const T &value;
+  };
+
   template <class Build>
-  std::expected<void, ManagedError> mutate(PositionChange change, bool inserts, Build build) const;
+  std::expected<void, ManagedError> mutate(PositionChange change, bool inserts, Build build,
+                                           const Replacement *replacement = nullptr) const;
 };
 
 /** @brief Cold explicit shared navigation; ordinary model-source views stay independent.
@@ -187,6 +209,36 @@ public:
       return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::CLOSED, {}, {}});
     }
     return data_->handle;
+  }
+
+  /** @brief Read the current model-local item key from the existing managed navigation channel.
+   * @return Logical current RowId, successful nullopt for no current item, or the original
+   * cold, closed, wrong-thread or channel access failure. No alias is registered or rows read.
+   * The key does not promise materialized data; update() validates its current existence independently.
+   */
+  std::expected<std::optional<RowId>, ManagedError> currentRow() const {
+    auto context = managed();
+
+    if (!context) {
+      return std::unexpected(context.error());
+    }
+
+    auto fail = [&](TreeError error) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, data_->observation->node.id(), error, {}, {}});
+    };
+    auto channel = context->current();
+
+    if (!channel) {
+      return fail(channel.error());
+    }
+
+    auto value = channel->snapshot();
+
+    if (!value) {
+      return fail(value.error());
+    }
+
+    return (*value)->value.row;
   }
 
   /** @brief Observe the accepted navigation channel as a cold read-only scalar model.
@@ -613,12 +665,13 @@ Model<T> model(std::array<T, N> values, CollectionLimits limits = {}, ModelOptio
       if (sequence->current) {
         return sequence->current;
       }
+
       std::vector<ModelRow<T>> rows(std::initializer_list<ModelRow<T>>{});
       rows.reserve(N);
       for (std::size_t index = 0; index < N; ++index) {
         rows.push_back({{index + 1, 1}, values[index]});
       }
-      auto proof = std::make_shared<detail::OwnedHistory>(1, sequence->history);
+      auto proof = std::make_shared<detail::OwnedHistory>(1, N, sequence->history);
       sequence->current = std::make_shared<detail::OwnedRows<T>>(rows, 1, std::move(proof));
       sequence->nextId = N + 1;
       return sequence->current;
@@ -689,7 +742,8 @@ std::expected<void, ManagedError> Navigation<T>::setModel(Model<T> target, Model
 
 template <class T>
 template <class Build>
-std::expected<void, ManagedError> Model<T>::mutate(PositionChange change, bool inserts, Build build) const {
+std::expected<void, ManagedError> Model<T>::mutate(PositionChange change, bool inserts, Build build,
+                                                   const Replacement *replacement) const {
   auto handle = managed();
   if (!handle) {
     return std::unexpected(handle.error());
@@ -719,17 +773,13 @@ std::expected<void, ManagedError> Model<T>::mutate(PositionChange change, bool i
         (change.kind == PositionChangeKind::MOVE && change.destination > count - change.removed)) {
       return fail(TreeError::INVALID_ARGUMENT);
     }
-    if ((!change.removed && !change.inserted) ||
-        (change.kind == PositionChangeKind::MOVE && change.destination == change.first)) {
+    if (!replacement && ((!change.removed && !change.inserted) ||
+                         (change.kind == PositionChangeKind::MOVE && change.destination == change.first))) {
       return {};
     }
     if (change.inserted > std::numeric_limits<std::uint64_t>::max() - (count - change.removed) ||
         count - change.removed + change.inserted > sequence->capacity) {
       return fail(TreeError::NODE_LIMIT);
-    }
-    if (previous->revision() == std::numeric_limits<std::uint64_t>::max() ||
-        (inserts && sequence->nextId == std::numeric_limits<std::uint64_t>::max())) {
-      return fail(TreeError::IDENTITY_EXHAUSTED);
     }
 
     struct Editing {
@@ -745,11 +795,37 @@ std::expected<void, ManagedError> Model<T>::mutate(PositionChange change, bool i
 
     sequence->editing = true;
     try {
+      if (replacement) {
+        const auto found = previous->locateRow(replacement->id);
+
+        if (found.state != RowLookupState::FOUND) {
+          return fail(TreeError::INVALID_ARGUMENT);
+        }
+
+        if constexpr (std::equality_comparable<T>) {
+          const bool equal = previous->rows()[static_cast<std::size_t>(found.index)].value == replacement->value;
+
+          if (lifetime.expired() || detail::Access::modelSceneClosed(**owner)) {
+            return fail(TreeError::CLOSED);
+          }
+
+          if (equal) {
+            return {};
+          }
+        }
+      }
+
+      if (previous->revision() == std::numeric_limits<std::uint64_t>::max() ||
+          (inserts && sequence->nextId == std::numeric_limits<std::uint64_t>::max())) {
+        return fail(TreeError::IDENTITY_EXHAUSTED);
+      }
+
       std::vector<ModelRow<T>> rows(std::initializer_list<ModelRow<T>>{});
       const auto nextCount = change.kind == PositionChangeKind::MOVE ? count : count - change.removed + change.inserted;
       rows.reserve(static_cast<std::size_t>(nextCount));
       std::invoke(build, rows, previous->rows(), sequence->nextId);
-      auto history = std::make_shared<detail::OwnedHistory>(previous->history(), count, change);
+      auto history = std::make_shared<detail::OwnedHistory>(previous->history(), count,
+                                                            replacement ? std::nullopt : std::optional(change));
       auto next = std::make_shared<detail::OwnedRows<T>>(rows, previous->revision() + 1, std::move(history));
       if (lifetime.expired()) {
         return fail(TreeError::CLOSED);
@@ -789,6 +865,30 @@ template <class T> std::expected<void, ManagedError> Model<T>::insert(std::uint6
       }
     }
   });
+}
+
+template <class T> std::expected<void, ManagedError> Model<T>::update(RowId id, const T &value) const {
+  const Replacement replacement{id, value};
+
+  return mutate(
+    {}, false,
+    [&](auto &rows, auto old, std::uint64_t) {
+      for (const auto &row : old) {
+        rows.emplace_back(row.id, row.id == id ? value : row.value);
+      }
+    },
+    &replacement);
+}
+
+template <class T> bool Model<T>::row(RowId id, const T &value, std::source_location origin) const {
+  const auto observation = data_ ? data_->observation : nullptr;
+  auto result = update(id, value);
+
+  if (!result) {
+    detail::reportEventError(observation, result.error(), origin);
+  }
+
+  return result.has_value();
 }
 
 template <class T> std::expected<void, ManagedError> Model<T>::erase(std::uint64_t first, std::uint64_t count) const {

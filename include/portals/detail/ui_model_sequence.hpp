@@ -15,23 +15,39 @@ struct OwnedChange {
 
 class OwnedHistory final : public PositionChangeHistory {
 public:
-  OwnedHistory(std::uint64_t revision, PositionMapOptions options) : revision_(revision), options_(options) {
+  OwnedHistory(std::uint64_t revision, std::uint64_t count, PositionMapOptions options)
+      : revision_(revision), proofFloor_(revision), count_(count), options_(options) {
   }
 
-  OwnedHistory(const OwnedHistory &previous, std::uint64_t beforeCount, PositionChange operation)
-      : revision_(previous.revision_ + 1), options_(previous.options_) {
-    const auto skip =
-      previous.changes_.size() >= options_.maxChanges ? previous.changes_.size() - options_.maxChanges + 1 : 0;
-    changes_.reserve(previous.changes_.size() - skip + 1);
+  OwnedHistory(const OwnedHistory &previous, std::uint64_t beforeCount, std::optional<PositionChange> operation)
+      : revision_(previous.revision_ + 1), proofFloor_(previous.proofFloor_), count_(beforeCount),
+        options_(previous.options_) {
+    // Identity revisions retain every structural proof. Dropping an operation only
+    // expires revisions through that operation; the following identity gap stays exact.
+    const auto skip = operation && previous.changes_.size() >= options_.maxChanges
+                        ? previous.changes_.size() - options_.maxChanges + 1
+                        : 0;
+
+    changes_.reserve(previous.changes_.size() - skip + (operation ? 1 : 0));
     changes_.insert(changes_.end(), previous.changes_.begin() + skip, previous.changes_.end());
-    changes_.push_back({previous.revision_, beforeCount, operation});
-  }
 
+    if (skip) {
+      proofFloor_ = previous.changes_[skip - 1].revision + 1;
+    }
+
+    if (operation) {
+      changes_.push_back({previous.revision_, beforeCount, *operation});
+
+      if (operation->kind == PositionChangeKind::SPLICE) {
+        count_ = beforeCount - operation->removed + operation->inserted;
+      }
+    }
+  }
   std::expected<PositionHistoryReply, SourceError> changesFrom(std::uint64_t revision) const override {
     if (!revision || revision > revision_) {
       return std::unexpected(SourceError::REVISION_CHANGED);
     }
-    const auto floor = changes_.empty() ? revision_ : changes_.front().revision;
+    const auto floor = proofFloor_;
     if (revision < floor) {
       return PositionHistoryReply{{}, floor, PositionResolution::UNAVAILABLE};
     }
@@ -39,16 +55,16 @@ public:
       return PositionHistoryReply{{}, floor, PositionResolution::EXACT};
     }
     const auto first = std::ranges::lower_bound(changes_, revision, {}, &OwnedChange::revision);
-    if (first == changes_.end() || first->revision != revision) {
-      return std::unexpected(SourceError::REVISION_CHANGED);
-    }
+
     try {
       std::vector<PositionChange> suffix(0);
       suffix.reserve(static_cast<std::size_t>(changes_.end() - first));
       for (auto entry = first; entry != changes_.end(); ++entry) {
         suffix.push_back(entry->operation);
       }
-      auto proof = PositionChangeMap::create(revision, revision_, first->beforeCount, suffix, options_);
+      const auto beforeCount = first == changes_.end() ? count_ : first->beforeCount;
+
+      auto proof = PositionChangeMap::create(revision, revision_, beforeCount, suffix, options_);
       return proof ? std::expected<PositionHistoryReply, SourceError>(
                        PositionHistoryReply{std::move(*proof), floor, PositionResolution::EXACT})
                    : std::unexpected(proof.error());
@@ -62,6 +78,8 @@ public:
 private:
   std::vector<OwnedChange> changes_ = std::vector<OwnedChange>(0);
   std::uint64_t revision_;
+  std::uint64_t proofFloor_;
+  std::uint64_t count_;
   PositionMapOptions options_;
 };
 
