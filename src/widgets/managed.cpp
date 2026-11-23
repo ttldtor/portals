@@ -34,6 +34,28 @@ void retireSceneCallback(void *storage, void (*reset)(void *) noexcept) noexcept
 
 namespace portals {
 namespace {
+// Optional value-caption captures retire after the operation's guards and borrows. The links live
+// only in their heap sidecars, and are detached before a last user destructor can destroy the scene.
+struct RetiredValueCaptions {
+  std::shared_ptr<ui::detail::ValueCaptionBinding> first;
+
+  void keep(std::shared_ptr<ui::detail::ValueCaptionBinding> &source) noexcept {
+    if (source) {
+      source->retiredNext.swap(first);
+      first.swap(source);
+    }
+  }
+
+  ~RetiredValueCaptions() {
+    while (first) {
+      auto next = std::move(first->retiredNext);
+
+      first.reset();
+      first.swap(next);
+    }
+  }
+};
+
 class ManagedRoot final : public Widget {
 public:
   std::expected<void, TreeError> arrange(CellRect local) override {
@@ -485,6 +507,7 @@ std::expected<void, ManagedError> ManagedScene::leaveFocusScope(Node<Widget> nod
 }
 
 std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
+  RetiredValueCaptions retiredCaptions;
   ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
   auto allowed = boundary(ManagedPhase::CLEANUP, root_);
 
@@ -555,6 +578,9 @@ std::expected<void, ManagedError> ManagedScene::remove(Node<Widget> node) {
     });
 
     if (!live && retired(live.error())) {
+      if (entry->caption) {
+        retiredCaptions.keep(entry->caption->source);
+      }
       retireClicks(*entry);
       retireEditing(*entry);
       retireChanges(*entry);
@@ -1725,7 +1751,7 @@ ManagedScene::bind(Node<CheckBox> node, ManagedState<CheckState> model,
   }
 }
 
-std::expected<void, ManagedError> ManagedScene::syncCaption(Node<Control> node, CaptionBinding &binding,
+std::expected<void, ManagedError> ManagedScene::syncCaption(Node<Widget> node, CaptionBinding &binding,
                                                             ManagedPhase phase) try {
   if (binding.model.origin_) {
     auto live = binding.model.origin_->check();
@@ -1756,7 +1782,15 @@ std::expected<void, ManagedError> ManagedScene::syncCaption(Node<Control> node, 
     return std::unexpected(failure);
   }
 
-  auto applied = setControlText(app_.tree(), node, std::move(*text));
+  auto applied = std::visit(
+    [&](auto receiver) {
+      if constexpr (std::same_as<decltype(receiver), Node<Border>>) {
+        return setBorderTitle(app_.tree(), receiver, *text);
+      } else {
+        return setControlText(app_.tree(), receiver, std::move(*text));
+      }
+    },
+    binding.node);
 
   if (!applied) {
     return std::unexpected(error(phase, node, applied.error()));
@@ -2546,6 +2580,7 @@ ManagedScene::setInput(std::function<std::expected<bool, ManagedError>(const Inp
 }
 
 std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize) {
+  RetiredValueCaptions retiredCaptions;
   ui::detail::SetupFailurePause setup(facadeContext());
   ui::detail::CurrentSceneScope mask;
   ui::detail::CurrentSceneScope current(facadeContext());
@@ -2588,12 +2623,16 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
     // The preparing guard rejects registry changes; prune only after every active borrow ends.
     struct Prune {
       ManagedScene &scene;
+      RetiredValueCaptions &retiredCaptions;
 
       ~Prune() {
         const bool previous = scene.preparing_;
         scene.preparing_ = true;
         std::erase_if(scene.entries_, [&](const auto &entry) {
           if (entry->removed) {
+            if (entry->caption) {
+              retiredCaptions.keep(entry->caption->source);
+            }
             scene.retireClicks(*entry);
             scene.retireEditing(*entry);
             scene.retireChanges(*entry);
@@ -2605,7 +2644,7 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
         scene.pruneScroll();
         scene.preparing_ = previous;
       }
-    } prune{*this};
+    } prune{*this, retiredCaptions};
 
     const auto recoverFocus = [&] {
       FocusReport report(*this);
@@ -2668,7 +2707,12 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
         std::expected<void, TreeError> status = live;
 
         if (status && entry->caption) {
-          auto synced = syncCaption(entry->caption->node, *entry->caption, ManagedPhase::PREPARE);
+          const auto target = std::visit(
+            [](auto node) {
+              return Node<Widget>(node);
+            },
+            entry->caption->node);
+          auto synced = syncCaption(target, *entry->caption, ManagedPhase::PREPARE);
 
           if (!synced) {
             remember(synced.error());
@@ -3031,6 +3075,7 @@ std::expected<bool, TreeError> ManagedScene::input(Application &app, const Input
 }
 
 std::expected<void, ManagedError> ManagedScene::close() {
+  RetiredValueCaptions retiredCaptions;
   ui::detail::SetupFailureScope mask({}, nullptr, nullptr);
   if (owner_ != std::this_thread::get_id()) {
     return std::unexpected(error(ManagedPhase::CLEANUP, root_, TreeError::WRONG_THREAD));
@@ -3117,6 +3162,9 @@ std::expected<void, ManagedError> ManagedScene::close() {
   }
 
   for (auto &entry : entries_) {
+    if (entry->caption) {
+      retiredCaptions.keep(entry->caption->source);
+    }
     retireClicks(*entry);
     retireEditing(*entry);
     retireChanges(*entry);
@@ -3152,8 +3200,14 @@ void ManagedScene::stop(Application &app) {
   }
 
   stoppingSession_ = true;
+  const auto owner = std::weak_ptr(lifetime_);
 
   auto result = close();
+
+  // Retiring an optional caption's final user capture may have destroyed this owner at close's exit.
+  if (owner.expired()) {
+    return;
+  }
 
   stoppingSession_ = false;
 

@@ -2,7 +2,9 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/detail/ui_value_text.hpp>
 #include <portals/ui_construction.hpp>
+#include <portals/ui_model.hpp>
 
 namespace portals::ui {
 
@@ -49,6 +51,228 @@ template <class T> Description<T> control(std::string_view text, ControlStyle st
 inline Description<Label> label(std::string_view text, ControlStyle style = {},
                                 SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return control<Label>(text, style, policy);
+}
+
+namespace detail {
+/// @cond INTERNAL
+/** @param source Owning formatted expression with explicit scalar dependencies.
+ * @param style Owning manual appearances. @param policy Layout constraints.
+ * @return Single-use recipe with a scene-owned bounded computed caption root.
+ * Initial failures reject mount; later failures preserve the last valid caption.
+ */
+template <class Control>
+Description<Control> valueTextControl(ValueText source, ControlStyle style = {},
+                                      SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  auto description =
+    detail::Access::cold<Control>([source = std::move(source), style, policy](
+                                    ManagedScene &scene, Node<Widget> parent,
+                                    detail::MountContext &context) -> std::expected<Node<Control>, ManagedError> {
+      auto empty = GraphemeText::from("", scene.widthPolicy());
+      if (!empty) {
+        return std::unexpected(detail::textError(parent, empty.error()));
+      }
+
+      auto node = [&] {
+        if constexpr (std::same_as<Control, Button>) {
+          return scene.emplace<Control>(parent, std::move(*empty), style, policy,
+                                        context.controlSettings->chrome.value_or(ButtonChrome::BRACKETS));
+        } else {
+          return scene.emplace<Control>(parent, std::move(*empty), style, policy);
+        }
+      }();
+      if (!node) {
+        return std::unexpected(node.error());
+      }
+
+      detail::ModelAccess::keep(scene, *node, context);
+
+      auto bound = detail::ValueTextAccess::bind(scene, *node, source, context);
+
+      return bound ? node : std::unexpected(bound.error());
+    });
+
+  return detail::Access::configuredControl(std::move(description), std::same_as<Control, Label> ? "Label" : "Button");
+}
+
+/// @endcond
+} // namespace detail
+
+/** @tparam Source Exactly ValueText, deduced so empty braces retain the literal caption overload.
+ * @param source Owning expression with explicit scalar dependencies.
+ * @param style Owning manual appearances. @param policy Layout constraints.
+ * @return Label using the same scalar observation and error path as other caption receivers.
+ */
+template <class Source>
+  requires std::same_as<Source, ValueText>
+Description<Label> label(Source source, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return detail::valueTextControl<Label>(std::move(source), style, policy);
+}
+
+namespace detail {
+/// @cond INTERNAL
+template <class T>
+concept ValueCaption =
+  std::formattable<std::remove_cvref_t<T>, char> || std::same_as<std::remove_cvref_t<T>, GraphemeText>;
+
+template <class Projection, class T>
+concept ValueCaptionProjection =
+  std::copy_constructible<std::decay_t<Projection>> && std::invocable<Projection &, const T &> &&
+  (!portals::detail::IS_UNSUPPORTED_DERIVED_EXPECTED<
+    std::remove_cvref_t<std::invoke_result_t<Projection &, const T &>>>) &&
+  ValueCaption<portals::detail::DerivedOutput<Projection, T>>;
+
+template <class Control, std::equality_comparable T, class Projection>
+Description<Control> valueControl(Model<T> source, Projection projection, ControlStyle style, SizePolicy policy) {
+  auto description =
+    detail::Access::cold<Control>([source = std::move(source), projection = std::move(projection), style, policy](
+                                    ManagedScene &scene, Node<Widget> parent,
+                                    detail::MountContext &context) -> std::expected<Node<Control>, ManagedError> {
+      auto empty = GraphemeText::from("", scene.widthPolicy());
+      if (!empty) {
+        return std::unexpected(detail::textError(parent, empty.error()));
+      }
+
+      auto node = [&] {
+        if constexpr (std::same_as<Control, Button>) {
+          return scene.emplace<Control>(parent, std::move(*empty), style, policy,
+                                        context.controlSettings->chrome.value_or(ButtonChrome::BRACKETS));
+        } else {
+          return scene.emplace<Control>(parent, std::move(*empty), style, policy);
+        }
+      }();
+      if (!node) {
+        return std::unexpected(node.error());
+      }
+
+      detail::ModelAccess::keep(scene, *node, context);
+
+      const auto owner = detail::Access::lifetime(scene);
+      auto retained = std::make_shared<Projection>(std::move(projection));
+      if (owner.expired()) {
+        return std::unexpected(detail::error(*node, TreeError::CLOSED));
+      }
+
+      auto bound = detail::ValueModelAccess::bindCaption(scene, *node, source, retained, context);
+
+      return bound ? node : std::unexpected(bound.error());
+    });
+
+  return detail::Access::configuredControl(std::move(description), std::same_as<Control, Label> ? "Label" : "Button");
+}
+
+/// @endcond
+} // namespace detail
+
+/** @brief Bind a scalar caption through the existing managed Property and caption delivery machinery.
+ * @tparam T Copyable equality-comparable value supported by the standard formatter, or owning GraphemeText.
+ * @param source Cold scalar; repeated consumers share one scene-owned value registration.
+ * @param style Owning manual appearances.
+ * @param policy Layout constraints.
+ * @return Single-use label recipe; failed mount rolls back only registrations created by this attempt.
+ */
+template <std::equality_comparable T>
+  requires std::copy_constructible<T> && detail::ValueCaption<T>
+Description<Label> label(Model<T> source, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return detail::valueControl<Label>(std::move(source), std::identity{}, style, policy);
+}
+
+/** @tparam T Copyable owning scalar accepted by a model caption.
+ * @param value Owning property descriptor; acquiring it does not read a snapshot.
+ * @param style Manual appearances. @param policy Layout constraints.
+ * @return Same label binding as the property's root model, without another state registration.
+ */
+template <std::equality_comparable T>
+  requires std::copy_constructible<T> && detail::ValueCaption<T>
+Description<Label> label(ModelValue<T> value, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return label(detail::ValueModelAccess::root(value), style, policy);
+}
+
+/** @brief Format a typed scalar projection, retaining its descriptor and callable by value.
+ * @tparam T Copyable equality-comparable owning scalar record.
+ * @tparam Projection Copyable member pointer or pure callable returning a formattable value, GraphemeText,
+ * or expected of either with TreeError. References are consumed during the call, never retained.
+ * @param source Cold scalar; every field and label shares its one scene registration.
+ * @param projection Owned synchronous computation, under ManagedScene::derive's callout contract.
+ * @param style Owning manual appearances.
+ * @param policy Layout constraints.
+ * @return Single-use label recipe; runtime projection/format errors retain the last valid caption.
+ */
+template <std::equality_comparable T, class Projection>
+  requires std::copy_constructible<T> && detail::ValueCaptionProjection<Projection, T>
+Description<Label> label(Model<T> source, Projection projection, ControlStyle style = {},
+                         SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return detail::valueControl<Label>(std::move(source), std::move(projection), style, policy);
+}
+
+/** @tparam T Owning scalar record accepted by the projected label overload.
+ * @tparam Member Formattable owning member value, including a const read-only member.
+ * @param field Owning descriptor; no snapshot is retained by this recipe.
+ * @param style Owning manual appearances.
+ * @param policy Layout constraints.
+ * @return Label observing the selected field through its root model.
+ */
+template <std::equality_comparable T, class Member>
+  requires std::copy_constructible<T> && detail::ValueCaption<Member>
+Description<Label> label(ModelField<T, Member> field, ControlStyle style = {},
+                         SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return label(detail::ValueModelAccess::root(field), detail::ValueModelAccess::member(field), style, policy);
+}
+
+/** @tparam Source Exactly ValueText, deduced so empty braces retain the literal caption overload.
+ * @param source Owning formatted expression with explicit scalar dependencies.
+ * @param style Manual appearances. @param policy Layout constraints.
+ * @return Button caption using the same bounded value binding as a label; actions remain independent.
+ */
+template <class Source>
+  requires std::same_as<Source, ValueText>
+Description<Button> button(Source source, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return detail::valueTextControl<Button>(std::move(source), style, policy);
+}
+
+/** @tparam T Copyable owning scalar accepted by the default formatter.
+ * @param source Shared single-scene scalar declaration.
+ * @param style Manual appearances. @param policy Layout constraints.
+ * @return Button observing accepted scalar revisions without polling or reverse writes.
+ */
+template <std::equality_comparable T>
+  requires std::copy_constructible<T> && detail::ValueCaption<T>
+Description<Button> button(Model<T> source, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return detail::valueControl<Button>(std::move(source), std::identity{}, style, policy);
+}
+
+/** @tparam T Copyable owning scalar accepted by a model caption.
+ * @param value Owning property descriptor, without a retained snapshot.
+ * @param style Manual appearances. @param policy Layout constraints.
+ * @return Same button binding as the property's root, sharing its original capabilities and state.
+ */
+template <std::equality_comparable T>
+  requires std::copy_constructible<T> && detail::ValueCaption<T>
+Description<Button> button(ModelValue<T> value, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return button(detail::ValueModelAccess::root(value), style, policy);
+}
+
+/** @tparam T Copyable owning scalar record. @tparam Projection Owned pure caption projection.
+ * @param source Shared single-scene scalar declaration. @param projection Member pointer or synchronous callable.
+ * @param style Manual appearances. @param policy Layout constraints.
+ * @return Projected button caption retaining its projection through compatible model replacement.
+ */
+template <std::equality_comparable T, class Projection>
+  requires std::copy_constructible<T> && detail::ValueCaptionProjection<Projection, T>
+Description<Button> button(Model<T> source, Projection projection, ControlStyle style = {},
+                           SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return detail::valueControl<Button>(std::move(source), std::move(projection), style, policy);
+}
+
+/** @tparam T Owning scalar record. @tparam Member Owning formattable member.
+ * @param field Owning root/member descriptor, without a borrowed snapshot.
+ * @param style Manual appearances. @param policy Layout constraints.
+ * @return Button observing the field through the existing scalar binding machinery.
+ */
+template <std::equality_comparable T, class Member>
+  requires std::copy_constructible<T> && detail::ValueCaption<Member>
+Description<Button> button(ModelField<T, Member> field, ControlStyle style = {},
+                           SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return button(detail::ValueModelAccess::root(field), detail::ValueModelAccess::member(field), style, policy);
 }
 
 namespace detail {
@@ -237,7 +461,9 @@ inline Description<Button> button(State &&model, ControlStyle style = {}, SizePo
 template <class Caption, class Callback>
   requires((std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
             std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
-            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>) &&
+            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> ||
+            portals::detail::IS_LIVE_TEXT_SOURCE<std::remove_cvref_t<Caption>> ||
+            std::same_as<std::remove_cvref_t<Caption>, ValueText> || detail::CaptionSource<Caption>) &&
            portals::detail::ManagedAction<Callback, ClickEvent>)
 inline Description<Button> button(Caption &&text, Callback action, ControlStyle style = {},
                                   SizePolicy policy = DEFAULT_CONTENT_POLICY) {
@@ -693,6 +919,76 @@ inline Description<Label> label(Ref<Label> reference, std::string_view text, Con
   return label(text, style, policy).reference(std::move(reference));
 }
 
+/** @tparam T Owning scalar accepted by the model label overload.
+ * @param reference Empty observing slot published after complete mount.
+ * @param source Cold scalar descriptor retained by the recipe.
+ * @param style Owning manual appearances.
+ * @param policy Layout constraints.
+ * @return Model label sharing the existing reference transaction.
+ */
+template <std::equality_comparable T>
+  requires std::copy_constructible<T> && detail::ValueCaption<T>
+Description<Label> label(Ref<Label> reference, Model<T> source, ControlStyle style = {},
+                         SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return label(std::move(source), style, policy).reference(std::move(reference));
+}
+
+/** @tparam T Copyable owning scalar accepted by a model caption.
+ * @param reference Empty slot published after complete mount. @param value Owning property descriptor.
+ * @param style Manual appearances. @param policy Layout constraints.
+ * @return Same observing label recipe as label(reference, rootModel).
+ */
+template <std::equality_comparable T>
+  requires std::copy_constructible<T> && detail::ValueCaption<T>
+Description<Label> label(Ref<Label> reference, ModelValue<T> value, ControlStyle style = {},
+                         SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return label(std::move(value), style, policy).reference(std::move(reference));
+}
+
+/** @tparam T Owning scalar record accepted by the projected label overload.
+ * @tparam Projection Copyable pure typed projection accepted by label(model, projection).
+ * @param reference Empty observing slot published after complete mount.
+ * @param source Cold scalar descriptor retained by the recipe.
+ * @param projection Owned member pointer or callable; borrowed results are consumed during invocation.
+ * @param style Owning manual appearances.
+ * @param policy Layout constraints.
+ * @return Projected label sharing the existing reference transaction.
+ */
+template <std::equality_comparable T, class Projection>
+  requires std::copy_constructible<T> && detail::ValueCaptionProjection<Projection, T>
+Description<Label> label(Ref<Label> reference, Model<T> source, Projection projection, ControlStyle style = {},
+                         SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return label(std::move(source), std::move(projection), style, policy).reference(std::move(reference));
+}
+
+/** @tparam T Owning scalar record. @tparam Projection Owned pure caption projection.
+ * @param reference Empty slot published after the complete mount succeeds.
+ * @param source Shared scalar root. @param projection Member pointer or synchronous callable.
+ * @param style Manual appearances. @param policy Layout constraints.
+ * @return Projected button with the same replacement and reference lifetime contracts as a label.
+ */
+template <std::equality_comparable T, class Projection>
+  requires std::copy_constructible<T> && detail::ValueCaptionProjection<Projection, T>
+Description<Button> button(Ref<Button> reference, Model<T> source, Projection projection, ControlStyle style = {},
+                           SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return button(std::move(source), std::move(projection), style, policy).reference(std::move(reference));
+}
+
+/** @tparam T Owning scalar record accepted by the field label overload.
+ * @tparam Member Formattable owning member value.
+ * @param reference Empty observing slot published after complete mount.
+ * @param field Owning field descriptor retained through its root declaration.
+ * @param style Owning manual appearances.
+ * @param policy Layout constraints.
+ * @return Field label sharing the existing reference transaction.
+ */
+template <std::equality_comparable T, class Member>
+  requires std::copy_constructible<T> && detail::ValueCaption<Member>
+Description<Label> label(Ref<Label> reference, ModelField<T, Member> field, ControlStyle style = {},
+                         SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+  return label(std::move(field), style, policy).reference(std::move(reference));
+}
+
 /** @param reference Empty observing slot published only after complete mount.
  * @param text Caption copied now.
  * @param style Manual appearances.
@@ -714,7 +1010,9 @@ inline Description<Button> button(Ref<Button> reference, std::string_view text, 
 template <class Caption>
   requires(std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
-           std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>)
+           std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> ||
+           portals::detail::IS_LIVE_TEXT_SOURCE<std::remove_cvref_t<Caption>> ||
+           std::same_as<std::remove_cvref_t<Caption>, ValueText> || detail::CaptionSource<Caption>)
 inline Description<Label> label(Ref<Label> reference, Caption &&text, ControlStyle style = {},
                                 SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return label(std::forward<Caption>(text), style, policy).reference(std::move(reference));
@@ -730,7 +1028,9 @@ inline Description<Label> label(Ref<Label> reference, Caption &&text, ControlSty
 template <class Caption>
   requires(std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
            std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
-           std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>)
+           std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> ||
+           portals::detail::IS_LIVE_TEXT_SOURCE<std::remove_cvref_t<Caption>> ||
+           std::same_as<std::remove_cvref_t<Caption>, ValueText> || detail::CaptionSource<Caption>)
 inline Description<Button> button(Ref<Button> reference, Caption &&text, ControlStyle style = {},
                                   SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return button(std::forward<Caption>(text), style, policy).reference(std::move(reference));
@@ -748,7 +1048,9 @@ inline Description<Button> button(Ref<Button> reference, Caption &&text, Control
 template <class Caption, class Callback>
   requires((std::same_as<std::remove_cvref_t<Caption>, TextValue> ||
             std::same_as<std::remove_cvref_t<Caption>, ManagedState<std::string>> ||
-            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> || detail::CaptionSource<Caption>) &&
+            std::same_as<std::remove_cvref_t<Caption>, ManagedSource<std::string>> ||
+            portals::detail::IS_LIVE_TEXT_SOURCE<std::remove_cvref_t<Caption>> ||
+            std::same_as<std::remove_cvref_t<Caption>, ValueText> || detail::CaptionSource<Caption>) &&
            portals::detail::ManagedAction<Callback, ClickEvent>)
 inline Description<Button> button(Ref<Button> reference, Caption &&text, Callback action, ControlStyle style = {},
                                   SizePolicy policy = DEFAULT_CONTENT_POLICY) {

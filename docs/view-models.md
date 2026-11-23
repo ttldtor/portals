@@ -179,14 +179,17 @@ publication does not retroactively qualify an unversioned checkpoint. Direct sha
 capture/navigation requiring unavailable versioned proof returns WOULD_BLOCK; native
 controls keep their local behavior without promising shared bookmark continuity.
 
-## Complete shared-group example
+## Complete shared-group example {#view-models-example}
 
 ![Two views switch model together and remember each model's position](images/view-models-guide.gif)
 
 [Full source](examples/guide_view_models.cpp) declares two small owned models with
 `ui::model` and binds a projected list and table through `ui::navigation`. Move with arrows, switch regions with
 F2/F3, and return to the former region. Both views recover that region's logical place.
-Tab changes focus; F10 or Ctrl+C exits. The caption changes only after group admission.
+Tab changes focus; F10 or Ctrl+C exits. The caption observes the accepted navigation resource
+through `navigation.current()` and the owning `ui::bySource` projection. Failed group admission
+keeps the old caption; there is no separately assigned region-name state. Metadata may also
+be an owning record or enum; see [value models](value-models.md).
 
 The views share the current row and remember their positions for each model. Each
 view reveals the current row within its own body: a table header reduces visible data

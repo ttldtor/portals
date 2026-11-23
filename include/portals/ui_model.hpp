@@ -12,26 +12,44 @@
 namespace portals::ui {
 template <class T> class Model;
 template <class T> class Navigation;
+template <class T> class ModelValue;
+template <class T, class Member> class ModelField;
 
 namespace detail {
 /// @cond INTERNAL
 struct ModelAccess;
+struct ValueModelAccess;
 
-template <class T> struct ModelDeclaration {
+struct ModelDeclarationBase {
+  enum class Kind {
+    COLLECTION,
+    VALUE,
+    VALUE_ALIAS,
+    VALUE_SOURCE,
+    VALUE_DEFERRED_SOURCE
+  };
+
+  explicit ModelDeclarationBase(Kind value) : observation(std::make_shared<RefTarget>()), kind(value) {
+  }
+
+  std::shared_ptr<RefTarget> observation;
+  NodeId scene;
+  const MountContext *attempt{};
+  bool published{};
+  bool resolving{};
+  const Kind kind;
+};
+
+template <class T> struct ModelDeclaration : ModelDeclarationBase {
   using Factory = std::function<std::expected<std::shared_ptr<const ModelSnapshot<T>>, TreeError>()>;
 
-  ModelDeclaration() : observation(std::make_shared<RefTarget>()) {
+  ModelDeclaration() : ModelDeclarationBase(Kind::COLLECTION) {
   }
 
   Factory create;
   ModelOptions options;
   ManagedViewHandler<T> prepared;
-  std::shared_ptr<RefTarget> observation;
   ManagedModel<T> handle;
-  NodeId scene;
-  const MountContext *attempt{};
-  bool published{};
-  bool resolving{};
   std::shared_ptr<OwnedSequence<T>> sequence;
 };
 
@@ -58,7 +76,7 @@ template <class T> struct NavigationDeclaration {
  * Construction does not read providers or register runtime objects. Closed declarations
  * remain closed; use a new declaration for another scene. Captured borrows retain their
  * original lifetime obligations. Access and registration are creating-UI-thread operations.
- * @tparam T Domain row; the owned-array path requires copyable values.
+ * @tparam T Domain value or collection row; scalar and owned-array paths require copyable values.
  */
 template <class T> class Model {
 public:
@@ -70,7 +88,7 @@ public:
    * @return Weak runtime handle, CLOSED before publication/after close, or a typed handle/thread failure.
    */
   std::expected<ManagedModel<T>, ManagedError> managed() const {
-    if (!data_) {
+    if (!data_ || data_->kind != detail::ModelDeclarationBase::Kind::COLLECTION) {
       return std::unexpected(ManagedError{ManagedPhase::STATE, {}, failure_, {}, {}});
     }
     auto owner = detail::eventScene(data_->observation);
@@ -80,8 +98,33 @@ public:
     if (detail::Access::modelSceneClosed(**owner)) {
       return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::CLOSED, {}, {}});
     }
-    return data_->handle;
+    return std::static_pointer_cast<detail::ModelDeclaration<T>>(data_)->handle;
   }
+
+  /** @brief Observe this scalar value; descriptor assignment itself only copies handles.
+   * @param origin Assignment diagnostic site retained by the returned proxy.
+   * @return UI-affine smart property with checked reads/writes and collected assignment.
+   * Collection declarations report INVALID_ARGUMENT; cold or closed values report CLOSED.
+   */
+  ModelValue<T> value(std::source_location origin = std::source_location::current()) const
+    requires std::equality_comparable<T>;
+
+  /** @brief Observe one owned scalar field without borrowing a snapshot or registering another source.
+   * @tparam Member Copyable owning field value; const fields expose checked reads only. Known borrowed
+   * pointers, string views, spans, reference wrappers and range views are rejected.
+   * @tparam Record Declaring record type, required to match this model's value type.
+   * @param member Non-null data-member pointer retained by value; null reports INVALID_ARGUMENT on use.
+   * @param origin Assignment diagnostic site retained by the returned proxy.
+   * @return UI-affine field property sharing this declaration and its root revision/transaction.
+   * Cold, collection, wrong-thread and closed failures follow value().
+   */
+  template <class Member, class Record>
+    requires std::same_as<Record, T> && std::equality_comparable<T> && std::copy_constructible<T> &&
+             std::copy_constructible<std::remove_cv_t<Member>> && (!std::is_array_v<Member>) &&
+             (!std::is_pointer_v<Member>) && (!portals::detail::IS_BORROWED_DERIVED_VALUE<std::remove_cv_t<Member>>) &&
+             (!std::ranges::view<std::remove_cv_t<Member>>)
+  ModelField<T, Member> field(Member Record::*member,
+                              std::source_location origin = std::source_location::current()) const;
 
   /** @brief Insert one value into a mounted owned sequence on its UI thread.
    * @param index Insertion ordinal, including the end boundary.
@@ -111,7 +154,10 @@ public:
 
 private:
   friend struct detail::ModelAccess;
-  std::shared_ptr<detail::ModelDeclaration<T>> data_;
+  friend struct detail::ValueModelAccess;
+  template <class> friend class ModelValue;
+  template <class, class> friend class ModelField;
+  std::shared_ptr<detail::ModelDeclarationBase> data_;
   TreeError failure_{TreeError::INVALID_ARGUMENT};
   template <class Build>
   std::expected<void, ManagedError> mutate(PositionChange change, bool inserts, Build build) const;
@@ -142,6 +188,12 @@ public:
     }
     return data_->handle;
   }
+
+  /** @brief Observe the accepted navigation channel as a cold read-only scalar model.
+   * @return Descriptor resolved with this navigation in the receiving mount transaction.
+   * No mirror value or additional Property is created; writes report INVALID_ARGUMENT.
+   */
+  Model<NavigationPosition> current() const;
 
   /** @brief Admit one model change for the complete shared group on its UI thread.
    * @param target Cold destination source in this scene.
@@ -175,10 +227,49 @@ private:
 namespace detail {
 /// @cond INTERNAL
 struct ModelAccess {
+  struct RegisteredSource {
+    NodeId scene;
+    ModelResource resource;
+  };
+
+  // The pure projection may run before descriptor publication in the same mount transaction.
+  // Inspect only an already registered handle; never resolve/register a cold catalog entry here.
+  template <class T>
+  static std::expected<std::optional<RegisteredSource>, TreeError> registeredSource(const Model<T> &model) {
+    const auto base = model.data_;
+    if (!base) {
+      return std::unexpected(model.failure_);
+    }
+    if (base->kind != ModelDeclarationBase::Kind::COLLECTION) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    if (base->observation->owner != std::this_thread::get_id()) {
+      return std::unexpected(TreeError::WRONG_THREAD);
+    }
+    if (base->scene == NodeId{}) {
+      return std::optional<RegisteredSource>{};
+    }
+
+    const auto data = std::static_pointer_cast<ModelDeclaration<T>>(base);
+    auto resource = Access::registeredModelResource(data->handle);
+    if (!resource) {
+      return std::unexpected(resource.error());
+    }
+
+    return std::optional(RegisteredSource{base->scene, *resource});
+  }
+
+  template <class T> static std::shared_ptr<void> identity(const Model<T> &model) {
+    return model.data_;
+  }
+
   template <class T>
   static std::expected<std::optional<ManagedModel<T>>, ManagedError> existing(ManagedScene &scene,
                                                                               const Model<T> &value) {
-    auto data = value.data_;
+    auto base = value.data_;
+    auto data = base && base->kind == ModelDeclarationBase::Kind::COLLECTION
+                  ? std::static_pointer_cast<ModelDeclaration<T>>(base)
+                  : nullptr;
     const auto fail = [&](TreeError error) {
       return std::unexpected(ManagedError{ManagedPhase::STATE, scene.root().id(), error, {}, {}});
     };
@@ -252,7 +343,10 @@ struct ModelAccess {
   template <class T>
   static std::expected<ManagedModel<T>, ManagedError> resolve(ManagedScene &scene, const Model<T> &value,
                                                               MountContext &context) {
-    auto data = value.data_;
+    auto base = value.data_;
+    auto data = base && base->kind == ModelDeclarationBase::Kind::COLLECTION
+                  ? std::static_pointer_cast<ModelDeclaration<T>>(base)
+                  : nullptr;
     const auto root = scene.root();
     const auto lifetime = Access::lifetime(scene);
     const auto fail = [&](TreeError error) {
@@ -612,7 +706,7 @@ std::expected<void, ManagedError> Model<T>::mutate(PositionChange change, bool i
   if constexpr (!std::is_copy_constructible_v<T>) {
     return fail(TreeError::INVALID_ARGUMENT);
   } else {
-    auto sequence = data_->sequence;
+    auto sequence = std::static_pointer_cast<detail::ModelDeclaration<T>>(data_)->sequence;
     if (!sequence || !sequence->current) {
       return fail(TreeError::INVALID_ARGUMENT);
     }
@@ -730,10 +824,11 @@ template <class T> std::expected<void, ManagedError> Model<T>::clear() const {
   if (!handle) {
     return std::unexpected(handle.error());
   }
-  if (!data_->sequence || !data_->sequence->current) {
+  const auto data = std::static_pointer_cast<detail::ModelDeclaration<T>>(data_);
+  if (!data->sequence || !data->sequence->current) {
     return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::INVALID_ARGUMENT, {}, {}});
   }
-  return erase(0, data_->sequence->current->rowCount());
+  return erase(0, data->sequence->current->rowCount());
 }
 
 template <class T>
@@ -784,3 +879,6 @@ std::expected<void, ManagedError> Ref<T>::setModel(Model<Row> source, ModelRebin
   }
 }
 } // namespace portals::ui
+
+#include <portals/detail/ui_source_projection.hpp>
+#include <portals/detail/ui_value_model.hpp>

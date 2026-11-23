@@ -63,6 +63,20 @@ struct ActionAccess;
 struct ActionStore;
 struct ActionRegistry;
 struct AsyncAccess;
+struct MountContext;
+
+/// @cond INTERNAL
+struct ValueCaptionBinding {
+  using Bind = std::function<std::expected<void, ManagedError>(ManagedScene &, std::shared_ptr<void>, MountContext &,
+                                                               const void *)>;
+  const void *type{};
+  std::shared_ptr<void> source;
+  std::shared_ptr<const Bind> bind;
+  std::shared_ptr<void> graph;
+  std::shared_ptr<ValueCaptionBinding> retiredNext;
+};
+
+/// @endcond
 
 /// @cond INTERNAL
 struct SceneActivity {
@@ -608,50 +622,11 @@ public:
   template <std::equality_comparable T>
   std::expected<ManagedState<T>, ManagedError> state(T initial, Invalidation kind = Invalidation::PAINT,
                                                      PropertyOptions options = {}) {
-    auto allowed = boundary(ManagedPhase::STATE, root_);
-
-    if (!allowed) {
-      return std::unexpected(allowed.error());
-    }
-
-    if (kind != Invalidation::PAINT && kind != Invalidation::LAYOUT) {
-      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::INVALID_ARGUMENT));
-    }
-
-    if (!liveText_.empty() || !originProperties_.empty()) {
-      pruneLiveText();
-    }
-    if (properties_.size() >= options_.maxStates) {
-      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NODE_LIMIT));
-    }
-
-    auto created = [&] {
-      if constexpr (std::same_as<T, std::string>) {
-        // MSVC Debug string moves may allocate a proxy in noexcept; copy inside Property's checked boundary.
-        return Property<T>::create(app_.tree(), root_, std::as_const(initial), kind, options);
-      } else {
-        return Property<T>::create(app_.tree(), root_, std::move(initial), kind, options);
-      }
-    }();
-
-    if (!created) {
-      return std::unexpected(error(ManagedPhase::STATE, root_, created.error()));
-    }
-
-    try {
-      std::shared_ptr<Property<T>> model(std::move(*created));
-      ManagedState<T> handle;
-
-      handle.model_ = model;
-      handle.facade_ = facade_;
-      handle.lifetime_ = lifetime_;
-      handle.owner_ = owner_;
-      handle.scene_ = root_.id();
-      properties_.push_back(std::move(model));
-
-      return handle;
-    } catch (const std::bad_alloc &) {
-      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NO_MEMORY));
+    if constexpr (std::same_as<T, std::string>) {
+      // MSVC Debug string moves may allocate a proxy in noexcept; copy inside Property's checked boundary.
+      return stateFrom<T>(std::as_const(initial), kind, options);
+    } else {
+      return stateFrom<T>(std::move(initial), kind, options);
     }
   }
 
@@ -2002,6 +1977,48 @@ public:
   void stop(Application &app) override;
 
 private:
+  template <std::equality_comparable T, class Value>
+  std::expected<ManagedState<T>, ManagedError> stateFrom(Value &&initial, Invalidation kind, PropertyOptions options) {
+    auto allowed = boundary(ManagedPhase::STATE, root_);
+
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
+
+    if (kind != Invalidation::PAINT && kind != Invalidation::LAYOUT) {
+      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::INVALID_ARGUMENT));
+    }
+
+    if (!liveText_.empty() || !originProperties_.empty()) {
+      pruneLiveText();
+    }
+    if (properties_.size() >= options_.maxStates) {
+      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NODE_LIMIT));
+    }
+
+    auto created = Property<T>::create(app_.tree(), root_, std::forward<Value>(initial), kind, options);
+
+    if (!created) {
+      return std::unexpected(error(ManagedPhase::STATE, root_, created.error()));
+    }
+
+    try {
+      std::shared_ptr<Property<T>> model(std::move(*created));
+      ManagedState<T> handle;
+
+      handle.model_ = model;
+      handle.facade_ = facade_;
+      handle.lifetime_ = lifetime_;
+      handle.owner_ = owner_;
+      handle.scene_ = root_.id();
+      properties_.push_back(std::move(model));
+
+      return handle;
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NO_MEMORY));
+    }
+  }
+
   struct OriginProperty {
     std::shared_ptr<detail::ManagedOrigin> origin;
     std::weak_ptr<void> property;
@@ -2388,9 +2405,10 @@ private:
   std::vector<std::weak_ptr<detail::SpinnerState>> spinners_ = std::vector<std::weak_ptr<detail::SpinnerState>>(0);
 
   struct CaptionBinding {
-    Node<Control> node;
+    std::variant<Node<Control>, Node<Border>> node;
     ManagedState<std::string> model;
     std::optional<std::uint64_t> revision;
+    std::shared_ptr<ui::detail::ValueCaptionBinding> source;
   };
 
   std::expected<Node<DataStateView>, ManagedError> beginDataState(Node<Widget> parent, DataPresentation initial,
@@ -2481,7 +2499,7 @@ private:
   std::expected<void, TreeError> prepareScrollFrame(const LayoutSnapshot &snapshot);
   void completeScrollFrame() noexcept;
 
-  std::expected<void, ManagedError> syncCaption(Node<Control> node, CaptionBinding &binding, ManagedPhase phase);
+  std::expected<void, ManagedError> syncCaption(Node<Widget> node, CaptionBinding &binding, ManagedPhase phase);
 
   template <class T>
   std::expected<std::shared_ptr<detail::ManagedModelSourceOf<T>>, ManagedError> modelSource(ManagedModel<T> model,

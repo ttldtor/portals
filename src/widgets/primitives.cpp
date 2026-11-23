@@ -789,6 +789,57 @@ std::expected<void, TreeError> syncBorder(WidgetTree &tree, Node<Border> node) {
   return syncBorder(tree, node, {});
 }
 
+std::expected<void, TreeError> setBorderTitle(WidgetTree &tree, Node<Border> node, const GraphemeText &title) try {
+  std::expected<void, TreeError> result;
+  auto edited = tree.edit(node, [&](Border &border) {
+    // WidgetTree::edit translates arbitrary callback exceptions to CALLBACK_FAILED.
+    // Keep checked preparation failures inside this adapter so allocation retains NO_MEMORY.
+    try {
+      if (!border.text_ || title.policy() != border.text_->title.policy()) {
+        result = std::unexpected(TreeError::INVALID_ARGUMENT);
+
+        return;
+      }
+      if (title.bytes() == border.options_.title) {
+        return;
+      }
+
+      auto candidate = border.options_;
+
+      candidate.title = title.bytes();
+
+      auto prepared = detail::prepareFrameText(title.policy(), candidate);
+      if (!prepared) {
+        result = std::unexpected(prepared.error());
+
+        return;
+      }
+
+      result = tree.invalidate(node, Invalidation::PAINT);
+      if (result) {
+        // All fallible preparation is complete. The old title remains alive through publication.
+        static_assert(std::is_nothrow_move_assignable_v<detail::PreparedFrameText>);
+        border.options_.title.swap(candidate.title);
+        *border.text_ = std::move(*prepared);
+      }
+    } catch (const std::bad_alloc &) {
+      result = std::unexpected(TreeError::NO_MEMORY);
+    } catch (const std::length_error &) {
+      result = std::unexpected(TreeError::NODE_LIMIT);
+    } catch (...) {
+      result = std::unexpected(TreeError::CALLBACK_FAILED);
+    }
+  });
+
+  return edited ? result : edited;
+} catch (const std::bad_alloc &) {
+  return std::unexpected(TreeError::NO_MEMORY);
+} catch (const std::length_error &) {
+  return std::unexpected(TreeError::NODE_LIMIT);
+} catch (...) {
+  return std::unexpected(TreeError::CALLBACK_FAILED);
+}
+
 std::expected<void, TreeError> syncBorder(WidgetTree &tree, Node<Border> node, Node<Widget> focused) {
   const auto eligible = tree.inputEligible(node);
 

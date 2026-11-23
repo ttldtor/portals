@@ -9,6 +9,7 @@ Copying the reference does not subscribe to changes.
 Explicit shared text state is supported by editors, labels and buttons.
 Managed observation delivers the latest state values.
 Read-only derived managed sources share the same observation and caption paths.
+For numbers, records, live formatting and source replacement, see [value models](value-models.md).
 
 ## Text changes from a button
 

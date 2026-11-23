@@ -16,6 +16,11 @@
 #include <variant>
 
 namespace portals {
+namespace detail {
+/// @cond INTERNAL
+template <class T> inline constexpr bool IS_LIVE_TEXT_SOURCE = false;
+/// @endcond
+} // namespace detail
 
 /** @brief Original text validation error or a distinct resource lookup error. */
 using TextValueError = std::variant<TextError, TextResourceError>;
@@ -207,7 +212,7 @@ private:
  * @note Other exceptions from user-defined formatters also propagate unchanged.
  */
 template <class... Args>
-  requires(sizeof...(Args) > 0)
+  requires(sizeof...(Args) > 0) && (!(detail::IS_LIVE_TEXT_SOURCE<std::remove_cvref_t<Args>> || ...))
 [[nodiscard]] TextValue text(std::format_string<Args...> pattern, Args &&...args) {
   return text(std::format(pattern, std::forward<Args>(args)...));
 }

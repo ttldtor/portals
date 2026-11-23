@@ -173,6 +173,7 @@ private:
   friend struct detail::GlyphProfileAccess;
   friend std::expected<void, TreeError> syncBorder(WidgetTree &, Node<Border>);
   friend std::expected<void, TreeError> syncBorder(WidgetTree &, Node<Border>, Node<Widget>);
+  friend std::expected<void, TreeError> setBorderTitle(WidgetTree &, Node<Border>, const GraphemeText &);
   Column layout_;
   FrameOptions options_;
   ControlStyle style_;
@@ -265,6 +266,15 @@ std::expected<void, TreeError> syncBorder(WidgetTree &tree, Node<Border> node);
  * Disabled presentation takes precedence over focus. The focus observer is borrowed only during this call.
  */
 std::expected<void, TreeError> syncBorder(WidgetTree &tree, Node<Border> node, Node<Widget> focused);
+/** @brief Replace a frame title through the existing checked tree mutation boundary.
+ * @param tree Borrowed UI owner, between frames.
+ * @param node Live passive frame, without changing its size policy or title decoration.
+ * @param title Validated text borrowed only during this call, using this frame's width policy.
+ * @return Checked boundary/text/capacity error without changing the old title, or success.
+ * Preparation precedes paint invalidation and publication; equal bytes request no redraw.
+ * Title text is clipped to the current allocation and never enlarges intrinsic frame width.
+ */
+std::expected<void, TreeError> setBorderTitle(WidgetTree &tree, Node<Border> node, const GraphemeText &title);
 /** @param tree Borrowed UI owner, between frames.
  * @param node Live gauge whose own and ancestor input eligibility is copied for disabled presentation.
  * @return Tree boundary error or success; unchanged eligibility requests no redraw.

@@ -44,6 +44,8 @@ template <class T> struct RecipeState {
     std::optional<Ref<Border>> reference;    ///< Optional observer for explicit outer geometry/removal.
     Node<Border> mounted;                    ///< Mount-only resize target; destroyed with the cold State.
     bool invalidPattern{};                   ///< Unknown compact spelling, reported at mount rather than ignored.
+    std::function<std::expected<void, ManagedError>(ManagedScene &, Node<Border>, MountContext &)>
+      titleBinding; ///< Optional scalar target adapter; retained only by this opted-in cold frame recipe.
   };
 
   std::unique_ptr<ManagedError>

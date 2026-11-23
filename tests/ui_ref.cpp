@@ -1498,6 +1498,15 @@ TEST_CASE("legacy empty caption braces remain literal overloads with and without
   CHECK(clicks == 1);
 }
 
+TEST_CASE("legacy empty framed title braces remain literal overloads with and without references") {
+  Fixture fixture;
+  ui::Ref<Border> frame;
+
+  take(ui::mount(*fixture.scene,
+                 ui::column(ui::label("body").framed("ascii", {}), ui::label("body").framed(frame, "ascii", {}))));
+  CHECK(take(fixture.app->tree().inspect(frame.node())).children.size() == 1);
+}
+
 TEST_CASE("threeState factories share the existing checkbox binding and fixed cycle") {
   Fixture fixture;
   ui::Ref<ThreeState> internal;
