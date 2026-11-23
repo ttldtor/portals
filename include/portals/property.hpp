@@ -11,6 +11,10 @@
 #include <utility>
 
 namespace portals {
+namespace detail {
+struct ManagedNavigationRecord;
+}
+
 /** @brief Immutable owning value/revision pair; revision zero is the initial value.
  * T must own its data transitively; mutable aliases must not change published snapshots.
  * @tparam T Value owning its data transitively; published reachable storage must remain immutable.
@@ -264,12 +268,20 @@ private:
     }
   }
 
-  /** @brief Prepare, commit and publish without creating an intermediate T.
-   * @tparam Value Deduced T or const T reference, preserving the caller's copy/move choice.
-   * @param value Candidate compared first and forwarded only when it differs from the current value.
-   * @return Exact operation receipt, or an error before any library-controlled commit.
-   */
-  template <class Value> std::expected<PropertyUpdate<T>, TreeError> setImpl(Value &&value) {
+  friend struct detail::ManagedNavigationRecord;
+
+  struct State;
+
+  // SDK navigation groups reuse these private phases. No public batch operation or
+  // additional per-property state is introduced.
+  struct PreparedChange {
+    std::shared_ptr<State> state;
+    std::shared_ptr<const PropertyChange<T>> previous;
+    std::shared_ptr<const PropertyChange<T>> next;
+    bool changed{};
+  };
+
+  template <class Value> std::expected<PreparedChange, TreeError> prepareChange(Value &&value) {
     auto state = state_;
 
     if (state->owner != std::this_thread::get_id()) {
@@ -283,10 +295,7 @@ private:
       return std::unexpected(allowed.error());
     }
 
-    // Retain the old value through every publication: its final destructor may reenter set.
-    // The receipt below must continue to identify this operation even if that reentry commits again.
     auto previous = state->current;
-    std::shared_ptr<const PropertyChange<T>> next;
 
     try {
       if (previous->value == value) {
@@ -297,29 +306,59 @@ private:
                          {id.session, id.slot, id.generation});
         }
 
-        return PropertyUpdate<T>{previous};
+        return PreparedChange{state, previous, previous, false};
       }
 
       if (previous->revision == std::numeric_limits<std::uint64_t>::max()) {
         return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
       }
 
-      next = std::make_shared<const PropertyChange<T>>(std::forward<Value>(value), previous->revision + 1);
+      auto next = std::make_shared<const PropertyChange<T>>(std::forward<Value>(value), previous->revision + 1);
+
+      return PreparedChange{state, previous, std::move(next), true};
     } catch (const std::bad_alloc &) {
       return std::unexpected(TreeError::NO_MEMORY);
     } catch (...) {
       return std::unexpected(TreeError::CALLBACK_FAILED);
     }
+  }
 
-    auto invalidated = state->tree.invalidate(state->target, state->kind);
+  static std::expected<void, TreeError> validateChange(const PreparedChange &change) {
+    const auto &state = change.state;
 
-    if (!invalidated) {
-      return std::unexpected(invalidated.error());
+    if (state->owner != std::this_thread::get_id()) {
+      return std::unexpected(TreeError::WRONG_THREAD);
+    }
+    if (!state->alive) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+    if (state->current != change.previous) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
     }
 
-    // Invalidation is the last fallible precommit step. Once current changes, bounded queue
-    // rejection is part of the receipt, never a reason to roll back the visible value.
-    state->current = next;
+    return state->tree.withScope(state->target, [](const UiScope &) {
+    });
+  }
+
+  static std::expected<void, TreeError> invalidateChange(const PreparedChange &change) {
+    return change.changed ? change.state->tree.invalidate(change.state->target, change.state->kind)
+                          : std::expected<void, TreeError>{};
+  }
+
+  static void installChange(const PreparedChange &change) noexcept {
+    if (change.changed) {
+      // previous pins the retired value through the complete group installation/publication.
+      change.state->current = change.next;
+    }
+  }
+
+  static PropertyUpdate<T> publishChange(const PreparedChange &change) {
+    if (!change.changed) {
+      return PropertyUpdate<T>{change.previous};
+    }
+
+    const auto &state = change.state;
+    const auto &next = change.next;
 
     if (auto *recorder = state->tree.diagnostics(); recorder && recorder->enabled()) {
       const auto id = state->target.id();
@@ -352,6 +391,25 @@ private:
     state->prune();
 
     return result;
+  }
+
+  /** @brief Existing single-property operation over the same private phases. */
+  template <class Value> std::expected<PropertyUpdate<T>, TreeError> setImpl(Value &&value) {
+    auto change = prepareChange(std::forward<Value>(value));
+
+    if (!change) {
+      return std::unexpected(change.error());
+    }
+
+    auto invalidated = invalidateChange(*change);
+
+    if (!invalidated) {
+      return std::unexpected(invalidated.error());
+    }
+
+    installChange(*change);
+
+    return publishChange(*change);
   }
 
   struct Lifetime {};

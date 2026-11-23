@@ -1233,6 +1233,22 @@ endif()
 add_test(NAME consumer.log-navigation COMMAND portals_log_navigation_consumer)
 set_tests_properties(consumer.log-navigation PROPERTIES TIMEOUT 15)
 
+add_executable(portals_model_rebind_consumer model_rebind.cpp model_rebind_header.cpp)
+target_link_libraries(portals_model_rebind_consumer PRIVATE portals::core)
+set_target_properties(portals_model_rebind_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_model_rebind_consumer PRIVATE no_dialogs.cpp)
+endif()
+add_test(NAME consumer.model-rebind COMMAND portals_model_rebind_consumer)
+set_tests_properties(consumer.model-rebind PROPERTIES TIMEOUT 15)
+
+add_executable(portals_docs_view_models_consumer docs/examples/guide_view_models.cpp)
+target_link_libraries(portals_docs_view_models_consumer PRIVATE portals::core)
+set_target_properties(portals_docs_view_models_consumer PROPERTIES CXX_EXTENSIONS OFF)
+if(WIN32)
+  target_sources(portals_docs_view_models_consumer PRIVATE no_dialogs.cpp)
+endif()
+
 add_executable(portals_document_source_consumer document_source.cpp)
 add_library(portals_document_source_headers OBJECT document_source_header.cpp
   document_search_header.cpp document_export_header.cpp)

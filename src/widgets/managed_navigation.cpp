@@ -4,6 +4,290 @@
 
 namespace portals {
 namespace detail {
+std::expected<ModelResource, TreeError> modelNavigationResource(ManagedModelSource &source) {
+  if (source.retired) {
+    return std::unexpected(TreeError::CLOSED);
+  }
+  if (!source.navigationResource.identity.instance) {
+    auto resource = ModelResource::create();
+
+    if (!resource) {
+      return std::unexpected(navigationTreeError(resource.error()));
+    }
+
+    source.navigationResource = *resource;
+  }
+
+  return source.navigationResource;
+}
+
+std::expected<std::shared_ptr<ModelViewHistory>, TreeError> ModelViewHistory::create(std::weak_ptr<const void> lifetime,
+                                                                                     ModelCheckpointOptions options) {
+  if (lifetime.expired() || !options.bookmarks.maxBytes) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  auto budget = SourceBudget::create({.maxBytes = options.maxBytes});
+
+  if (!budget) {
+    return std::unexpected(navigationTreeError(budget.error()));
+  }
+
+  constexpr std::size_t SESSION_ALLOCATION_ALLOWANCE = 256;
+  auto credit = (*budget)->reserve({sizeof(ModelViewHistory) + SESSION_ALLOCATION_ALLOWANCE, 0, 0, 0});
+
+  if (!credit) {
+    return std::unexpected(navigationTreeError(credit.error()));
+  }
+
+  try {
+    auto result = std::make_shared<ModelViewHistory>();
+
+    result->credit_ = std::move(*credit);
+    result->budget_ = std::move(*budget);
+    result->lifetime_ = std::move(lifetime);
+    result->options_ = options;
+
+    return result;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+ModelViewHistoryEntry *ModelViewHistory::find(const std::shared_ptr<ManagedModelSource> &model, std::uint64_t role,
+                                              bool lineageFallback) const noexcept {
+  ModelViewHistoryEntry *fallback{};
+  for (auto *entry = entries_.get(); entry; entry = entry->next.get()) {
+    if (entry->role != role) {
+      continue;
+    }
+    if (entry->resource == model->navigationResource) {
+      return entry;
+    }
+    if (lineageFallback && entry->resource.identity == model->navigationResource.identity) {
+      fallback = entry;
+    }
+  }
+
+  return fallback;
+}
+
+void ModelViewHistory::prune() noexcept {
+  auto *entry = &entries_;
+
+  while (*entry) {
+    auto model = (*entry)->model.lock();
+
+    if ((!(*entry)->explicitResource && (!model || model->retired)) ||
+        ((*entry)->role && (*entry)->participant.expired())) {
+      auto removed = std::move(*entry);
+
+      *entry = std::move(removed->next);
+    } else {
+      entry = &(*entry)->next;
+    }
+  }
+}
+
+std::expected<ModelViewHistoryChange, TreeError> ModelViewHistory::stage(std::shared_ptr<ManagedModelSource> model,
+                                                                         std::uint64_t role, ModelViewCheckpoint value,
+                                                                         std::weak_ptr<const void> participant) {
+  if (lifetime_.expired() || !model || model->retired) {
+    return std::unexpected(TreeError::CLOSED);
+  }
+  auto resource = modelNavigationResource(*model);
+  if (!resource) {
+    return std::unexpected(resource.error());
+  }
+
+  std::size_t metadata{};
+
+  for (const auto *bookmark : {&value.current, &value.reading}) {
+    if (*bookmark) {
+      if ((*bookmark)->storageBytes() > options_.bookmarks.maxBytes) {
+        return std::unexpected(TreeError::WOULD_BLOCK);
+      }
+
+      const auto bytes = (*bookmark)->storageBytes() - sizeof(ModelBookmark);
+      if (bytes > std::numeric_limits<std::size_t>::max() - metadata) {
+        return std::unexpected(TreeError::NODE_LIMIT);
+      }
+      metadata += bytes;
+    }
+  }
+
+  if (!value.selection.rows().empty()) {
+    constexpr std::size_t SELECTION_ALLOCATION_ALLOWANCE = 256;
+    const auto rows = value.selection.rows().size();
+
+    if (metadata > std::numeric_limits<std::size_t>::max() - SELECTION_ALLOCATION_ALLOWANCE ||
+        rows > (std::numeric_limits<std::size_t>::max() - metadata - SELECTION_ALLOCATION_ALLOWANCE) / sizeof(RowId)) {
+      return std::unexpected(TreeError::NODE_LIMIT);
+    }
+
+    metadata += rows * sizeof(RowId) + SELECTION_ALLOCATION_ALLOWANCE;
+  }
+
+  prune();
+  ModelViewHistoryChange change;
+
+  change.existing = find(model, role, false);
+  change.model = model;
+  change.resource = *resource;
+  change.explicitResource = model->navigationExplicit || (change.existing && change.existing->explicitResource);
+  change.role = role;
+  change.participant = participant;
+  change.value = std::move(value);
+
+  if (change.existing) {
+    if (change.existing->revision == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+    }
+
+    change.revision = change.existing->revision;
+
+    if (!metadata) {
+      change.replaceMetadata = true;
+      return change;
+    }
+    if (metadata <= change.existing->metadataCredit.usage().bytes) {
+      return change;
+    }
+  }
+
+  auto payload = budget_->reserve({metadata, 0, 0, 0});
+
+  if (!payload) {
+    return std::unexpected(navigationTreeError(payload.error()));
+  }
+
+  change.metadataCredit = std::move(*payload);
+  change.replaceMetadata = true;
+
+  if (change.existing) {
+    return change;
+  }
+
+  constexpr std::size_t ENTRY_ALLOCATION_ALLOWANCE = 128;
+  auto credit = budget_->reserve({sizeof(ModelViewHistoryEntry) + ENTRY_ALLOCATION_ALLOWANCE, 0, 0, 0});
+
+  if (!credit) {
+    return std::unexpected(navigationTreeError(credit.error()));
+  }
+
+  try {
+    change.added = std::make_unique<ModelViewHistoryEntry>();
+    change.added->credit = std::move(*credit);
+    change.added->metadataCredit = std::move(change.metadataCredit);
+    change.added->model = std::move(model);
+    change.added->resource = change.resource;
+    change.added->explicitResource = change.explicitResource;
+    change.added->role = role;
+    change.added->participant = std::move(participant);
+    change.added->value = std::move(change.value);
+
+    return change;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+bool ModelViewHistory::valid(const ModelViewHistoryChange &change) const noexcept {
+  auto model = change.model.lock();
+
+  if (lifetime_.expired() || !model || model->retired) {
+    return false;
+  }
+
+  if (model->navigationResource != change.resource) {
+    return false;
+  }
+  const auto *entry = find(model, change.role, false);
+
+  return change.existing ? entry == change.existing && entry->revision == change.revision : entry == nullptr;
+}
+
+void ModelViewHistory::commit(ModelViewHistoryChange change) noexcept {
+  if (change.existing) {
+    change.existing->value = std::move(change.value);
+    change.existing->model = std::move(change.model);
+    change.existing->explicitResource = change.explicitResource;
+    change.existing->participant = std::move(change.participant);
+    ++change.existing->revision;
+
+    if (change.replaceMetadata) {
+      change.existing->metadataCredit = std::move(change.metadataCredit);
+    }
+  } else {
+    change.added->next = std::move(entries_);
+    entries_ = std::move(change.added);
+  }
+}
+
+std::expected<std::uint64_t, TreeError> ModelViewHistory::role() {
+  if (nextRole_ == std::numeric_limits<std::uint64_t>::max()) {
+    return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+  }
+
+  return nextRole_++;
+}
+
+std::expected<SourceCredit, TreeError> ModelViewHistory::reserveState() {
+  constexpr std::size_t STATE_ALLOCATION_ALLOWANCE = 256;
+  auto reserved = budget_->reserve({sizeof(ModelViewRestoreState) + STATE_ALLOCATION_ALLOWANCE, 0, 0, 0});
+  return reserved ? std::expected<SourceCredit, TreeError>(std::move(*reserved))
+                  : std::unexpected(navigationTreeError(reserved.error()));
+}
+
+std::expected<SourceCredit, TreeError> ModelViewHistory::reserveRole() {
+  constexpr std::size_t ROLE_ALLOCATION_ALLOWANCE = 256;
+  auto reserved = budget_->reserve({sizeof(SourceCredit) + ROLE_ALLOCATION_ALLOWANCE, 0, 0, 0});
+  return reserved ? std::expected<SourceCredit, TreeError>(std::move(*reserved))
+                  : std::unexpected(navigationTreeError(reserved.error()));
+}
+
+std::expected<std::shared_ptr<ModelSelectionPositions>, TreeError>
+ModelViewHistory::selectedPositions(std::size_t count) {
+  constexpr std::size_t POSITIONS_ALLOCATION_ALLOWANCE = 256;
+  constexpr std::size_t BASE_BYTES = sizeof(ModelSelectionPositions) + POSITIONS_ALLOCATION_ALLOWANCE;
+  if (count > (std::numeric_limits<std::size_t>::max() - BASE_BYTES) / sizeof(ModelBookmark)) {
+    return std::unexpected(TreeError::NODE_LIMIT);
+  }
+  auto credit = budget_->reserve({BASE_BYTES + count * sizeof(ModelBookmark), 0, 0, 0});
+  if (!credit) {
+    return std::unexpected(navigationTreeError(credit.error()));
+  }
+  try {
+    auto result = std::make_shared<ModelSelectionPositions>();
+    result->credit = std::move(*credit);
+    result->positions.reserve(count);
+    return result;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  } catch (const std::length_error &) {
+    return std::unexpected(TreeError::NODE_LIMIT);
+  }
+}
+
+std::expected<std::shared_ptr<ModelCanonicalRestore>, TreeError> ModelViewHistory::canonicalRestore() {
+  constexpr std::size_t RESTORE_ALLOCATION_ALLOWANCE = 256;
+  auto credit = budget_->reserve({sizeof(ModelCanonicalRestore) + RESTORE_ALLOCATION_ALLOWANCE, 0, 0, 0});
+  if (!credit) {
+    return std::unexpected(navigationTreeError(credit.error()));
+  }
+  try {
+    auto result = std::make_shared<ModelCanonicalRestore>();
+    result->credit = std::move(*credit);
+    return result;
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+const ModelCheckpointOptions &ModelViewHistory::options() const noexcept {
+  return options_;
+}
+
 LogCheckpointEntry *LogNavigationSession::find(ModelResource resource) const noexcept {
   for (auto *entry = entries.get(); entry; entry = entry->next.get()) {
     if (entry->resource.identity == resource.identity && !entry->lifetime.expired()) {
@@ -263,11 +547,98 @@ std::span<const RowId> NavigationSelection::rows() const noexcept {
   return rows_ ? std::span<const RowId>(*rows_) : std::span<const RowId>{};
 }
 
+ModelResource NavigationSelection::resource() const noexcept {
+  return resource_;
+}
+
+PositionResolution NavigationSelection::resolution() const noexcept {
+  return resolution_;
+}
+
 bool NavigationSelection::operator==(const NavigationSelection &other) const noexcept {
-  return std::ranges::equal(rows(), other.rows());
+  return resource_ == other.resource_ && resolution_ == other.resolution_ && std::ranges::equal(rows(), other.rows());
 }
 
 namespace detail {
+std::expected<ManagedNavigationRecord::Publication, TreeError>
+ManagedNavigationRecord::preparePublication(NavigationPosition nextCurrent, NavigationSelection nextSelection,
+                                            NavigationPosition nextReading) {
+  auto currentOwner = current.lock();
+  auto selectionOwner = selection.lock();
+  auto readingOwner = reading.lock();
+
+  if (!currentOwner || !selectionOwner || !readingOwner) {
+    return std::unexpected(!currentOwner     ? currentOwner.error()
+                           : !selectionOwner ? selectionOwner.error()
+                                             : readingOwner.error());
+  }
+
+  auto preparedCurrent = (*currentOwner)->prepareChange(std::move(nextCurrent));
+
+  if (!preparedCurrent) {
+    return std::unexpected(preparedCurrent.error());
+  }
+
+  auto preparedSelection = (*selectionOwner)->prepareChange(std::move(nextSelection));
+
+  if (!preparedSelection) {
+    return std::unexpected(preparedSelection.error());
+  }
+
+  auto preparedReading = (*readingOwner)->prepareChange(std::move(nextReading));
+
+  if (!preparedReading) {
+    return std::unexpected(preparedReading.error());
+  }
+
+  return Publication{*currentOwner,
+                     *selectionOwner,
+                     *readingOwner,
+                     std::move(*preparedCurrent),
+                     std::move(*preparedSelection),
+                     std::move(*preparedReading)};
+}
+
+std::expected<void, TreeError> ManagedNavigationRecord::validatePublication(const Publication &publication) const {
+  if (closed || lifetime.expired()) {
+    return std::unexpected(TreeError::CLOSED);
+  }
+
+  auto currentValidation = Property<NavigationPosition>::validateChange(publication.current);
+  auto selectionValidation = Property<NavigationSelection>::validateChange(publication.selection);
+  auto readingValidation = Property<NavigationPosition>::validateChange(publication.reading);
+
+  return !currentValidation ? currentValidation : !selectionValidation ? selectionValidation : readingValidation;
+}
+
+std::expected<void, TreeError> ManagedNavigationRecord::invalidatePublication(const Publication &publication) const {
+  auto currentInvalidation = Property<NavigationPosition>::invalidateChange(publication.current);
+
+  if (!currentInvalidation) {
+    return currentInvalidation;
+  }
+
+  auto selectionInvalidation = Property<NavigationSelection>::invalidateChange(publication.selection);
+
+  return selectionInvalidation ? Property<NavigationPosition>::invalidateChange(publication.reading)
+                               : selectionInvalidation;
+}
+
+void ManagedNavigationRecord::installPublication(const Publication &publication) noexcept {
+  Property<NavigationPosition>::installChange(publication.current);
+  Property<NavigationSelection>::installChange(publication.selection);
+  Property<NavigationPosition>::installChange(publication.reading);
+}
+
+std::optional<SchedulerError> ManagedNavigationRecord::publishPublication(const Publication &publication) {
+  const auto current = Property<NavigationPosition>::publishChange(publication.current);
+  const auto selection = Property<NavigationSelection>::publishChange(publication.selection);
+  const auto reading = Property<NavigationPosition>::publishChange(publication.reading);
+  return current.notification_error     ? current.notification_error
+         : selection.notification_error ? selection.notification_error
+                                        : reading.notification_error;
+}
+
 TreeError navigationTreeError(SourceError error) noexcept {
   switch (error) {
   case SourceError::WRONG_THREAD:
@@ -303,13 +674,18 @@ void ManagedNavigationRecord::close() noexcept {
   closed = true;
   auto oldCapture = std::move(capture);
   auto oldSynchronize = std::move(synchronize);
+  auto oldHistory = std::move(history);
 
   cancel();
 }
 
 std::expected<void, TreeError> ManagedNavigationRecord::setPosition(std::optional<ModelBookmark> value,
                                                                     PositionResolution resolution, bool readingAnchor) {
-  if (value && (value->resource() != resource || value->position().revision == 0 ||
+  // An incompatible lineage is retained as owning metadata for explicit reset or
+  // a later attested reopen. It is never admitted as a resolved current item.
+  const bool incompatibleLineage =
+    value && resolution == PositionResolution::INCOMPATIBLE && value->resource().identity == resource.identity;
+  if (value && ((value->resource() != resource && !incompatibleLineage) || value->position().revision == 0 ||
                 value->storageBytes() > options.bookmarks.maxBytes)) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
@@ -412,7 +788,7 @@ std::expected<void, TreeError> ManagedNavigation::navigate(RowId id) const {
   }
 
   auto capture = (*record)->capture;
-  auto value = (*capture)(id);
+  auto value = (*capture)(*record, id);
 
   if (!value) {
     return std::unexpected(value.error());
@@ -454,6 +830,9 @@ std::expected<void, TreeError> ManagedNavigation::setSelection(std::span<const R
 
   try {
     NavigationSelection value;
+
+    value.resource_ = (*record)->resource;
+    value.resolution_ = rows.empty() ? PositionResolution::EMPTY : PositionResolution::EXACT;
 
     if (!rows.empty()) {
       auto payload = std::make_shared<std::vector<RowId>>(rows.begin(), rows.end());
@@ -497,8 +876,19 @@ std::expected<void, TreeError> ManagedNavigation::setChangeMap(PositionChangeMap
     return std::unexpected(record.error());
   }
 
+  if ((*record)->operation == std::numeric_limits<std::uint64_t>::max()) {
+    return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+  }
+  if (auto model = (*record)->model.lock()) {
+    if (model->navigationRevision == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+    }
+    model->navigationChanges = changes;
+    ++model->navigationRevision;
+  }
   (*record)->changes = std::move(changes);
   (*record)->frameRevision = 0;
+  ++(*record)->operation;
 
   return {};
 }
@@ -595,7 +985,7 @@ std::expected<ManagedNavigation, ManagedError> ManagedScene::navigation(ModelRes
     return std::unexpected(allowed.error());
   }
   if (!resource.identity.instance || !resource.identity.epoch || !resource.lineage || !session.instance ||
-      !session.epoch || !options.maxSelectedRows || !options.bookmarks.maxBytes) {
+      !session.epoch || !options.maxSelectedRows || !options.bookmarks.maxBytes || !options.maxCheckpointBytes) {
     return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::INVALID_ARGUMENT));
   }
   if (options_.maxStates - std::min(options_.maxStates, properties_.size()) < 3) {
@@ -623,7 +1013,10 @@ std::expected<ManagedNavigation, ManagedError> ManagedScene::navigation(ModelRes
       return rollback(current.error());
     }
 
-    auto selection = state(NavigationSelection{});
+    NavigationSelection selected;
+
+    selected.resource_ = resource;
+    auto selection = state(std::move(selected));
 
     if (!selection) {
       return rollback(selection.error());
@@ -636,6 +1029,7 @@ std::expected<ManagedNavigation, ManagedError> ManagedScene::navigation(ModelRes
     }
 
     record->current = *current;
+    record->owner = this;
     record->selection = *selection;
     record->reading = *reading;
     record->lifetime = lifetime_;
@@ -754,6 +1148,9 @@ void ManagedScene::pruneNavigation() {
 
     auto record = navigation_->contexts[index];
 
+    if (record->history) {
+      record->history->prune();
+    }
     if (!record->finite || record->closed) {
       continue;
     }

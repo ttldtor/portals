@@ -278,6 +278,15 @@ public:
    * @note UI frame only; no I/O, model reads, delegate calls or invalidation.
    */
   std::expected<void, TreeError> paint(PaintContext &context) override {
+    if (preparedSuppressed_) {
+      auto bounds = CellRect::from({}, arranged_);
+      if (!bounds) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+      const auto style = computedStyle() ? computedStyle()->normal : options_.normal;
+      const std::array<RenderCommand, 1> commands{FillCommand{*bounds, *bounds, style}};
+      return context.submit(commands);
+    }
     if (!prepared_ || dirty_) {
       return std::unexpected(TreeError::WOULD_BLOCK);
     }
@@ -713,6 +722,7 @@ private:
   std::uint64_t anchorRevision_{};
   CellSize arranged_;
   bool dirty_{true};
+  bool preparedSuppressed_{};
   bool retry_{};
   bool retryPending_{};
   bool retryFailedBase_{};

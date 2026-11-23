@@ -1088,6 +1088,115 @@ public:
     return result.has_value();
   }
 
+  /** @brief Replace a virtual list/table model with the same row type, retaining the node and presentation.
+   * @tparam Row Immutable row type of this virtual list or table.
+   * @param source Live model belonging to the receiving scene; no provider I/O runs during admission.
+   * @param prepared Omitted retains a same-model override; a different model uses model-owned preparation.
+   * An explicit empty ManagedViewHandler clears the override.
+   * @param origin Original command site retained on a failure.
+   * @param options Restore/reset and bounded metadata policy.
+   * @return Checked atomic admission, without reporting. Different models remember resource-specific navigation;
+   * the same model retains its consumer, prepared data and pending requests, even for handler replacement.
+   * UI only; preparation, styling and diagnostic callback reentry is rejected. Argument construction may throw.
+   */
+  template <class Row>
+    requires(std::same_as<T, VirtualList<Row>> || std::same_as<T, VirtualTable<Row>>)
+  std::expected<void, ManagedError>
+  setModel(ManagedModel<Row> source,
+           std::type_identity_t<std::optional<ManagedViewHandler<Row>>> prepared = std::nullopt,
+           std::source_location origin = std::source_location::current(), ModelRebindOptions options = {}) const {
+    const auto owner = detail::eventScene(target());
+
+    if (!owner) {
+      auto failure = owner.error();
+
+      failure.registrationOrigin = origin;
+
+      return std::unexpected(failure);
+    }
+
+    auto result = (*owner)->setModel(this->node(), std::move(source), std::move(prepared), options);
+
+    if (!result) {
+      result.error().registrationOrigin = origin;
+    }
+
+    return result;
+  }
+
+  /** @tparam Row Immutable row type of this list or table.
+   * @param source Same-scene model. @param options Explicit restore/reset and bounded history policy.
+   * @param prepared Omitted override uses model preparation on a different model.
+   * @param origin Original command site. @return Checked admission, without reporting.
+   */
+  template <class Row>
+    requires(std::same_as<T, VirtualList<Row>> || std::same_as<T, VirtualTable<Row>>)
+  std::expected<void, ManagedError>
+  setModel(ManagedModel<Row> source, ModelRebindOptions options,
+           std::type_identity_t<std::optional<ManagedViewHandler<Row>>> prepared = std::nullopt,
+           std::source_location origin = std::source_location::current()) const {
+    return setModel(std::move(source), std::move(prepared), origin, options);
+  }
+
+  /** @tparam Row Immutable row type of this virtual list or table.
+   * @param source Same-scene replacement; retains view identity, formatter/columns and options.
+   * @param prepared Omitted retains a same-model override; cross-model preparation belongs to the new model.
+   * An explicit empty ManagedViewHandler clears the override.
+   * @param origin Original operation site.
+   * @return Admission success; false reports the original error once through the scene collector.
+   */
+  template <class Row>
+    requires(std::same_as<T, VirtualList<Row>> || std::same_as<T, VirtualTable<Row>>)
+  bool model(ManagedModel<Row> source,
+             std::type_identity_t<std::optional<ManagedViewHandler<Row>>> prepared = std::nullopt,
+             std::source_location origin = std::source_location::current()) const {
+    const auto result = setModel(std::move(source), std::move(prepared), origin);
+
+    if (!result) {
+      detail::reportEventError(target(), result.error(), origin);
+    }
+
+    return result.has_value();
+  }
+
+  /** @tparam Row Immutable row type of this list or table.
+   * @param source Same-scene model. @param options Restore/reset and bounded history policy.
+   * @param prepared Optional explicit view preparation override. @param origin Original operation site.
+   * @return Admission success; false reports its error once through the existing collector.
+   */
+  template <class Row>
+    requires(std::same_as<T, VirtualList<Row>> || std::same_as<T, VirtualTable<Row>>)
+  bool model(ManagedModel<Row> source, ModelRebindOptions options,
+             std::type_identity_t<std::optional<ManagedViewHandler<Row>>> prepared = std::nullopt,
+             std::source_location origin = std::source_location::current()) const {
+    const auto result = setModel(std::move(source), std::move(prepared), origin, options);
+    if (!result) {
+      detail::reportEventError(target(), result.error(), origin);
+    }
+    return result.has_value();
+  }
+
+  /** @param origin Original query site.
+   * @return No value before restoration, otherwise the current/reading/selection aggregate outcome.
+   * Unresolved current takes precedence over reading and selection. No work or redraw is started.
+   */
+  std::expected<std::optional<PositionResolution>, ManagedError>
+  restoreStatus(std::source_location origin = std::source_location::current()) const
+    requires requires(const ManagedScene &scene, Node<T> node) { scene.restoreStatus(node); }
+  {
+    const auto owner = detail::eventScene(target());
+    if (!owner) {
+      auto failure = owner.error();
+      failure.registrationOrigin = origin;
+      return std::unexpected(failure);
+    }
+    auto result = (*owner)->restoreStatus(this->node());
+    if (!result) {
+      result.error().registrationOrigin = origin;
+    }
+    return result;
+  }
+
   /** @param origin Original call site. @return Pure checked resume-following result, without reporting. */
   std::expected<void, ManagedError> followTail(std::source_location origin = std::source_location::current()) const
     requires std::same_as<T, LogView>

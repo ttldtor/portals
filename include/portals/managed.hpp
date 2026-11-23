@@ -124,6 +124,11 @@ struct Access;
 } // namespace style::ct::detail
 
 namespace detail {
+struct ModelViewCheckpoint;
+struct ModelViewRestoreState;
+struct ModelRestoreChannels;
+struct PreparedModelViewChange;
+class ModelViewHistory;
 struct ManagedScrollState;
 struct ScrollIntentRecord;
 struct ManagedScrollTestAccess;
@@ -356,6 +361,7 @@ private:
   friend class ManagedScene;
   friend class NumericState;
   friend struct ui::detail::Access;
+  friend struct detail::ManagedNavigationRecord;
 
   std::expected<std::shared_ptr<Property<T>>, TreeError> lock() const {
     if (owner_ != std::thread::id{} && owner_ != std::this_thread::get_id()) {
@@ -1696,11 +1702,12 @@ public:
    * @tparam T Immutable domain row satisfying Model<T>'s provider contract.
    * @param initial Non-null immutable initial snapshot, retained by the model.
    * @param options Positive existing model range, consumer and work limits.
+   * @param prepared Model-owned preparation callback used by views without an explicit override.
    * @return Handle or original allocation/validation error in STATE phase.
    */
   template <class T>
   std::expected<ManagedModel<T>, ManagedError> model(std::shared_ptr<const ModelSnapshot<T>> initial,
-                                                     ModelOptions options = {});
+                                                     ModelOptions options = {}, ManagedViewHandler<T> prepared = {});
 
   /** @brief Bind owning immutable rows to a fresh sink-only model using the existing UI transaction.
    * @tparam Source Exact ManagedSource<RowCollection<T>>, with copyable equality-comparable immutable T.
@@ -1774,8 +1781,8 @@ public:
    * @param columns Column descriptions copied by the table.
    * @param options Existing table configuration, validated by preparation.
    * @param policy Existing layout policy for the table.
-   * @param prepared Optional callback after each preparation, including retries; empty rejects pending work with
-   * INVALID_ARGUMENT.
+   * @param prepared Optional view override after preparation; empty uses the model's preparation callback.
+   * Pending work without either callback is rejected with INVALID_ARGUMENT.
    * @return Observing node or typed error; standard input semantics are preserved.
    */
   template <class T>
@@ -1791,7 +1798,8 @@ public:
    * @param delegate Owning row formatter, invoked only for visible rows.
    * @param options Existing list configuration, validated by preparation.
    * @param policy Existing layout policy for the list.
-   * @param prepared Optional callback after each preparation; empty rejects pending work with INVALID_ARGUMENT.
+   * @param prepared Optional view override after preparation; empty uses model-owned preparation.
+   * Pending work without either callback is rejected with INVALID_ARGUMENT.
    * @return Observing node or typed mount/bind error.
    */
   template <class T>
@@ -1800,6 +1808,51 @@ public:
               VirtualListOptions options = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY,
               std::type_identity_t<ManagedViewHandler<T>> prepared = {});
 
+  /** @brief Atomically replace a managed list's model without replacing its node or presentation.
+   * @tparam T Existing immutable row type shared by both models.
+   * @param node Live list created by this scene's virtualList factory.
+   * @param model Live replacement owned by this scene; admission performs no provider I/O.
+   * @param prepared Omitted keeps a same-model override; a new model uses its own preparation callback.
+   * An explicitly empty handler clears the override. @param options Remember/reset and bounded metadata policy.
+   * @return Success or the original admission error with the old binding intact. Different models remember
+   * independent current, selection and reading metadata; returning resolves stable IDs without a full scan.
+   * The same model preserves its consumer and state; an explicit handler affects future preparations. UI only;
+   * preparation, styling and diagnostic callbacks reject reentry with WOULD_BLOCK. Argument construction may throw.
+   */
+  template <class T>
+  std::expected<void, ManagedError>
+  setModel(Node<VirtualList<T>> node, ManagedModel<T> model,
+           std::type_identity_t<std::optional<ManagedViewHandler<T>>> prepared = std::nullopt,
+           ModelRebindOptions options = {});
+
+  /** @brief Atomically replace a managed table's model, preserving columns, options and node identity.
+   * @tparam T Existing immutable row type shared by both models.
+   * @param node Live table created by this scene's virtualTable factory.
+   * @param model Live replacement owned by this scene.
+   * @param prepared Optional override with the same keep/replace/clear policy as the list overload.
+   * @param options Remember/reset and bounded metadata policy.
+   * @return Same admission, restoration, same-model and UI/reentry guarantees as the list overload.
+   */
+  template <class T>
+  std::expected<void, ManagedError>
+  setModel(Node<VirtualTable<T>> node, ManagedModel<T> model,
+           std::type_identity_t<std::optional<ManagedViewHandler<T>>> prepared = std::nullopt,
+           ModelRebindOptions options = {});
+
+  /** @tparam T Immutable row type of the existing managed view.
+   * @param node Live list in this scene.
+   * @return No value before a restore attempt, or its current/reading/selection aggregate outcome.
+   * The first unresolved channel determines a terminal/pending outcome; successful channels
+   * aggregate to NEAREST if any required a proven neighbor, otherwise EXACT or known EMPTY.
+   */
+  template <class T>
+  std::expected<std::optional<PositionResolution>, ManagedError> restoreStatus(Node<VirtualList<T>> node) const;
+  /** @tparam T Immutable row type of the existing managed view.
+   * @param node Live table. @return Same checked metadata-only outcome as the list overload.
+   */
+  template <class T>
+  std::expected<std::optional<PositionResolution>, ManagedError> restoreStatus(Node<VirtualTable<T>> node) const;
+
   /** @brief Mount a chart with owned range, style and automatic preparation.
    * @tparam T Immutable row projected into an optional OHLC value.
    * @param parent Managed parent; failure removes only the attempted child.
@@ -1807,7 +1860,8 @@ public:
    * @param accessor Owning OHLC projection; nullopt introduces a gap.
    * @param options Existing chart mode, width and glyph configuration.
    * @param first Optional source of the first row; empty means zero. Runs in registration order.
-   * @param prepared Optional callback after each preparation; empty rejects pending work with INVALID_ARGUMENT.
+   * @param prepared Optional view override after preparation; empty uses model-owned preparation.
+   * Pending work without either callback is rejected with INVALID_ARGUMENT.
    * @param policy Owning viewport constraints; explicit policies remain authoritative.
    * @return Observing node or typed mount/bind error; chart adds no input binding.
    */
@@ -2174,6 +2228,7 @@ private:
   friend struct ui::detail::ActionAccess;
   friend struct ui::detail::AsyncAccess;
   friend struct detail::ManagedScrollTestAccess;
+  friend class ManagedNavigation;
 
   struct Entry;
   std::shared_ptr<detail::MessageRecord> findMessage(Node<Widget> node) const;
@@ -2436,9 +2491,59 @@ private:
   std::expected<ManagedModel<T>, ManagedError> collectionModel(ManagedState<Collection> input,
                                                                CollectionModelOptions options, MakeRows makeRows);
 
-  template <class T, class W, class Prepare>
+  /// @cond INTERNAL
+  template <class T, class W> struct ViewPreparation;
+  template <class T, class W> struct PreparedViewModelChange;
+  /// @endcond
+
+  template <class T>
+  std::expected<ManagedNavigation, ManagedError> makeModelNavigation(ManagedModel<T> model, ModelResource resource,
+                                                                     SourceStamp session, NavigationOptions options,
+                                                                     bool explicitDomain);
+
+  template <class T, class W>
   std::expected<Node<W>, ManagedError> attachView(Node<W> node, std::shared_ptr<detail::ManagedModelSourceOf<T>> source,
-                                                  Prepare prepare, ManagedViewHandler<T> handler);
+                                                  ManagedViewHandler<T> handler, ManagedChartOrigin first = {});
+
+  template <class T, class W>
+  std::expected<void, ManagedError> replaceViewModel(Node<W> node, ManagedModel<T> model,
+                                                     std::optional<ManagedViewHandler<T>> prepared,
+                                                     ModelRebindOptions options = {});
+
+  template <class T, class W>
+  std::expected<detail::ModelViewCheckpoint, TreeError>
+  captureViewCheckpoint(Node<W> node, const std::shared_ptr<detail::ManagedModelSourceOf<T>> &source,
+                        BookmarkOptions options);
+
+  template <class T>
+  std::expected<detail::ModelViewCheckpoint, TreeError> resolveViewCheckpoint(
+    detail::ModelViewCheckpoint value, const std::shared_ptr<detail::ManagedModelSourceOf<T>> &source,
+    const std::shared_ptr<detail::ModelViewHistory> &history, BookmarkOptions options, PositionResolution &resolution,
+    PositionChangeMap changes = {}, const detail::ModelRestoreChannels *channels = nullptr);
+
+  template <class T>
+  std::expected<void, TreeError> retryCanonicalRestore(const std::shared_ptr<detail::ManagedNavigationRecord> &record,
+                                                       const std::shared_ptr<detail::ManagedModelSourceOf<T>> &source);
+
+  template <class T>
+  std::expected<void, TreeError>
+  captureSelectedPositions(detail::ModelViewCheckpoint &value,
+                           const std::shared_ptr<detail::ManagedModelSourceOf<T>> &source,
+                           const std::shared_ptr<detail::ModelViewHistory> &history, BookmarkOptions options);
+
+  template <class T, class W>
+  std::expected<std::unique_ptr<detail::PreparedModelViewChange>, ManagedError>
+  prepareViewModelChange(Node<W> node, const std::shared_ptr<detail::ManagedModelSourceOf<T>> &source,
+                         std::optional<ManagedViewHandler<T>> prepared, ModelRebindOptions options,
+                         std::shared_ptr<detail::ModelViewHistory> history,
+                         const detail::ModelViewCheckpoint *sharedPosition = nullptr,
+                         const NavigationBindingOptions *sharing = nullptr);
+
+  template <class T>
+  std::expected<void, ManagedError>
+  replaceNavigationModel(const std::shared_ptr<detail::ManagedNavigationRecord> &record, ManagedModel<T> model,
+                         ModelRebindOptions options, Node<Widget> overrideNode = {},
+                         std::optional<ManagedViewHandler<T>> prepared = std::nullopt);
 
   explicit ManagedScene(Application &app, ManagedOptions options);
 
@@ -2837,6 +2942,11 @@ private:
 
 #include <portals/detail/managed_derive.hpp>
 #include <portals/detail/managed_navigation.hpp>
+
+// Plain history types must be complete before the dependent view templates.
+#include <portals/detail/model_view_history.hpp>
+
+// These integration headers depend on the navigation and history records above.
 #include <portals/detail/managed_navigation_views.hpp>
 #include <portals/detail/managed_scroll.hpp>
 #include <portals/detail/managed_views.hpp>
