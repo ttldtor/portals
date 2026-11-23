@@ -61,6 +61,10 @@ struct FileLogReadFailure {
   }
 };
 
+namespace detail {
+class FileReadSessionImpl;
+}
+
 /** @brief File-backed rich model with optional bounded WindowSource delivery.
  * Creation owns the path without opening it. All I/O methods are worker-only; they do not start
  * threads. Every operation owns its native handle and bounded block cache. No row history, dense
@@ -133,6 +137,8 @@ public:
   FileLogOptions options() const noexcept;
 
 private:
+  friend class detail::FileReadSessionImpl;
+
   struct Observation {
     std::uint64_t identityHigh{};
     std::uint64_t identityLow{};

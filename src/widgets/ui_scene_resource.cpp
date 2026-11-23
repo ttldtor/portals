@@ -277,6 +277,7 @@ std::expected<void, ControlContextError> ResourceAccess::installScrolls(SceneRes
         config.language = document.language.value_or(config.language);
         config.syntax = document.syntax.value_or(config.syntax);
         config.maxAutoHighlightBytes = document.maxAutoHighlightBytes.value_or(config.maxAutoHighlightBytes);
+        config.tailWorkTurns = document.tailWorkTurns.value_or(config.tailWorkTurns);
         config.lineNumbers = document.lineNumbers.value_or(config.lineNumbers);
         config.wrap = document.wrap.value_or(config.wrap);
         config.decoder.explicitEncoding = document.encoding.value_or(config.decoder.explicitEncoding);

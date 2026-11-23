@@ -121,7 +121,7 @@ struct Oracle {
   }
 };
 
-class Counted final : public ByteDocumentProvider {
+class Counted final : public ByteDocumentProvider, public std::enable_shared_from_this<Counted> {
 public:
   explicit Counted(std::shared_ptr<ByteDocumentProvider> input)
       : input_(std::move(input)), owner_(std::this_thread::get_id()) {
@@ -164,7 +164,56 @@ public:
     return result;
   }
 
+  class ReadSession final : public ByteDocumentReadSession {
+  public:
+    ReadSession(std::shared_ptr<Counted> owner, std::unique_ptr<ByteDocumentReadSession> session)
+        : owner_(std::move(owner)), session_(std::move(session)) {
+    }
+
+    ByteDocumentMetadata metadata() const noexcept override {
+      return session_->metadata();
+    }
+
+    std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
+                                                      std::stop_token stop) override {
+      owner_->sessionThreadCheck();
+      ++owner_->reads;
+      auto result = session_->read(command, destination, stop);
+      if (result) {
+        owner_->bytes += result->bytesRead;
+      }
+
+      return result;
+    }
+
+    std::expected<void, DocumentError> seal(std::stop_token stop) override {
+      owner_->sessionThreadCheck();
+      ++owner_->metadataCalls;
+      return session_->seal(stop);
+    }
+
+  private:
+    std::shared_ptr<Counted> owner_;
+    std::unique_ptr<ByteDocumentReadSession> session_;
+  };
+
+  std::expected<std::unique_ptr<ByteDocumentReadSession>, DocumentError>
+  openReadSession(std::stop_token stop) override {
+    sessionThreadCheck();
+    ++metadataCalls;
+    auto opened = input_->openReadSession(stop);
+    if (!opened) {
+      return std::unexpected(opened.error());
+    }
+
+    return std::make_unique<ReadSession>(shared_from_this(), std::move(*opened));
+  }
+
 private:
+  void sessionThreadCheck() {
+    ownerIo += std::this_thread::get_id() == owner_;
+  }
+
   std::shared_ptr<ByteDocumentProvider> input_;
   std::thread::id owner_;
 };

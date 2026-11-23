@@ -14,6 +14,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <limits>
 #include <sstream>
 #include <thread>
 
@@ -30,6 +31,7 @@ constexpr std::uint64_t TIMER_MS = 10;
 struct Options {
   std::string file, kind{"plain"}, language{"plain"};
   unsigned views{1}, budgetMiB{128}, timeoutMs{60000}, samples{8192};
+  unsigned tailWorkTurns{DocumentViewConfig{}.tailWorkTurns};
   bool idle{}, help{};
 };
 
@@ -103,7 +105,7 @@ private:
 
 // Both wrappers share the original provider. The outer one measures logical admission;
 // the inner one measures physical compressed reads when gzip is selected.
-class CountedProvider final : public ByteDocumentProvider {
+class CountedProvider final : public ByteDocumentProvider, public std::enable_shared_from_this<CountedProvider> {
 public:
   explicit CountedProvider(std::shared_ptr<ByteDocumentProvider> provider) : provider_(std::move(provider)) {
   }
@@ -149,7 +151,56 @@ public:
 
   std::atomic<std::uint64_t> readCalls{}, admittedBytes{}, metadataCalls{}, discoveryCalls{}, uiIoViolations{};
 
+  class ReadSession final : public ByteDocumentReadSession {
+  public:
+    ReadSession(std::shared_ptr<CountedProvider> owner, std::unique_ptr<ByteDocumentReadSession> session)
+        : owner_(std::move(owner)), session_(std::move(session)) {
+    }
+
+    ByteDocumentMetadata metadata() const noexcept override {
+      return session_->metadata();
+    }
+
+    std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
+                                                      std::stop_token stop) override {
+      owner_->sessionThreadCheck();
+      ++owner_->readCalls;
+      auto result = session_->read(command, destination, stop);
+      if (result) {
+        owner_->admittedBytes += result->bytesRead;
+      }
+
+      return result;
+    }
+
+    std::expected<void, DocumentError> seal(std::stop_token stop) override {
+      owner_->sessionThreadCheck();
+      ++owner_->metadataCalls;
+      return session_->seal(stop);
+    }
+
+  private:
+    std::shared_ptr<CountedProvider> owner_;
+    std::unique_ptr<ByteDocumentReadSession> session_;
+  };
+
+  std::expected<std::unique_ptr<ByteDocumentReadSession>, DocumentError>
+  openReadSession(std::stop_token stop) override {
+    sessionThreadCheck();
+    ++metadataCalls;
+    auto opened = provider_->openReadSession(stop);
+    if (!opened) {
+      return std::unexpected(opened.error());
+    }
+
+    return std::make_unique<ReadSession>(shared_from_this(), std::move(*opened));
+  }
+
 private:
+  void sessionThreadCheck() {
+    checkThread();
+  }
+
   void checkThread() {
     if (std::this_thread::get_id() == ui_) {
       ++uiIoViolations;
@@ -462,6 +513,7 @@ int run(const Options &options) {
   ui::SceneOptions sceneOptions;
   sceneOptions.application.observer = {Measurements::observe, &metrics};
   DocumentViewConfig config;
+  config.tailWorkTurns = static_cast<std::uint8_t>(options.tailWorkTurns);
   config.language = options.language == "mysql"      ? DocumentLanguage::MYSQL_LEXICAL
                     : options.language == "markdown" ? DocumentLanguage::MARKDOWN_SOURCE
                                                      : DocumentLanguage::PLAIN;
@@ -551,6 +603,7 @@ int run(const Options &options) {
             << ",\"views\":" << (options.idle ? 0 : options.views) << ",\"kind\":\"" << options.kind
             << "\",\"language\":\"" << options.language
             << "\",\"viewport\":[120,40],\"budget_limit_bytes\":" << options.budgetMiB * MIB
+            << ",\"preparation_quantum_bytes\":" << config.workBytes << ",\"tail_work_turns\":" << options.tailWorkTurns
             << ",\"budget_peak_sampled_bytes\":" << metrics.budgetPeakBytes
             << ",\"budget_after_cleanup_bytes\":" << released.bytes << ",\"accepted_frames\":" << metrics.frames
             << ",\"budget_root_metadata_bytes\":" << SourceBudget::ROOT_METADATA_BYTES
@@ -652,6 +705,8 @@ int probeMain(int argc, char **argv) {
     ::lyra::opt(options.budgetMiB, "MiB")["--budget-mib"]("Shared source limit, 1..4096 MiB") |
     ::lyra::opt(options.timeoutMs, "ms")["--timeout-ms"]("Workload deadline, 1..3600000 ms") |
     ::lyra::opt(options.samples, "count")["--samples"]("Retained samples per metric, 1..1000000") |
+    ::lyra::opt(options.tailWorkTurns,
+                "count")["--tail-work-turns"]("Managed tail quanta per job, 1..255; 1 disables batching") |
     ::lyra::opt(options.idle)["--idle"]("Mount the same Application with no DocumentViews for memory baseline");
   const auto parsed = cli.parse({argc, argv});
 
@@ -668,7 +723,8 @@ int probeMain(int argc, char **argv) {
   }
 
   if (!options.budgetMiB || options.budgetMiB > 4096 || !options.timeoutMs || options.timeoutMs > 3600000 ||
-      !options.samples || options.samples > 1000000 || (!options.idle && options.file.empty())) {
+      !options.samples || options.samples > 1000000 || !options.tailWorkTurns ||
+      options.tailWorkTurns > std::numeric_limits<std::uint8_t>::max() || (!options.idle && options.file.empty())) {
     std::cerr << "Invalid bounds or missing --file; use --help.\n";
 
     return 2;

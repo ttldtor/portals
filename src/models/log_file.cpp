@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "log_file_read_session.hpp"
 #include <portals/log_file.hpp>
 
 #include <array>
 #include <cstring>
 #include <limits>
+#include <thread>
 #include <utility>
 
 #ifdef _WIN32
@@ -487,6 +489,134 @@ SourceError sourceError(FileLogFailure error) {
   }
 }
 } // namespace
+
+namespace detail {
+class FileReadSessionImpl final : public FileReadSession {
+public:
+  static std::expected<std::unique_ptr<FileReadSession>, FileLogFailure> create(std::shared_ptr<FileLogModel> model,
+                                                                                std::stop_token stop) {
+    static_assert(sizeof(FileReadSessionImpl) < 2048);
+    if (!model) {
+      return std::unexpected(failure(FileLogError::INVALID_ARGUMENT));
+    }
+    auto operation = model->beginOperation(stop);
+    if (!operation) {
+      return std::unexpected(operation.error());
+    }
+    auto file = NativeFile::open(model->path_, stop);
+    if (!file) {
+      return std::unexpected(file.error());
+    }
+    auto info = file->info();
+    if (!info) {
+      return std::unexpected(info.error());
+    }
+    auto generation =
+      model->observe({info->identityHigh, info->identityLow, info->byteExtent, info->modified}, *operation, stop);
+    if (!generation) {
+      return std::unexpected(generation.error());
+    }
+    try {
+      return std::unique_ptr<FileReadSession>(
+        new FileReadSessionImpl(std::move(model), std::move(*file), *info, *generation, *operation));
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(failure(FileLogError::NO_MEMORY));
+    }
+  }
+
+  FileLogMetadata metadata() const noexcept override {
+    return {expected_.byteExtent, generation_};
+  }
+
+  std::expected<std::size_t, FileLogFailure> read(std::uint64_t offset, std::span<std::byte> destination,
+                                                  std::stop_token stop) override {
+    if (std::this_thread::get_id() != worker_ || destination.size() > model_->options_.ioBlockBytes ||
+        offset > expected_.byteExtent) {
+      return std::unexpected(failure(FileLogError::INVALID_ARGUMENT));
+    }
+    if (stop.stop_requested()) {
+      return std::unexpected(failure(FileLogError::CANCELLED));
+    }
+    const auto count =
+      static_cast<std::size_t>(std::min<std::uint64_t>(destination.size(), expected_.byteExtent - offset));
+    auto read = file_.read(offset, destination.first(count), stop);
+    if (!read) {
+      return std::unexpected(read.error());
+    }
+    auto checked = validate(stop);
+    if (!checked) {
+      return std::unexpected(checked.error());
+    }
+    return *read;
+  }
+
+  std::expected<void, FileLogFailure> seal(std::stop_token stop) override {
+    if (std::this_thread::get_id() != worker_) {
+      return std::unexpected(failure(FileLogError::INVALID_ARGUMENT));
+    }
+    // Reopen the path once at the transaction boundary. fstat on the retained
+    // handle alone cannot discover an atomic replacement of that path.
+    auto current = model_->metadata(stop);
+    if (!current) {
+      return std::unexpected(current.error());
+    }
+    if (current->generation != generation_ || current->byteExtent != expected_.byteExtent || !modelStillCurrent()) {
+      return std::unexpected(failure(FileLogError::FILE_CHANGED, FileLogOperation::METADATA));
+    }
+    return {};
+  }
+
+private:
+  FileReadSessionImpl(std::shared_ptr<FileLogModel> model, NativeFile file, FileInfo expected, std::uint64_t generation,
+                      std::uint64_t operation)
+      : model_(std::move(model)), file_(std::move(file)), expected_(expected), generation_(generation),
+        operation_(operation), worker_(std::this_thread::get_id()) {
+  }
+
+  bool modelStillCurrent() const {
+    std::lock_guard lock(model_->mutex_);
+    const auto &observed = model_->observed_;
+    return model_->generation_ == generation_ && observed.identityHigh == expected_.identityHigh &&
+           observed.identityLow == expected_.identityLow && observed.byteExtent == expected_.byteExtent &&
+           observed.modified == expected_.modified;
+  }
+
+  std::expected<void, FileLogFailure> validate(std::stop_token stop) {
+    auto info = file_.info();
+    if (!info) {
+      return std::unexpected(info.error());
+    }
+    if (!modelStillCurrent()) {
+      return std::unexpected(failure(FileLogError::FILE_CHANGED, FileLogOperation::METADATA));
+    }
+    // The sequence belongs to the retained handle, not to each later read.
+    // An old handle must never overwrite a newer path observation.
+    auto generation =
+      model_->observe({info->identityHigh, info->identityLow, info->byteExtent, info->modified}, operation_, stop);
+    if (!generation) {
+      return std::unexpected(generation.error());
+    }
+    if (*generation != generation_ || info->identityHigh != expected_.identityHigh ||
+        info->identityLow != expected_.identityLow || info->byteExtent != expected_.byteExtent ||
+        info->modified != expected_.modified) {
+      return std::unexpected(failure(FileLogError::FILE_CHANGED, FileLogOperation::METADATA));
+    }
+    return {};
+  }
+
+  std::shared_ptr<FileLogModel> model_;
+  NativeFile file_;
+  FileInfo expected_;
+  std::uint64_t generation_;
+  std::uint64_t operation_;
+  std::thread::id worker_;
+};
+
+std::expected<std::unique_ptr<FileReadSession>, FileLogFailure> openFileReadSession(std::shared_ptr<FileLogModel> model,
+                                                                                    std::stop_token stop) {
+  return FileReadSessionImpl::create(std::move(model), stop);
+}
+} // namespace detail
 
 LogLine::LogLine(std::uint64_t offset, std::string_view utf8, std::pmr::memory_resource *resource)
     : byteOffset(offset), text(utf8, resource) {

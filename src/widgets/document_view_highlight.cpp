@@ -174,10 +174,9 @@ void classifyPreview(DocumentHighlightScan &scan, TokenRun run) {
 }
 } // namespace
 
-std::expected<DocumentInputPage, DocumentError> readDocumentInput(ByteDocumentSource &source,
-                                                                  DocumentReadRequest request,
-                                                                  DocumentHighlightScan *highlight,
-                                                                  std::stop_token stop, bool protectWindow) {
+std::expected<DocumentInputPage, DocumentError>
+readDocumentInput(ByteDocumentSource &source, DocumentReadRequest request, DocumentHighlightScan *highlight,
+                  std::stop_token stop, bool protectWindow, DocumentReadBatch *batch) {
   const auto failure = [](SourceError error) {
     return std::unexpected(DocumentError{error, {}, {}});
   };
@@ -185,7 +184,7 @@ std::expected<DocumentInputPage, DocumentError> readDocumentInput(ByteDocumentSo
     return failure(SourceError::CANCELLED);
   }
   if (!highlight || !highlight->sequential || !highlight->replay) {
-    auto page = source.read(request, stop);
+    auto page = batch ? batch->read(request, stop) : source.read(request, stop);
     if (!page) {
       return std::unexpected(page.error());
     }

@@ -3,6 +3,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 
+#include "../src/models/log_file_read_session.hpp"
 #include <portals/log_file.hpp>
 
 #include <array>
@@ -351,4 +352,25 @@ TEST_CASE("special files are rejected without blocking the worker") {
   REQUIRE(WIFEXITED(status));
   CHECK(WEXITSTATUS(status) == 0);
 #endif
+}
+
+TEST_CASE("an older scoped handle cannot roll back a newer file path observation") {
+  FileFixture fixture("original");
+  auto model = take(FileLogModel::create(fixture.path));
+  std::async(std::launch::async, [&] {
+    auto session = take(detail::openFileReadSession(model, {}));
+    const auto initial = session->metadata();
+    std::filesystem::rename(fixture.path, fixture.path.string() + ".old");
+    fixture.write("replaced");
+    const auto replacement = take(model->metadata());
+    REQUIRE(replacement.generation != initial.generation);
+    std::array<std::byte, 8> bytes{};
+    const auto stale = session->read(0, bytes, {});
+    REQUIRE_FALSE(stale);
+    CHECK(stale.error().error == FileLogError::FILE_CHANGED);
+    const auto stillCurrent = take(model->metadata());
+    CHECK(stillCurrent.generation == replacement.generation);
+    CHECK(stillCurrent.byteExtent == replacement.byteExtent);
+    CHECK_FALSE(session->seal({}));
+  }).get();
 }

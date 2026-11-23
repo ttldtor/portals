@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 #include <filesystem>
+#include <memory>
 #include <portals/log_file_error.hpp>
 #include <portals/window_source.hpp>
 #include <string>
@@ -30,6 +31,7 @@ struct DocumentRevision {
 struct ByteDocumentCapabilities {
   bool seekable{true};  ///< Arbitrary byte offsets can be requested.
   bool immutable{true}; ///< Provider revision never changes.
+  bool readSessions{};  ///< Worker-owned provisional read sessions are supported.
 };
 
 /** @brief Worker-observed provider metadata. */
@@ -55,6 +57,28 @@ struct ByteReadCommand {
 struct ByteReadResult {
   std::size_t bytesRead{}; ///< Initialized prefix of the borrowed destination.
   bool finalEnd{};         ///< Definitive EOF immediately after that prefix.
+};
+
+/** @brief One worker-owned provisional read transaction; destroy it on its creating worker.
+ * A successful seal qualifies all preceding pages. Until then callers must not publish
+ * them. Implementations retain bounded metadata/handles only, never destination aliases.
+ */
+class ByteDocumentReadSession {
+public:
+  virtual ~ByteDocumentReadSession() = default; ///< Release worker-owned backend storage.
+  /** @return Immutable metadata captured by opening this session, without further I/O. */
+  virtual ByteDocumentMetadata metadata() const noexcept = 0;
+  /** @param command Captured revision and bounded original byte offset.
+   * @param destination Writable bytes borrowed only for this call.
+   * @param stop Cooperative cancellation.
+   * @return Provisional initialized bytes/EOF, or an exact typed failure.
+   */
+  virtual std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command,
+                                                            std::span<std::byte> destination, std::stop_token stop) = 0;
+  /** @param stop Cooperative cancellation of final path/revision validation.
+   * @return Success qualifying preceding reads, or failure that forbids publishing them.
+   */
+  virtual std::expected<void, DocumentError> seal(std::stop_token stop) = 0;
 };
 
 /** @brief Read-only worker provider; callers serialize operations using the existing executor.
@@ -106,6 +130,15 @@ public:
    */
   virtual std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command,
                                                             std::span<std::byte> destination, std::stop_token stop) = 0;
+
+  /** @param stop Cooperative worker cancellation.
+   * @return Optional bounded read session, or UNSUPPORTED without opening the source.
+   * Appended capability; ordinary metadata/read remain unchanged for other providers.
+   */
+  virtual std::expected<std::unique_ptr<ByteDocumentReadSession>, DocumentError> openReadSession(std::stop_token stop) {
+    (void)stop;
+    return std::unexpected(DocumentError{SourceError::UNSUPPORTED, {}, {}});
+  }
 };
 
 /** @brief Adapter retaining existing immutable shared text without copying whole input. */
@@ -128,6 +161,7 @@ private:
 };
 
 class FileLogModel;
+struct FileLogMetadata;
 
 /** @brief Cold file adapter reusing FileLogModel raw worker I/O without record limits.
  * Exact document revision advances on every observed extent or file generation change.
@@ -153,8 +187,14 @@ public:
                                                     std::stop_token stop)
     override; ///< @param command Exact revision and byte offset. @param destination Borrowed writable bytes. @param
               ///< stop Cooperative cancellation. @return Validate before/after raw read.
+  /** @param stop Cooperative worker cancellation.
+   * @return One bounded native-handle transaction with deferred fresh-path sealing.
+   */
+  std::expected<std::unique_ptr<ByteDocumentReadSession>, DocumentError> openReadSession(std::stop_token stop) override;
+
 private:
   explicit FileDocumentProvider(std::shared_ptr<FileLogModel> model);
+  std::expected<ByteDocumentMetadata, DocumentError> observeMetadata(FileLogMetadata observed);
   std::shared_ptr<FileLogModel> model_;
   std::uint64_t fileGeneration_{};
   std::uint64_t byteExtent_{};
@@ -249,6 +289,9 @@ public:
   std::expected<DocumentBytePage, DocumentError> read(DocumentReadRequest request, std::stop_token stop = {});
 
 private:
+  friend class DocumentReadBatch;
+  std::expected<DocumentBytePage, DocumentError> readImpl(DocumentReadRequest request, std::stop_token stop,
+                                                          ByteDocumentReadSession *session);
   std::expected<DocumentMetadata, DocumentError> inspectOnWorker(std::stop_token stop, bool discoverEnd);
   ByteDocumentSource(std::shared_ptr<ByteDocumentProvider> provider, std::shared_ptr<SourceBudget> budget,
                      SourceCredit credit, DocumentSourceOptions options, SourceStamp stamp);
@@ -260,6 +303,54 @@ private:
   ByteDocumentCapabilities capabilities_;
   std::thread::id ownerThread_;
   std::mutex providerMutex_;
+};
+
+/** @brief Explicit source-owning provisional batch, confined to its creating worker.
+ * Read pages can outlive the batch, but must not be published before successful seal.
+ * Destruction closes the backend before returning metadata credit; it performs no I/O
+ * validation and cannot turn an abandoned batch into a committed result.
+ */
+class DocumentReadBatch {
+public:
+  static constexpr std::size_t READ_BATCH_METADATA_BYTES = 4096; ///< Held only by an actual supported batch.
+  /** @param source Strong existing source; its creating UI thread is rejected.
+   * @param stop Cooperative cancellation, also checked after provider callbacks.
+   * @return Worker-owned batch with captured qualified metadata, or typed failure.
+   */
+  static std::expected<DocumentReadBatch, DocumentError> create(std::shared_ptr<ByteDocumentSource> source,
+                                                                std::stop_token stop = {});
+  /** @param other Worker-local ownership transferred without allocation. */
+  DocumentReadBatch(DocumentReadBatch &&other) noexcept = default;
+  /** @param other Replacement worker-local batch. @return This owner after safely releasing old storage. */
+  DocumentReadBatch &operator=(DocumentReadBatch other) noexcept;
+  DocumentReadBatch(const DocumentReadBatch &) = delete;
+  ~DocumentReadBatch() = default; ///< Destroy on the creating worker; does not terminate on misuse.
+
+  /** @return Borrowed captured metadata, valid until this batch moves or dies; no provider I/O. */
+  const DocumentMetadata &metadata() const noexcept {
+    return metadata_;
+  }
+
+  /** @param request Exact captured revision, source namespace and bounded byte window.
+   * @param stop Cooperative cancellation; late cancellation discards the provisional page.
+   * @return Owning provisional page, or the first batch failure. Wrong-thread calls never mutate the batch.
+   */
+  std::expected<DocumentBytePage, DocumentError> read(DocumentReadRequest request, std::stop_token stop = {});
+  /** @param stop Cooperative cancellation of final validation.
+   * @return Success qualifying preceding pages, or the first failure; a successful batch is single-use.
+   */
+  std::expected<void, DocumentError> seal(std::stop_token stop = {});
+
+private:
+  DocumentReadBatch(SourceCredit credit, std::shared_ptr<ByteDocumentSource> source,
+                    std::unique_ptr<ByteDocumentReadSession> session, DocumentMetadata metadata);
+  SourceCredit credit_; // Backend storage is destroyed before returning this credit.
+  std::shared_ptr<ByteDocumentSource> source_;
+  std::unique_ptr<ByteDocumentReadSession> session_;
+  DocumentMetadata metadata_;
+  std::thread::id workerThread_;
+  std::optional<DocumentError> failure_;
+  bool sealed_{};
 };
 
 /** @brief Policy qualifying every index checkpoint; UTF16 requires a decoder adapter. */

@@ -1,10 +1,12 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
+#include "log_file_read_session.hpp"
 #include <portals/document_source.hpp>
 #include <portals/log_file.hpp>
 
 #include <cstring>
 #include <limits>
+#include <utility>
 
 namespace portals {
 namespace {
@@ -15,7 +17,8 @@ DocumentError failure(SourceError code) {
   return {code, {}, std::nullopt};
 }
 
-DocumentError operationFailure(DocumentError error, std::size_t envelopeBytes, std::size_t pageBytes) {
+DocumentError operationFailure(DocumentError error, std::size_t envelopeBytes, std::size_t pageBytes,
+                               std::size_t heldBytes = 0) {
   if (!error.budgetPeak) {
     return error;
   }
@@ -23,12 +26,13 @@ DocumentError operationFailure(DocumentError error, std::size_t envelopeBytes, s
   auto &peak = *error.budgetPeak;
   constexpr auto MAX = std::numeric_limits<std::size_t>::max();
 
-  if (envelopeBytes > MAX - pageBytes || peak.bytes > MAX - envelopeBytes - pageBytes ||
-      (pageBytes && peak.pages == MAX) || peak.work == MAX) {
+  if (envelopeBytes > MAX - pageBytes || heldBytes > MAX - envelopeBytes - pageBytes ||
+      peak.bytes > MAX - envelopeBytes - pageBytes - heldBytes || (pageBytes && peak.pages == MAX) ||
+      peak.work == MAX) {
     return failure(SourceError::PAGE_TOO_LARGE);
   }
 
-  peak.bytes += envelopeBytes + pageBytes;
+  peak.bytes += envelopeBytes + pageBytes + heldBytes;
   peak.pages += pageBytes ? 1 : 0;
   ++peak.work;
 
@@ -57,6 +61,42 @@ DocumentError fileFailure(FileLogFailure cause) {
 
   return {code, std::error_code(static_cast<int>(cause.nativeCode), std::system_category()), cause};
 }
+
+class FileDocumentReadSession final : public ByteDocumentReadSession {
+public:
+  FileDocumentReadSession(std::unique_ptr<detail::FileReadSession> session, ByteDocumentMetadata metadata,
+                          std::size_t ioBlockBytes)
+      : session_(std::move(session)), metadata_(metadata), ioBlockBytes_(ioBlockBytes) {
+    static_assert(sizeof(FileDocumentReadSession) < 1024);
+  }
+
+  ByteDocumentMetadata metadata() const noexcept override {
+    return metadata_;
+  }
+
+  std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
+                                                    std::stop_token stop) override {
+    if (command.dataRevision != metadata_.dataRevision) {
+      return std::unexpected(failure(SourceError::REVISION_CHANGED));
+    }
+    const auto bounded = destination.first(std::min(destination.size(), ioBlockBytes_));
+    auto count = session_->read(command.offset, bounded, stop);
+    if (!count) {
+      return std::unexpected(fileFailure(count.error()));
+    }
+    return ByteReadResult{*count, command.offset + *count == *metadata_.byteExtent};
+  }
+
+  std::expected<void, DocumentError> seal(std::stop_token stop) override {
+    auto sealed = session_->seal(stop);
+    return sealed ? std::expected<void, DocumentError>{} : std::unexpected(fileFailure(sealed.error()));
+  }
+
+private:
+  std::unique_ptr<detail::FileReadSession> session_;
+  ByteDocumentMetadata metadata_;
+  std::size_t ioBlockBytes_;
+};
 
 bool validRevision(DocumentRevision revision) {
   return revision.source.instance && revision.source.epoch && revision.dataRevision;
@@ -155,7 +195,7 @@ FileDocumentProvider::create(std::shared_ptr<FileLogModel> model) {
 }
 
 ByteDocumentCapabilities FileDocumentProvider::capabilities() const noexcept {
-  return {true, false};
+  return {true, false, true};
 }
 
 std::expected<ByteDocumentMetadata, DocumentError> FileDocumentProvider::metadata(std::stop_token stop) {
@@ -165,17 +205,33 @@ std::expected<ByteDocumentMetadata, DocumentError> FileDocumentProvider::metadat
     return std::unexpected(fileFailure(observed.error()));
   }
 
-  if (!revision_ || observed->generation != fileGeneration_ || observed->byteExtent != byteExtent_) {
+  return observeMetadata(*observed);
+}
+
+std::expected<ByteDocumentMetadata, DocumentError> FileDocumentProvider::observeMetadata(FileLogMetadata observed) {
+  if (!revision_ || observed.generation != fileGeneration_ || observed.byteExtent != byteExtent_) {
     if (revision_ == MAX_OFFSET) {
       return std::unexpected(failure(SourceError::IDENTITY_EXHAUSTED));
     }
-
     ++revision_;
-    fileGeneration_ = observed->generation;
-    byteExtent_ = observed->byteExtent;
+    fileGeneration_ = observed.generation;
+    byteExtent_ = observed.byteExtent;
   }
-
   return ByteDocumentMetadata{revision_, byteExtent_};
+}
+
+std::expected<std::unique_ptr<ByteDocumentReadSession>, DocumentError>
+FileDocumentProvider::openReadSession(std::stop_token stop) {
+  auto session = detail::openFileReadSession(model_, stop);
+  if (!session) {
+    return std::unexpected(fileFailure(session.error()));
+  }
+  auto observed = observeMetadata((*session)->metadata());
+  if (!observed) {
+    return std::unexpected(observed.error());
+  }
+  return std::unique_ptr<ByteDocumentReadSession>(
+    new FileDocumentReadSession(std::move(*session), *observed, model_->options().ioBlockBytes));
 }
 
 std::expected<ByteReadResult, DocumentError>
@@ -352,6 +408,11 @@ std::expected<DocumentMetadata, DocumentError> ByteDocumentSource::inspectOnWork
 
 std::expected<DocumentBytePage, DocumentError> ByteDocumentSource::read(DocumentReadRequest request,
                                                                         std::stop_token stop) {
+  return readImpl(request, stop, nullptr);
+}
+
+std::expected<DocumentBytePage, DocumentError>
+ByteDocumentSource::readImpl(DocumentReadRequest request, std::stop_token stop, ByteDocumentReadSession *session) {
   if (std::this_thread::get_id() == ownerThread_) {
     return std::unexpected(failure(SourceError::WRONG_THREAD));
   }
@@ -386,6 +447,10 @@ std::expected<DocumentBytePage, DocumentError> ByteDocumentSource::read(Document
     return std::unexpected(error);
   }
 
+  if (session && request.revision.dataRevision != session->metadata().dataRevision) {
+    return std::unexpected(failure(SourceError::REVISION_CHANGED));
+  }
+
   auto credit = budget_->reserve({request.maxBytes + SourceArena::METADATA_BYTES, 1, 0, 0});
 
   if (!credit) {
@@ -408,16 +473,18 @@ std::expected<DocumentBytePage, DocumentError> ByteDocumentSource::read(Document
     data->request = request;
     data->data = static_cast<std::byte *>(data->arena->allocate(request.maxBytes, alignof(std::byte)));
 
-    auto result =
-      provider_->read({request.revision.dataRevision, request.offset}, {data->data, request.maxBytes}, stop);
+    const ByteReadCommand command{request.revision.dataRevision, request.offset};
+    const auto destination = std::span(data->data, request.maxBytes);
+    auto result = session ? session->read(command, destination, stop) : provider_->read(command, destination, stop);
 
     if (stop.stop_requested()) {
       return std::unexpected(failure(SourceError::CANCELLED));
     }
 
     if (!result) {
-      return std::unexpected(
-        operationFailure(result.error(), options_.envelopeBytes, request.maxBytes + SourceArena::METADATA_BYTES));
+      return std::unexpected(operationFailure(result.error(), options_.envelopeBytes,
+                                              request.maxBytes + SourceArena::METADATA_BYTES,
+                                              session ? DocumentReadBatch::READ_BATCH_METADATA_BYTES : 0));
     }
 
     if (result->bytesRead > request.maxBytes) {
@@ -437,6 +504,144 @@ std::expected<DocumentBytePage, DocumentError> ByteDocumentSource::read(Document
   } catch (...) {
     return std::unexpected(failure(SourceError::CALLBACK_FAILED));
   }
+}
+
+DocumentReadBatch::DocumentReadBatch(SourceCredit credit, std::shared_ptr<ByteDocumentSource> source,
+                                     std::unique_ptr<ByteDocumentReadSession> session, DocumentMetadata metadata)
+    : credit_(std::move(credit)), source_(std::move(source)), session_(std::move(session)), metadata_(metadata),
+      workerThread_(std::this_thread::get_id()) {
+}
+
+DocumentReadBatch &DocumentReadBatch::operator=(DocumentReadBatch other) noexcept {
+  using std::swap;
+  swap(credit_, other.credit_);
+  swap(source_, other.source_);
+  swap(session_, other.session_);
+  swap(metadata_, other.metadata_);
+  swap(workerThread_, other.workerThread_);
+  swap(failure_, other.failure_);
+  swap(sealed_, other.sealed_);
+  return *this;
+}
+
+std::expected<DocumentReadBatch, DocumentError> DocumentReadBatch::create(std::shared_ptr<ByteDocumentSource> source,
+                                                                          std::stop_token stop) {
+  if (!source) {
+    return std::unexpected(failure(SourceError::INVALID_ARGUMENT));
+  }
+  if (std::this_thread::get_id() == source->ownerThread_) {
+    return std::unexpected(failure(SourceError::WRONG_THREAD));
+  }
+  if (stop.stop_requested()) {
+    return std::unexpected(failure(SourceError::CANCELLED));
+  }
+  if (!source->capabilities_.readSessions) {
+    return std::unexpected(failure(SourceError::UNSUPPORTED));
+  }
+  auto credit = source->budget_->reserve({READ_BATCH_METADATA_BYTES, 0, 0, 0});
+  if (!credit) {
+    auto error = failure(credit.error());
+    error.budgetDemand = SourceBudgetUsage{READ_BATCH_METADATA_BYTES, 0, 0, 0};
+    return std::unexpected(error);
+  }
+  std::unique_lock lock(source->providerMutex_);
+  if (stop.stop_requested()) {
+    return std::unexpected(failure(SourceError::CANCELLED));
+  }
+  auto work = source->budget_->reserve({source->options_.envelopeBytes, 0, 1, 0});
+  if (!work) {
+    auto error = failure(work.error());
+    error.budgetDemand = SourceBudgetUsage{source->options_.envelopeBytes, 0, 1, 0};
+    return std::unexpected(error);
+  }
+  try {
+    auto session = source->provider_->openReadSession(stop);
+    if (stop.stop_requested()) {
+      return std::unexpected(failure(SourceError::CANCELLED));
+    }
+    if (!session) {
+      return std::unexpected(
+        operationFailure(session.error(), source->options_.envelopeBytes, 0, READ_BATCH_METADATA_BYTES));
+    }
+    if (!*session) {
+      return std::unexpected(failure(SourceError::INVALID_REPLY));
+    }
+    const auto observed = (*session)->metadata();
+    if (!observed.dataRevision) {
+      return std::unexpected(failure(SourceError::INVALID_REPLY));
+    }
+    const DocumentMetadata metadata{
+      {source->stamp_, observed.dataRevision}, observed.byteExtent, source->capabilities_};
+    return DocumentReadBatch(std::move(*credit), std::move(source), std::move(*session), metadata);
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(failure(SourceError::NO_MEMORY));
+  } catch (...) {
+    return std::unexpected(failure(SourceError::CALLBACK_FAILED));
+  }
+}
+
+std::expected<DocumentBytePage, DocumentError> DocumentReadBatch::read(DocumentReadRequest request,
+                                                                       std::stop_token stop) {
+  if (std::this_thread::get_id() != workerThread_) {
+    return std::unexpected(failure(SourceError::WRONG_THREAD));
+  }
+  if (!source_ || !session_ || sealed_) {
+    return std::unexpected(failure(SourceError::INVALID_ARGUMENT));
+  }
+  if (failure_) {
+    return std::unexpected(*failure_);
+  }
+  auto page = source_->readImpl(request, stop, session_.get());
+  if (!page) {
+    failure_ = page.error();
+  }
+  return page;
+}
+
+std::expected<void, DocumentError> DocumentReadBatch::seal(std::stop_token stop) {
+  if (std::this_thread::get_id() != workerThread_) {
+    return std::unexpected(failure(SourceError::WRONG_THREAD));
+  }
+  if (!source_ || !session_ || sealed_) {
+    return std::unexpected(failure(SourceError::INVALID_ARGUMENT));
+  }
+  if (failure_) {
+    return std::unexpected(*failure_);
+  }
+  const auto seal = [&]() -> std::expected<void, DocumentError> {
+    if (stop.stop_requested()) {
+      return std::unexpected(failure(SourceError::CANCELLED));
+    }
+    std::unique_lock lock(source_->providerMutex_);
+    if (stop.stop_requested()) {
+      return std::unexpected(failure(SourceError::CANCELLED));
+    }
+    auto work = source_->budget_->reserve({source_->options_.envelopeBytes, 0, 1, 0});
+    if (!work) {
+      auto error = failure(work.error());
+      error.budgetDemand = SourceBudgetUsage{source_->options_.envelopeBytes, 0, 1, 0};
+      return std::unexpected(error);
+    }
+    try {
+      auto sealed = session_->seal(stop);
+      if (stop.stop_requested()) {
+        return std::unexpected(failure(SourceError::CANCELLED));
+      }
+      return sealed ? sealed
+                    : std::unexpected(operationFailure(sealed.error(), source_->options_.envelopeBytes, 0,
+                                                       READ_BATCH_METADATA_BYTES));
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(failure(SourceError::NO_MEMORY));
+    } catch (...) {
+      return std::unexpected(failure(SourceError::CALLBACK_FAILED));
+    }
+  }();
+  if (!seal) {
+    failure_ = seal.error();
+    return std::unexpected(*failure_);
+  }
+  sealed_ = true;
+  return {};
 }
 
 SparseDocumentIndex::SparseDocumentIndex(std::shared_ptr<SourceArena> arena, DocumentRevision revision,

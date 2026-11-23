@@ -71,7 +71,7 @@ public:
   }
 };
 
-class Provider final : public ByteDocumentProvider {
+class Provider final : public ByteDocumentProvider, public std::enable_shared_from_this<Provider> {
 public:
   std::string text = std::string(0, '\0');
   std::uint64_t revision{1};
@@ -96,6 +96,10 @@ public:
   SourceCredit optionalCache;
   std::size_t cacheTrims{};
   std::optional<DocumentError> budgetFailure;
+  std::function<void(const ByteReadCommand &)> beforeRead;
+  bool sessions{};
+  bool rejectSeal{};
+  std::size_t sessionOpens{}, sessionSeals{};
 
   std::size_t pinnedBudgetBytes(const SourceBudget &root) const noexcept override {
     return accountedRoot.get() == &root ? pinnedCredit.usage().bytes : 0;
@@ -112,11 +116,51 @@ public:
     return true;
   }
 
+  class ReadSession final : public ByteDocumentReadSession {
+  public:
+    ReadSession(std::shared_ptr<Provider> owner, ByteDocumentMetadata metadata)
+        : owner_(std::move(owner)), metadata_(metadata) {
+    }
+
+    ByteDocumentMetadata metadata() const noexcept override {
+      return metadata_;
+    }
+
+    std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
+                                                      std::stop_token stop) override {
+      return owner_->read(command, destination, stop);
+    }
+
+    std::expected<void, DocumentError> seal(std::stop_token) override {
+      ++owner_->sessionSeals;
+      if (owner_->rejectSeal) {
+        return std::unexpected(DocumentError{SourceError::REVISION_CHANGED, {}, {}});
+      }
+
+      return {};
+    }
+
+  private:
+    std::shared_ptr<Provider> owner_;
+    ByteDocumentMetadata metadata_;
+  };
+
+  std::expected<std::unique_ptr<ByteDocumentReadSession>, DocumentError>
+  openReadSession(std::stop_token stop) override {
+    ++sessionOpens;
+    auto observed = metadata(stop);
+    if (!observed) {
+      return std::unexpected(observed.error());
+    }
+
+    return std::make_unique<ReadSession>(shared_from_this(), *observed);
+  }
+
   std::optional<std::uint64_t> syntheticExtent;
   const std::thread::id ui = std::this_thread::get_id();
 
   ByteDocumentCapabilities capabilities() const noexcept override {
-    return {seekable, false};
+    return {.seekable = seekable, .immutable = false, .readSessions = sessions};
   }
 
   std::expected<ByteDocumentMetadata, DocumentError> metadata(std::stop_token) override {
@@ -141,6 +185,9 @@ public:
   std::expected<ByteReadResult, DocumentError> read(const ByteReadCommand &command, std::span<std::byte> destination,
                                                     std::stop_token) override {
     ++reads;
+    if (beforeRead) {
+      beforeRead(command);
+    }
     if (enforceSequential && command.offset != sequentialOffset) {
       return std::unexpected(DocumentError{SourceError::UNSUPPORTED, {}, {}});
     }
@@ -379,6 +426,194 @@ TEST_CASE("standard managed preparation produces immutable visible rows and then
   CHECK(f.executor.submissions == submitted);
 }
 
+TEST_CASE("managed tail jobs honor configurable byte quanta and release credits") {
+  constexpr std::size_t QUANTUM_BYTES = 64;
+  constexpr std::array<std::uint8_t, 4> TAIL_WORK_TURNS{1, 2, 7, 32};
+  for (const auto turns : TAIL_WORK_TURNS) {
+    CAPTURE(turns);
+    auto budget = take(SourceBudget::create());
+    auto provider = std::make_shared<Provider>();
+    provider->text = std::string(64 * 1024, 'x');
+    {
+      Fixture f(ui::document(provider, budget), {.workBytes = QUANTUM_BYTES, .tailWorkTurns = turns});
+      REQUIRE(f.reference.end());
+      f.pump();
+      REQUIRE(f.executor.job);
+      const auto bytes = provider->bytesRead.load();
+      const auto reserved = budget->usage();
+      f.executor.runOne();
+      const auto admitted = provider->bytesRead.load() - bytes;
+      CHECK(admitted > 0);
+      CHECK(admitted <= static_cast<std::size_t>(turns) * QUANTUM_BYTES);
+      if (turns == 1) {
+        CHECK(admitted == QUANTUM_BYTES);
+      }
+      CHECK(budget->usage().work == reserved.work);
+      CHECK_FALSE(provider->uiOperation.load());
+      CHECK_FALSE(f.frame());
+    }
+    CHECK(budget->usage().work == 0);
+    CHECK(budget->usage().pages == 0);
+    CHECK(budget->usage().consumers == 0);
+  }
+}
+
+TEST_CASE("managed tail burst stops on cancellation revision changes and provider waiting") {
+  enum class Boundary {
+    CANCEL,
+    REVISION,
+    WAIT
+  };
+  for (const auto boundary : {Boundary::CANCEL, Boundary::REVISION, Boundary::WAIT}) {
+    CAPTURE(boundary);
+    auto provider = std::make_shared<Provider>();
+    provider->text = std::string(64 * 1024, 'x');
+    Fixture f(ui::document(provider), {.workBytes = 64, .tailWorkTurns = 32});
+    REQUIRE(f.reference.end());
+    f.pump();
+    REQUIRE(f.executor.job);
+    const std::weak_ptr<BackgroundJob> running = f.executor.job;
+    provider->beforeRead = [&, running](const ByteReadCommand &) {
+      if (provider->reads.load() != 2) {
+        return;
+      }
+      if (boundary == Boundary::CANCEL) {
+        if (const auto job = running.lock()) {
+          job->requestStop();
+        }
+      } else if (boundary == Boundary::REVISION) {
+        ++provider->revision;
+      } else {
+        provider->providerWouldBlock = true;
+      }
+    };
+    // A soft time slice can yield early on a preempted test host. The boundary
+    // remains deterministic across the next quantum rather than relying on time.
+    for (unsigned step = 0; step < 3 && provider->reads.load() < 2; ++step) {
+      REQUIRE(f.executor.job);
+      f.executor.runOne();
+      f.pump();
+    }
+    CHECK(provider->reads.load() == 2);
+    CHECK_FALSE(f.frame());
+    const auto status = take(f.reference.status());
+    CHECK_FALSE(status.finalEnd);
+    if (boundary == Boundary::WAIT) {
+      CHECK(status.waiting);
+      CHECK_FALSE(status.preparing);
+      CHECK_FALSE(status.backpressured);
+    } else if (boundary == Boundary::REVISION) {
+      REQUIRE(status.error);
+      CHECK(status.error->code == SourceError::REVISION_CHANGED);
+    }
+    provider->beforeRead = {};
+    provider->providerWouldBlock = false;
+    if (boundary == Boundary::CANCEL) {
+      // Cancellation retires the job; a new intent retires the UI waiter too.
+      REQUIRE(f.reference.home());
+      f.settle(12);
+      REQUIRE(f.frame());
+      CHECK_FALSE(take(f.reference.status()).preparing);
+    }
+    CHECK_FALSE(provider->uiOperation.load());
+  }
+}
+
+TEST_CASE("managed tail seals both provisional continuation and complete frame") {
+  for (const bool partial : {false, true}) {
+    CAPTURE(partial);
+    auto provider = std::make_shared<Provider>();
+    provider->text = partial ? std::string(64 * 1024, 'x') : "last row";
+    provider->sessions = true;
+    provider->rejectSeal = true;
+    auto budget = take(SourceBudget::create({32 * 1024 * 1024, 8, 2, 4}));
+    Fixture f(ui::document(provider, budget), {.workBytes = 64, .tailWorkTurns = 1});
+    REQUIRE(f.reference.end());
+    f.pump();
+    REQUIRE(f.executor.job);
+    f.executor.runOne();
+    f.pump();
+
+    CHECK(provider->sessionOpens == 1);
+    CHECK(provider->sessionSeals == 1);
+    CHECK_FALSE(f.frame());
+    const auto status = take(f.reference.status());
+    REQUIRE(status.error);
+    CHECK(status.error->code == SourceError::REVISION_CHANGED);
+    CHECK_FALSE(status.finalEnd);
+    CHECK_FALSE(provider->uiOperation.load());
+    CHECK(budget->usage().work == 0);
+  }
+}
+
+TEST_CASE("waiting tail session cannot publish its unsealed provisional scan") {
+  auto provider = std::make_shared<Provider>();
+  provider->text = std::string(512, 'x');
+  provider->sessions = true;
+  Fixture f(ui::document(provider), {.workBytes = 64, .tailWorkTurns = 32});
+  provider->beforeRead = [&](const ByteReadCommand &) {
+    if (provider->reads.load() == 2) {
+      provider->providerWouldBlock = true;
+    }
+  };
+  REQUIRE(f.reference.end());
+  f.pump();
+  for (unsigned step = 0; step < 3 && provider->reads.load() < 2; ++step) {
+    REQUIRE(f.executor.job);
+    f.executor.runOne();
+    f.pump();
+  }
+  CHECK(take(f.reference.status()).waiting);
+  CHECK_FALSE(f.frame());
+
+  provider->beforeRead = {};
+  provider->providerWouldBlock = false;
+  provider->text = "replacement row";
+  ++provider->revision;
+  take(f.reference.refresh());
+  f.settle();
+  const auto status = take(f.reference.status());
+  CHECK_FALSE(status.error);
+  CHECK(status.finalEnd);
+  REQUIRE(f.frame());
+  CHECK(status.byteExtent == provider->text.size());
+  CHECK_FALSE(provider->uiOperation.load());
+}
+
+TEST_CASE("empty nonfinal tail replies wait with and without read sessions") {
+  for (const bool sessions : {false, true}) {
+    CAPTURE(sessions);
+    auto provider = std::make_shared<Provider>();
+    provider->text = "waiting content";
+    provider->sessions = sessions;
+    provider->emptyMore = true;
+    Fixture f(ui::document(provider));
+    REQUIRE(f.reference.end());
+    f.settle(3);
+    const auto waiting = take(f.reference.status());
+    CHECK(waiting.waiting);
+    CHECK_FALSE(waiting.error);
+    if (sessions) {
+      CHECK_FALSE(f.frame());
+    }
+
+    provider->emptyMore = false;
+    take(f.reference.refresh());
+    f.settle();
+    const auto ready = take(f.reference.status());
+    CHECK_FALSE(ready.waiting);
+    CHECK_FALSE(ready.error);
+    CHECK(ready.finalEnd);
+    REQUIRE(f.frame());
+  }
+}
+
+TEST_CASE("zero tail work quanta fail checked scene preparation") {
+  Fixture f(source("valid"));
+  const auto mounted = ui::mount(*f.scene, ui::viewer(source("invalid"), {.tailWorkTurns = 0}));
+  CHECK_FALSE(mounted);
+}
+
 TEST_CASE("incomplete text End preparation continues after dispatch without another layout") {
   auto provider = std::make_shared<Provider>();
   provider->text = std::string(10000, 'x');
@@ -458,7 +693,7 @@ TEST_CASE("text End continuation defers stale geometry and superseded intent to 
 TEST_CASE("text End final frame still commits through the layout path") {
   auto provider = std::make_shared<Provider>();
   provider->text = std::string(70, 'x');
-  Fixture f(ui::document(provider), {.workBytes = 16});
+  Fixture f(ui::document(provider), {.workBytes = 16, .tailWorkTurns = 1});
   REQUIRE(f.reference.end());
   f.pump();
   unsigned turns{};
@@ -3781,35 +4016,39 @@ TEST_CASE("nested provider retry peak rejects an impossible decoder turn without
 }
 
 TEST_CASE("End discovers unknown seekable extent before bounded last-page layout") {
-  for (const auto mode : {DocumentViewMode::TEXT, DocumentViewMode::HEX}) {
-    CAPTURE(mode);
-    constexpr std::uint64_t EXTENT = std::uint64_t{8} << 30;
-    auto provider = std::make_shared<Provider>();
-    provider->syntheticExtent = EXTENT;
-    provider->unknown = true;
-    provider->discoverable = true;
-    DocumentViewConfig config;
-    config.mode = mode;
-    Fixture f(ui::document(provider), config);
-    f.settle(3);
-    REQUIRE(f.frame());
-    CHECK(provider->discoveries == 0);
-    CHECK_FALSE(f.frame()->status.byteExtent);
+  for (const bool sessions : {false, true}) {
+    CAPTURE(sessions);
+    for (const auto mode : {DocumentViewMode::TEXT, DocumentViewMode::HEX}) {
+      CAPTURE(mode);
+      constexpr std::uint64_t EXTENT = std::uint64_t{8} << 30;
+      auto provider = std::make_shared<Provider>();
+      provider->syntheticExtent = EXTENT;
+      provider->unknown = true;
+      provider->sessions = sessions;
+      provider->discoverable = true;
+      DocumentViewConfig config;
+      config.mode = mode;
+      Fixture f(ui::document(provider), config);
+      f.settle(3);
+      REQUIRE(f.frame());
+      CHECK(provider->discoveries == 0);
+      CHECK_FALSE(f.frame()->status.byteExtent);
 
-    REQUIRE(f.reference.end());
-    f.settle(4);
+      REQUIRE(f.reference.end());
+      f.settle(4);
 
-    REQUIRE(f.frame());
-    CHECK(f.frame()->status.byteExtent == EXTENT);
-    CHECK(f.frame()->finalEndVisible);
-    const auto rowCount = f.frame()->rows.size();
-    take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
-      const auto height = detail::ScrollWidgetAccess::state(widget).geometry.viewport.height;
-      CHECK(rowCount == static_cast<std::size_t>(height));
-    }));
-    CHECK(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
-    CHECK(provider->discoveries > 0);
-    CHECK(provider->bytesRead.load() <= 512 * 1024);
-    CHECK_FALSE(provider->uiOperation.load());
+      REQUIRE(f.frame());
+      CHECK(f.frame()->status.byteExtent == EXTENT);
+      CHECK(f.frame()->finalEndVisible);
+      const auto rowCount = f.frame()->rows.size();
+      take(f.app->tree().read(f.node, [&](const DocumentView &widget) {
+        const auto height = detail::ScrollWidgetAccess::state(widget).geometry.viewport.height;
+        CHECK(rowCount == static_cast<std::size_t>(height));
+      }));
+      CHECK(f.frame()->footer->bytes().find("100.0%") != std::string_view::npos);
+      CHECK(provider->discoveries > 0);
+      CHECK(provider->bytesRead.load() <= 512 * 1024);
+      CHECK_FALSE(provider->uiOperation.load());
+    }
   }
 }

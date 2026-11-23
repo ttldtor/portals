@@ -395,6 +395,7 @@ struct DocumentPrepareIntent {
   bool suppressPreview{};
   std::optional<DocumentSearchSelection> searchSelection;
   bool searchReflow{};
+  bool managedTailBurst{}; // Only the managed job may batch unpublished tail preparation quanta.
 };
 
 struct DocumentPreparation {
