@@ -14,6 +14,13 @@ struct ManagedError;
 template <class T> class ManagedModel;
 template <std::equality_comparable T> class ManagedSource;
 
+/// @cond INTERNAL
+namespace ui::detail {
+struct Access;
+} // namespace ui::detail
+
+/// @endcond
+
 namespace detail {
 struct ManagedNavigationRecord;
 struct ManagedNavigationRegistry;
@@ -170,6 +177,7 @@ public:
 
 private:
   friend class ManagedScene;
+  friend struct ui::detail::Access;
   std::expected<std::shared_ptr<detail::ManagedNavigationRecord>, TreeError> lock() const;
   std::weak_ptr<detail::ManagedNavigationRecord> record_;
   std::thread::id owner_{};

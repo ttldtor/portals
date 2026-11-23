@@ -24,6 +24,7 @@ class LogSource;
 class DocumentSource;
 template <class T> class Description;
 template <class T> class Ref;
+template <class T> class Model;
 class DynamicRef;
 class StyleStage;
 class DialogCommandResult;
@@ -1122,6 +1123,30 @@ public:
     }
 
     return result;
+  }
+
+  /** @tparam Row Immutable row type of this list or table.
+   * @param source Cold single-scene model. @param options Existing restore/reset policy.
+   * @param origin Original command site. @return Checked admission; failed cold registration is retired.
+   */
+  template <class Row>
+    requires(std::same_as<T, VirtualList<Row>> || std::same_as<T, VirtualTable<Row>>)
+  std::expected<void, ManagedError> setModel(Model<Row> source, ModelRebindOptions options = {},
+                                             std::source_location origin = std::source_location::current()) const;
+
+  /** @param source Cold target model. @param options Existing restore/reset policy.
+   * @param origin Original command site. @return Admission success, reporting a checked failure once.
+   */
+  template <class Row>
+    requires(std::same_as<T, VirtualList<Row>> || std::same_as<T, VirtualTable<Row>>)
+  bool model(Model<Row> source, ModelRebindOptions options = {},
+             std::source_location origin = std::source_location::current()) const {
+    const auto observation = target();
+    auto result = setModel(std::move(source), options, origin);
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return static_cast<bool>(result);
   }
 
   /** @tparam Row Immutable row type of this list or table.

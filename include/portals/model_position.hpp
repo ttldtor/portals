@@ -252,4 +252,24 @@ private:
   struct Data;
   std::shared_ptr<const Data> data_;
 };
+
+/** @brief Qualified metadata-only proof result; expired history is an observable outcome. */
+struct PositionHistoryReply {
+  PositionChangeMap changes;  ///< Complete suffix for the requested revision, when available.
+  std::uint64_t proofFloor{}; ///< Earliest revision whose ordering proof remains retained.
+  PositionResolution state{PositionResolution::UNSUPPORTED}; ///< EXACT proof or UNAVAILABLE retained-history gap.
+};
+
+/** @brief Optional immutable bounded ordering history owned only by supporting providers.
+ * No rows, view handles or scene references are retained by a proof. Callers obtain
+ * one map for a channel/batch, not a freshly allocated map per selected identity.
+ */
+class PositionChangeHistory {
+public:
+  virtual ~PositionChangeHistory() = default;
+  /** @param revision Positive captured data revision.
+   * @return Complete qualified suffix, UNAVAILABLE below the floor, or typed admission/provider failure.
+   */
+  virtual std::expected<PositionHistoryReply, SourceError> changesFrom(std::uint64_t revision) const = 0;
+};
 } // namespace portals

@@ -12,6 +12,7 @@
 #include <portals/ui_layout.hpp>
 #include <portals/ui_log_view.hpp>
 #include <portals/ui_menu.hpp>
+#include <portals/ui_model.hpp>
 #include <portals/ui_modifiers.hpp>
 #include <portals/ui_mount.hpp>
 #include <portals/ui_password.hpp>

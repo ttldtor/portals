@@ -14,6 +14,8 @@
 #include <thread>
 
 namespace portals {
+class PositionChangeHistory;
+
 /** @brief Provider-assigned column identity; typed row accessors define column values. */
 struct ColumnId {
   std::uint64_t value{};      ///< Nonzero identity within one model.
@@ -128,6 +130,14 @@ public:
   virtual RowLookup locateRow(RowId id) const {
     (void)id;
 
+    return {};
+  }
+
+  /** @brief Optional immutable ordering proof owner; default sources add no storage.
+   * @return Provider-owned bounded scalar history, or empty when this capability is unsupported.
+   * This additive virtual capability requires matching SDK headers and library ABI.
+   */
+  virtual std::shared_ptr<const PositionChangeHistory> positionHistory() const {
     return {};
   }
 

@@ -1,0 +1,786 @@
+// Copyright (c) 2026 ttldtor.
+// SPDX-License-Identifier: BSL-1.0
+#pragma once
+
+#include <portals/collection.hpp>
+#include <portals/detail/ui_model_sequence.hpp>
+#include <portals/text_format.hpp>
+#include <portals/ui_description.hpp>
+
+#include <array>
+
+namespace portals::ui {
+template <class T> class Model;
+template <class T> class Navigation;
+
+namespace detail {
+/// @cond INTERNAL
+struct ModelAccess;
+
+template <class T> struct ModelDeclaration {
+  using Factory = std::function<std::expected<std::shared_ptr<const ModelSnapshot<T>>, TreeError>()>;
+
+  ModelDeclaration() : observation(std::make_shared<RefTarget>()) {
+  }
+
+  Factory create;
+  ModelOptions options;
+  ManagedViewHandler<T> prepared;
+  std::shared_ptr<RefTarget> observation;
+  ManagedModel<T> handle;
+  NodeId scene;
+  const MountContext *attempt{};
+  bool published{};
+  bool resolving{};
+  std::shared_ptr<OwnedSequence<T>> sequence;
+};
+
+template <class T> struct NavigationDeclaration {
+  explicit NavigationDeclaration(Model<T> value)
+      : initial(std::move(value)), observation(std::make_shared<RefTarget>()) {
+  }
+
+  Model<T> initial;
+  NavigationBindingOptions binding;
+  NavigationOptions options;
+  std::shared_ptr<RefTarget> observation;
+  ManagedNavigation handle;
+  NodeId scene;
+  const MountContext *attempt{};
+  bool published{};
+  bool resolving{};
+};
+
+/// @endcond
+} // namespace detail
+
+/** @brief Owning cold model declaration; copies share one single-scene registration.
+ * Construction does not read providers or register runtime objects. Closed declarations
+ * remain closed; use a new declaration for another scene. Captured borrows retain their
+ * original lifetime obligations. Access and registration are creating-UI-thread operations.
+ * @tparam T Domain row; the owned-array path requires copyable values.
+ */
+template <class T> class Model {
+public:
+  using Row = T; ///< Immutable domain row, shared with the mounted model.
+  /** @brief Create an empty descriptor whose checked use reports INVALID_ARGUMENT. */
+  Model() = default;
+
+  /** @brief Obtain the published model without extending scene lifetime.
+   * @return Weak runtime handle, CLOSED before publication/after close, or a typed handle/thread failure.
+   */
+  std::expected<ManagedModel<T>, ManagedError> managed() const {
+    if (!data_) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, {}, failure_, {}, {}});
+    }
+    auto owner = detail::eventScene(data_->observation);
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+    if (detail::Access::modelSceneClosed(**owner)) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::CLOSED, {}, {}});
+    }
+    return data_->handle;
+  }
+
+  /** @brief Insert one value into a mounted owned sequence on its UI thread.
+   * @param index Insertion ordinal, including the end boundary.
+   * @param value Value copied under the existing mutation admission boundary.
+   * @return Success with a fresh SDK identity, or typed capability, lifetime, capacity or allocation failure.
+   * Existing identities survive; failure preserves the installed snapshot.
+   */
+  std::expected<void, ManagedError> insert(std::uint64_t index, const T &value) const;
+  /** @brief Erase a range from a mounted owned sequence on its UI thread.
+   * @param first Range start; the end boundary is valid for an empty range.
+   * @param count Erased count, defaulting to one; zero is a no-op.
+   * @return Success or typed capability, lifetime, bounds or allocation failure; rejection preserves the snapshot.
+   */
+  std::expected<void, ManagedError> erase(std::uint64_t first, std::uint64_t count = 1) const;
+  /** @brief Move an owned range without replacing its row identities.
+   * @param first Moved range start.
+   * @param count Moved row count; zero is a no-op.
+   * @param destination Insertion index after removing the range.
+   * @return Success or typed capability, lifetime, bounds or allocation failure; rejection preserves the snapshot.
+   */
+  std::expected<void, ManagedError> move(std::uint64_t first, std::uint64_t count, std::uint64_t destination) const;
+  /** @brief Remove every row from a mounted owned sequence on its UI thread.
+   * @return Success or typed capability, lifetime or allocation failure; rejection preserves the snapshot.
+   * An already empty sequence does not advance its revision.
+   */
+  std::expected<void, ManagedError> clear() const;
+
+private:
+  friend struct detail::ModelAccess;
+  std::shared_ptr<detail::ModelDeclaration<T>> data_;
+  TreeError failure_{TreeError::INVALID_ARGUMENT};
+  template <class Build>
+  std::expected<void, ManagedError> mutate(PositionChange change, bool inserts, Build build) const;
+};
+
+/** @brief Cold explicit shared navigation; ordinary model-source views stay independent.
+ * @tparam T Common domain row of the context's model and participating views.
+ */
+template <class T> class Navigation {
+public:
+  using Row = T; ///< Common domain row of the explicit navigation session.
+  /** @brief Create an empty context descriptor whose checked use reports INVALID_ARGUMENT. */
+  Navigation() = default;
+
+  /** @brief Obtain the published context without extending scene lifetime.
+   * @return Weak navigation handle, CLOSED before publication/after close, or a typed handle/thread failure.
+   */
+  std::expected<ManagedNavigation, ManagedError> managed() const {
+    if (!data_) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, {}, failure_, {}, {}});
+    }
+    auto owner = detail::eventScene(data_->observation);
+    if (!owner) {
+      return std::unexpected(owner.error());
+    }
+    if (detail::Access::modelSceneClosed(**owner)) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::CLOSED, {}, {}});
+    }
+    return data_->handle;
+  }
+
+  /** @brief Admit one model change for the complete shared group on its UI thread.
+   * @param target Cold destination source in this scene.
+   * @param options Existing remember/reset policy; default same-model use preserves navigation.
+   * @return Success or typed admission failure; failed admission retains the installed group.
+   */
+  std::expected<void, ManagedError> setModel(Model<T> target, ModelRebindOptions options = {}) const;
+
+  /** @brief Change the shared model and report a checked failure through existing scene diagnostics.
+   * @param target Cold destination source in this scene.
+   * @param options Existing remember/reset policy.
+   * @param origin Original command site attached to a reported failure.
+   * @return True on success; false after reporting the original checked error.
+   */
+  bool model(Model<T> target, ModelRebindOptions options = {},
+             std::source_location origin = std::source_location::current()) const {
+    const auto observation = data_ ? data_->observation : nullptr;
+    auto result = setModel(std::move(target), options);
+    if (!result) {
+      detail::reportEventError(observation, result.error(), origin);
+    }
+    return static_cast<bool>(result);
+  }
+
+private:
+  friend struct detail::ModelAccess;
+  std::shared_ptr<detail::NavigationDeclaration<T>> data_;
+  TreeError failure_{TreeError::INVALID_ARGUMENT};
+};
+
+namespace detail {
+/// @cond INTERNAL
+struct ModelAccess {
+  template <class T>
+  static std::expected<std::optional<ManagedModel<T>>, ManagedError> existing(ManagedScene &scene,
+                                                                              const Model<T> &value) {
+    auto data = value.data_;
+    const auto fail = [&](TreeError error) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, scene.root().id(), error, {}, {}});
+    };
+    if (Access::modelSceneClosed(scene)) {
+      return fail(TreeError::CLOSED);
+    }
+    if (!data) {
+      return fail(value.failure_);
+    }
+    if (data->observation->owner != std::this_thread::get_id()) {
+      return fail(TreeError::WRONG_THREAD);
+    }
+    if (data->scene != NodeId{} && data->scene != scene.root().id()) {
+      return fail(TreeError::WRONG_SESSION);
+    }
+    if (data->resolving || (!data->published && data->attempt)) {
+      return fail(TreeError::WOULD_BLOCK);
+    }
+    if (!data->published) {
+      return std::optional<ManagedModel<T>>{};
+    }
+    auto handle = value.managed();
+    return handle ? std::expected<std::optional<ManagedModel<T>>, ManagedError>(std::optional(*handle))
+                  : std::unexpected(handle.error());
+  }
+
+  template <class W> static void keep(ManagedScene &scene, Node<W> node, MountContext &context) {
+    try {
+      context.rollback.emplace_back([&scene, node, lifetime = Access::lifetime(scene)] {
+        if (!lifetime.expired()) {
+          (void)scene.remove(node);
+        }
+      });
+    } catch (...) {
+      (void)scene.remove(node);
+      throw;
+    }
+  }
+
+  template <class T> static Model<T> make(std::shared_ptr<ModelDeclaration<T>> value) {
+    Model<T> result;
+    result.data_ = std::move(value);
+    return result;
+  }
+
+  template <class T> static Model<T> failed(TreeError error) {
+    Model<T> result;
+    result.failure_ = error;
+    return result;
+  }
+
+  template <class T> static Navigation<T> make(std::shared_ptr<NavigationDeclaration<T>> value) {
+    Navigation<T> result;
+    result.data_ = std::move(value);
+    return result;
+  }
+
+  template <class T> static Navigation<T> failedNavigation(TreeError error) {
+    Navigation<T> result;
+    result.failure_ = error;
+    return result;
+  }
+
+  static void publish(MountContext &context) {
+    context.committed = true;
+    for (auto &action : context.publish) {
+      action();
+    }
+  }
+
+  template <class T>
+  static std::expected<ManagedModel<T>, ManagedError> resolve(ManagedScene &scene, const Model<T> &value,
+                                                              MountContext &context) {
+    auto data = value.data_;
+    const auto root = scene.root();
+    const auto lifetime = Access::lifetime(scene);
+    const auto fail = [&](TreeError error) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, root.id(), error, {}, {}});
+    };
+    if (Access::modelSceneClosed(scene)) {
+      return fail(TreeError::CLOSED);
+    }
+    if (!data) {
+      return fail(value.failure_);
+    }
+    if (data->observation->owner != std::this_thread::get_id()) {
+      return fail(TreeError::WRONG_THREAD);
+    }
+    if (data->resolving) {
+      return fail(TreeError::WOULD_BLOCK);
+    }
+    if (data->scene != NodeId{}) {
+      if (data->scene != scene.root().id()) {
+        return fail(TreeError::WRONG_SESSION);
+      }
+      if (data->published) {
+        return value.managed();
+      }
+      return data->attempt == &context ? std::expected<ManagedModel<T>, ManagedError>(data->handle)
+                                       : std::expected<ManagedModel<T>, ManagedError>(fail(TreeError::WOULD_BLOCK));
+    }
+
+    struct Resolving {
+      bool &active;
+
+      ~Resolving() {
+        active = false;
+      }
+    } guard{data->resolving};
+
+    data->resolving = true;
+    try {
+      auto initial = data->create();
+      if (!initial) {
+        return fail(initial.error());
+      }
+      if (lifetime.expired()) {
+        return fail(TreeError::CLOSED);
+      }
+      // User callable copies are callouts too. Finish that copy and validate
+      // lifetime before entering a method through the borrowed scene pointer.
+      auto prepared = data->prepared;
+      if (lifetime.expired()) {
+        return fail(TreeError::CLOSED);
+      }
+      auto created = scene.model<T>(std::move(*initial), data->options, std::move(prepared));
+      if (!created) {
+        return std::unexpected(created.error());
+      }
+      if (lifetime.expired()) {
+        return fail(TreeError::CLOSED);
+      }
+      if (data->sequence) {
+        Access::ownedModel(*created);
+      }
+      bool rollbackInstalled{};
+      try {
+        context.rollback.emplace_back([&scene, data, lifetime, handle = *created] {
+          if (!lifetime.expired()) {
+            auto copy = handle;
+            Access::retireChoiceModel(scene, copy);
+          }
+          data->handle = {};
+          data->scene = {};
+          data->attempt = nullptr;
+        });
+        rollbackInstalled = true;
+        context.publish.emplace_back([&scene, data, root, lifetime] {
+          data->observation->scene = &scene;
+          data->observation->lifetime = lifetime;
+          data->observation->node = root;
+          data->attempt = nullptr;
+          data->published = true;
+        });
+      } catch (...) {
+        if (!rollbackInstalled) {
+          auto copy = *created;
+          Access::retireChoiceModel(scene, copy);
+        }
+        throw;
+      }
+      data->handle = *created;
+      data->scene = scene.root().id();
+      data->attempt = &context;
+      return *created;
+    } catch (const std::bad_alloc &) {
+      return fail(lifetime.expired() ? TreeError::CLOSED : TreeError::NO_MEMORY);
+    } catch (...) {
+      return fail(lifetime.expired() ? TreeError::CLOSED : TreeError::CALLBACK_FAILED);
+    }
+  }
+
+  template <class T>
+  static std::expected<ManagedNavigation, ManagedError> resolve(ManagedScene &scene, const Navigation<T> &value,
+                                                                MountContext &context) {
+    auto data = value.data_;
+    const auto root = scene.root();
+    const auto lifetime = Access::lifetime(scene);
+    const auto fail = [&](TreeError error) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, root.id(), error, {}, {}});
+    };
+    if (Access::modelSceneClosed(scene)) {
+      return fail(TreeError::CLOSED);
+    }
+    if (!data) {
+      return fail(value.failure_);
+    }
+    if (data->observation->owner != std::this_thread::get_id()) {
+      return fail(TreeError::WRONG_THREAD);
+    }
+    if (data->resolving) {
+      return fail(TreeError::WOULD_BLOCK);
+    }
+    if (data->scene != NodeId{}) {
+      if (data->scene != scene.root().id()) {
+        return fail(TreeError::WRONG_SESSION);
+      }
+      if (data->published) {
+        return value.managed();
+      }
+      return data->attempt == &context ? std::expected<ManagedNavigation, ManagedError>(data->handle)
+                                       : std::expected<ManagedNavigation, ManagedError>(fail(TreeError::WOULD_BLOCK));
+    }
+
+    struct Resolving {
+      bool &active;
+
+      ~Resolving() {
+        active = false;
+      }
+    } guard{data->resolving};
+
+    data->resolving = true;
+    auto model = resolve(scene, data->initial, context);
+    if (!model) {
+      return std::unexpected(model.error());
+    }
+    auto created = scene.navigation(*model, data->options);
+    if (!created) {
+      return std::unexpected(created.error());
+    }
+    try {
+      context.rollback.emplace_back([&scene, data, lifetime, handle = *created] {
+        if (!lifetime.expired()) {
+          Access::retireColdNavigation(scene, handle);
+        }
+        data->handle = {};
+        data->scene = {};
+        data->attempt = nullptr;
+      });
+    } catch (const std::bad_alloc &) {
+      Access::retireColdNavigation(scene, *created);
+      return fail(TreeError::NO_MEMORY);
+    } catch (...) {
+      Access::retireColdNavigation(scene, *created);
+      return fail(TreeError::CALLBACK_FAILED);
+    }
+    try {
+      context.publish.emplace_back([&scene, data, root, lifetime] {
+        data->observation->scene = &scene;
+        data->observation->lifetime = lifetime;
+        data->observation->node = root;
+        data->attempt = nullptr;
+        data->published = true;
+      });
+    } catch (const std::bad_alloc &) {
+      return fail(TreeError::NO_MEMORY);
+    } catch (...) {
+      return fail(TreeError::CALLBACK_FAILED);
+    }
+    data->handle = *created;
+    data->scene = scene.root().id();
+    data->attempt = &context;
+    return *created;
+  }
+
+  template <class T>
+  static std::expected<ManagedModel<T>, ManagedError> source(ManagedScene &scene, const Model<T> &value,
+                                                             MountContext &context) {
+    return resolve(scene, value, context);
+  }
+
+  template <class T>
+  static std::expected<ManagedModel<T>, ManagedError> source(ManagedScene &scene, const Navigation<T> &value,
+                                                             MountContext &context) {
+    auto navigation = resolve(scene, value, context);
+    return navigation ? Access::navigationModel<T>(scene, *navigation) : std::unexpected(navigation.error());
+  }
+
+  template <class T, class W>
+  static std::expected<void, ManagedError> bind(ManagedScene &, Node<W>, const Model<T> &, MountContext &) {
+    return {};
+  }
+
+  template <class T, class W>
+  static std::expected<void, ManagedError> bind(ManagedScene &scene, Node<W> node, const Navigation<T> &value,
+                                                MountContext &context) {
+    auto navigation = resolve(scene, value, context);
+    return navigation ? scene.bindNavigation(node, *navigation, value.data_->binding)
+                      : std::unexpected(navigation.error());
+  }
+};
+
+/// @endcond
+} // namespace detail
+
+/** @brief Declare a provider without reading, copying rows or registering it before mount.
+ * @tparam T Immutable provider row; copying or default construction is not required.
+ * @param provider Shared immutable source; no model preparation or provider callback runs here.
+ * @param options Existing finite model budgets.
+ * @param prepared Model-owned preparation hook used unless a view explicitly overrides it.
+ * @return Cold source, including a factory allocation failure reported by later checked admission.
+ */
+template <class T>
+Model<T> model(std::shared_ptr<const ModelSnapshot<T>> provider, ModelOptions options = {},
+               ManagedViewHandler<T> prepared = {}) {
+  try {
+    auto data = std::make_shared<detail::ModelDeclaration<T>>();
+    data->options = options;
+    data->prepared = std::move(prepared);
+    data->create = [provider = std::move(provider)] {
+      return std::expected<std::shared_ptr<const ModelSnapshot<T>>, TreeError>(provider);
+    };
+    return detail::ModelAccess::make(std::move(data));
+  } catch (const std::bad_alloc &) {
+    return detail::ModelAccess::failed<T>(TreeError::NO_MEMORY);
+  } catch (...) {
+    return detail::ModelAccess::failed<T>(TreeError::CALLBACK_FAILED);
+  }
+}
+
+/** @brief Declare a bounded owning sequence with SDK-assigned stable identities.
+ * @tparam T Copyable domain value; contained references retain their normal borrow semantics.
+ * @tparam N Initial number of values, checked against the configured capacity at mount.
+ * @param values Values owned by the cold declaration; captured borrows remain caller obligations.
+ * @param limits Whole-sequence capacity, defaulting to 4096 rows.
+ * @param options Existing finite model budgets.
+ * @param history Rolling scalar-proof retention, defaulting to the latest 1024 structural changes.
+ * @return Cold model; registration allocates identities under the mounted error boundary.
+ * Edits continue after proof expiry. Live identities remain exact; old missing identities report UNAVAILABLE.
+ */
+template <class T, std::size_t N>
+Model<T> model(std::array<T, N> values, CollectionLimits limits = {}, ModelOptions options = {},
+               PositionMapOptions history = {}) {
+  try {
+    auto data = std::make_shared<detail::ModelDeclaration<T>>();
+    data->options = options;
+    auto sequence = std::make_shared<detail::OwnedSequence<T>>();
+    sequence->capacity = limits.maxRows;
+    sequence->history = history;
+    data->sequence = sequence;
+    data->create = [values = std::move(values), limits,
+                    sequence]() -> std::expected<std::shared_ptr<const ModelSnapshot<T>>, TreeError> {
+      if (!limits.maxRows || !sequence->history.maxChanges || N > limits.maxRows) {
+        return std::unexpected(!limits.maxRows || !sequence->history.maxChanges ? TreeError::INVALID_ARGUMENT
+                                                                                : TreeError::NODE_LIMIT);
+      }
+      if (sequence->current) {
+        return sequence->current;
+      }
+      std::vector<ModelRow<T>> rows(std::initializer_list<ModelRow<T>>{});
+      rows.reserve(N);
+      for (std::size_t index = 0; index < N; ++index) {
+        rows.push_back({{index + 1, 1}, values[index]});
+      }
+      auto proof = std::make_shared<detail::OwnedHistory>(1, sequence->history);
+      sequence->current = std::make_shared<detail::OwnedRows<T>>(rows, 1, std::move(proof));
+      sequence->nextId = N + 1;
+      return sequence->current;
+    };
+    return detail::ModelAccess::make(std::move(data));
+  } catch (const std::bad_alloc &) {
+    return detail::ModelAccess::failed<T>(TreeError::NO_MEMORY);
+  } catch (...) {
+    return detail::ModelAccess::failed<T>(TreeError::CALLBACK_FAILED);
+  }
+}
+
+/** @brief Declare one explicit shared navigation session; no Property is created yet.
+ * @tparam T Common domain row of the model and consuming views.
+ * @param source Cold initial model.
+ * @param binding Channels shared by consuming views; reading-anchor sharing is optional.
+ * @param options Existing navigation and checkpoint admission limits.
+ * @return Cold context; copies share this declaration, while separate calls create independent sessions.
+ */
+template <class T>
+Navigation<T> navigation(Model<T> source, NavigationBindingOptions binding = {}, NavigationOptions options = {}) {
+  try {
+    auto data = std::make_shared<detail::NavigationDeclaration<T>>(std::move(source));
+    data->binding = binding;
+    data->options = options;
+    return detail::ModelAccess::make(std::move(data));
+  } catch (const std::bad_alloc &) {
+    return detail::ModelAccess::failedNavigation<T>(TreeError::NO_MEMORY);
+  } catch (...) {
+    return detail::ModelAccess::failedNavigation<T>(TreeError::CALLBACK_FAILED);
+  }
+}
+
+template <class T>
+std::expected<void, ManagedError> Navigation<T>::setModel(Model<T> target, ModelRebindOptions options) const {
+  const auto data = data_;
+  auto owner = data ? detail::eventScene(data->observation)
+                    : std::expected<ManagedScene *, ManagedError>(
+                        std::unexpected(ManagedError{ManagedPhase::INPUT, {}, failure_, {}, {}}));
+  if (!owner) {
+    return std::unexpected(owner.error());
+  }
+  auto existing = detail::ModelAccess::existing(**owner, target);
+  if (!existing) {
+    return std::unexpected(existing.error());
+  }
+  if (*existing) {
+    return data->handle.setModel(**existing, options);
+  }
+  try {
+    detail::MountContext context;
+    auto model = detail::ModelAccess::resolve(**owner, target, context);
+    if (!model) {
+      return std::unexpected(model.error());
+    }
+    auto changed = data->handle.setModel(*model, options);
+    if (!changed) {
+      return changed;
+    }
+    detail::ModelAccess::publish(context);
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(ManagedError{ManagedPhase::INPUT, {}, TreeError::NO_MEMORY, {}, {}});
+  } catch (...) {
+    return std::unexpected(ManagedError{ManagedPhase::INPUT, {}, TreeError::CALLBACK_FAILED, {}, {}});
+  }
+}
+
+template <class T>
+template <class Build>
+std::expected<void, ManagedError> Model<T>::mutate(PositionChange change, bool inserts, Build build) const {
+  auto handle = managed();
+  if (!handle) {
+    return std::unexpected(handle.error());
+  }
+  auto owner = detail::eventScene(data_->observation);
+  if (!owner) {
+    return std::unexpected(owner.error());
+  }
+  const auto root = data_->observation->node;
+  const auto lifetime = data_->observation->lifetime;
+  auto fail = [&](TreeError error) {
+    return std::unexpected(ManagedError{ManagedPhase::STATE, root.id(), error, {}, {}});
+  };
+  if constexpr (!std::is_copy_constructible_v<T>) {
+    return fail(TreeError::INVALID_ARGUMENT);
+  } else {
+    auto sequence = data_->sequence;
+    if (!sequence || !sequence->current) {
+      return fail(TreeError::INVALID_ARGUMENT);
+    }
+    if (sequence->editing || data_->resolving) {
+      return fail(TreeError::WOULD_BLOCK);
+    }
+    const auto previous = sequence->current;
+    const auto count = previous->rowCount();
+    if (change.first > count || change.removed > count - change.first ||
+        (change.kind == PositionChangeKind::MOVE && change.destination > count - change.removed)) {
+      return fail(TreeError::INVALID_ARGUMENT);
+    }
+    if ((!change.removed && !change.inserted) ||
+        (change.kind == PositionChangeKind::MOVE && change.destination == change.first)) {
+      return {};
+    }
+    if (change.inserted > std::numeric_limits<std::uint64_t>::max() - (count - change.removed) ||
+        count - change.removed + change.inserted > sequence->capacity) {
+      return fail(TreeError::NODE_LIMIT);
+    }
+    if (previous->revision() == std::numeric_limits<std::uint64_t>::max() ||
+        (inserts && sequence->nextId == std::numeric_limits<std::uint64_t>::max())) {
+      return fail(TreeError::IDENTITY_EXHAUSTED);
+    }
+
+    struct Editing {
+      detail::OwnedSequence<T> &sequence;
+      bool active{true};
+
+      ~Editing() {
+        if (active) {
+          sequence.editing = false;
+        }
+      }
+    } guard{*sequence};
+
+    sequence->editing = true;
+    try {
+      std::vector<ModelRow<T>> rows(std::initializer_list<ModelRow<T>>{});
+      const auto nextCount = change.kind == PositionChangeKind::MOVE ? count : count - change.removed + change.inserted;
+      rows.reserve(static_cast<std::size_t>(nextCount));
+      std::invoke(build, rows, previous->rows(), sequence->nextId);
+      auto history = std::make_shared<detail::OwnedHistory>(previous->history(), count, change);
+      auto next = std::make_shared<detail::OwnedRows<T>>(rows, previous->revision() + 1, std::move(history));
+      if (lifetime.expired()) {
+        return fail(TreeError::CLOSED);
+      }
+      if (sequence->current != previous) {
+        return fail(TreeError::WOULD_BLOCK);
+      }
+      auto applied = detail::Access::applyOwnedModel(**owner, *handle, std::shared_ptr<const ModelSnapshot<T>>(next));
+      if (!applied) {
+        return applied;
+      }
+      // All fallible work precedes the existing model transaction. Publish owner
+      // metadata before releasing old rows, whose user destructors may reenter.
+      sequence->current = std::move(next);
+      if (inserts) {
+        ++sequence->nextId;
+      }
+      sequence->editing = false;
+      guard.active = false;
+      return {};
+    } catch (const std::bad_alloc &) {
+      return fail(lifetime.expired() ? TreeError::CLOSED : TreeError::NO_MEMORY);
+    } catch (...) {
+      return fail(lifetime.expired() ? TreeError::CLOSED : TreeError::CALLBACK_FAILED);
+    }
+  }
+}
+
+template <class T> std::expected<void, ManagedError> Model<T>::insert(std::uint64_t index, const T &value) const {
+  return mutate(PositionChange::splice(index, 0, 1), true, [&](auto &rows, auto old, std::uint64_t identity) {
+    for (std::size_t offset = 0; offset <= old.size(); ++offset) {
+      if (offset == index) {
+        rows.emplace_back(RowId{identity, 1}, value);
+      }
+      if (offset < old.size()) {
+        rows.push_back(old[offset]);
+      }
+    }
+  });
+}
+
+template <class T> std::expected<void, ManagedError> Model<T>::erase(std::uint64_t first, std::uint64_t count) const {
+  return mutate(PositionChange::splice(first, count, 0), false, [&](auto &rows, auto old, std::uint64_t) {
+    for (std::size_t offset = 0; offset < old.size(); ++offset) {
+      if (offset < first || offset - first >= count) {
+        rows.push_back(old[offset]);
+      }
+    }
+  });
+}
+
+template <class T>
+std::expected<void, ManagedError> Model<T>::move(std::uint64_t first, std::uint64_t count,
+                                                 std::uint64_t destination) const {
+  return mutate(PositionChange::move(first, count, destination), false, [&](auto &rows, auto old, std::uint64_t) {
+    for (std::size_t offset = 0; offset < old.size(); ++offset) {
+      const bool moved = offset >= destination && offset - destination < count;
+      std::uint64_t original{};
+      if (moved) {
+        original = first + offset - destination;
+      } else {
+        const auto remaining = offset < destination ? offset : offset - count;
+        original = remaining < first ? remaining : remaining + count;
+      }
+      rows.push_back(old[static_cast<std::size_t>(original)]);
+    }
+  });
+}
+
+template <class T> std::expected<void, ManagedError> Model<T>::clear() const {
+  auto handle = managed();
+  if (!handle) {
+    return std::unexpected(handle.error());
+  }
+  if (!data_->sequence || !data_->sequence->current) {
+    return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::INVALID_ARGUMENT, {}, {}});
+  }
+  return erase(0, data_->sequence->current->rowCount());
+}
+
+template <class T>
+template <class Row>
+  requires(std::same_as<T, VirtualList<Row>> || std::same_as<T, VirtualTable<Row>>)
+std::expected<void, ManagedError> Ref<T>::setModel(Model<Row> source, ModelRebindOptions options,
+                                                   std::source_location origin) const {
+  const auto observation = target();
+  const auto node = this->node();
+  auto owner = detail::eventScene(observation);
+  if (!owner) {
+    auto failure = owner.error();
+    failure.registrationOrigin = origin;
+    return std::unexpected(failure);
+  }
+  auto existing = detail::ModelAccess::existing(**owner, source);
+  if (!existing) {
+    auto failure = existing.error();
+    failure.registrationOrigin = origin;
+    return std::unexpected(failure);
+  }
+  if (*existing) {
+    auto changed = (*owner)->setModel(node, **existing, std::nullopt, options);
+    if (!changed) {
+      changed.error().registrationOrigin = origin;
+    }
+    return changed;
+  }
+  try {
+    detail::MountContext context;
+    auto model = detail::ModelAccess::resolve(**owner, source, context);
+    if (!model) {
+      auto failure = model.error();
+      failure.registrationOrigin = origin;
+      return std::unexpected(failure);
+    }
+    auto changed = (*owner)->setModel(node, *model, std::nullopt, options);
+    if (!changed) {
+      changed.error().registrationOrigin = origin;
+      return changed;
+    }
+    detail::ModelAccess::publish(context);
+    return {};
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(ManagedError{ManagedPhase::INPUT, {}, TreeError::NO_MEMORY, {}, {}});
+  } catch (...) {
+    return std::unexpected(ManagedError{ManagedPhase::INPUT, {}, TreeError::CALLBACK_FAILED, {}, {}});
+  }
+}
+} // namespace portals::ui

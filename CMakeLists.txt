@@ -1710,6 +1710,13 @@ if(PORTALS_BUILD_TESTS)
   add_test(NAME portals.managed-model-rebind COMMAND portals_managed_model_rebind)
   set_tests_properties(portals.managed-model-rebind PROPERTIES TIMEOUT 30)
 
+  add_executable(portals_ui_models tests/ui_models.cpp)
+  target_include_directories(portals_ui_models SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")
+  target_link_libraries(portals_ui_models PRIVATE portals::core)
+  portals_enable_warnings(portals_ui_models)
+  add_test(NAME portals.ui-models COMMAND portals_ui_models)
+  set_tests_properties(portals.ui-models PROPERTIES TIMEOUT 30)
+
   add_executable(portals_model_query tests/model_query.cpp)
   target_link_libraries(portals_model_query PRIVATE portals::core)
   target_include_directories(portals_model_query SYSTEM PRIVATE "${CMAKE_CURRENT_SOURCE_DIR}/vendor/doctest")

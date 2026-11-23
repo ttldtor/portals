@@ -2,9 +2,132 @@
 // SPDX-License-Identifier: BSL-1.0
 #pragma once
 
+#include <portals/table_column.hpp>
 #include <portals/ui_construction.hpp>
+#include <portals/ui_model.hpp>
 
 namespace portals::ui {
+
+namespace detail {
+template <class Source>
+concept ModelDeclarationSource = requires {
+  typename Source::Row;
+} && (std::same_as<Source, Model<typename Source::Row>> || std::same_as<Source, Navigation<typename Source::Row>>);
+
+template <ModelDeclarationSource Source, class Projection, class FormatterFactory>
+auto projectedList(Source source, Projection projection, FormatterFactory factory, VirtualListOptions options,
+                   SizePolicy policy) {
+  using T = typename Source::Row;
+  auto description = Access::cold<VirtualList<T>>(
+    [source = std::move(source), projection = std::move(projection), factory = std::move(factory), options,
+     policy](ManagedScene &scene, Node<Widget> parent,
+             MountContext &context) mutable -> std::expected<Node<VirtualList<T>>, ManagedError> {
+      auto model = ModelAccess::source(scene, source, context);
+      if (!model) {
+        return std::unexpected(model.error());
+      }
+      auto effective = controlVirtualListOptions(*context.controlSettings, options);
+      auto formatter = std::invoke(factory, effective.width_policy);
+      auto node = scene.virtualList<T>(
+        parent, *model,
+        [projection, formatter = std::move(formatter)](const ModelRow<T> &row) mutable {
+          return std::invoke(formatter, std::invoke(projection, row.value));
+        },
+        effective, policy);
+      if (!node) {
+        return std::unexpected(node.error());
+      }
+      ModelAccess::keep(scene, *node, context);
+      auto bound = ModelAccess::bind(scene, *node, source, context);
+      return bound ? node : std::unexpected(bound.error());
+    });
+  return Access::configuredControl(std::move(description), "VirtualList");
+}
+} // namespace detail
+
+/** @brief Describe a cold model list using an owned member or lambda projection.
+ * @param source Cold model or explicit shared navigation. @param projection Maps const row& to a field.
+ * @param formatter Existing owning GraphemeText formatter. @param options Existing view policy.
+ * @param policy Existing size policy. @return Ordinary single-use list description.
+ */
+template <detail::ModelDeclarationSource Source, class Projection, class Formatter>
+  requires ColumnFormatter<typename Source::Row, Projection, Formatter>
+auto virtualList(Source source, Projection projection, Formatter formatter, VirtualListOptions options = {},
+                 SizePolicy policy = DEFAULT_VIEWPORT_POLICY) {
+  return detail::projectedList(
+    std::move(source), std::move(projection),
+    [formatter = std::move(formatter)](WidthPolicy) {
+      return formatter;
+    },
+    options, policy);
+}
+
+/** @brief Project a standard-formattable field with the receiving view's width policy.
+ * @param source Cold model or explicit shared navigation. @param projection Owning member/lambda projection.
+ * @param options Existing list options. @param policy Existing size policy.
+ * @return Cold list description; provider/registration failures remain checked mount failures.
+ */
+template <detail::ModelDeclarationSource Source, class Projection>
+  requires ColumnProjection<typename Source::Row, Projection> &&
+           std::formattable<std::remove_cvref_t<std::invoke_result_t<Projection &, const typename Source::Row &>>, char>
+auto virtualList(Source source, Projection projection, VirtualListOptions options = {},
+                 SizePolicy policy = DEFAULT_VIEWPORT_POLICY) {
+  using Field = std::remove_cvref_t<std::invoke_result_t<Projection &, const typename Source::Row &>>;
+  return detail::projectedList(
+    std::move(source), std::move(projection),
+    [](WidthPolicy policy) {
+      return cellFormat<Field>("{}", policy);
+    },
+    options, policy);
+}
+
+/** @brief Display standard-formattable scalar model rows without a projection adapter.
+ * @param source Cold scalar model/navigation. @param options List settings. @param policy Layout policy.
+ * @return Existing typed list description with default formatting.
+ */
+template <detail::ModelDeclarationSource Source>
+  requires std::formattable<typename Source::Row, char>
+auto virtualList(Source source, VirtualListOptions options = {}, SizePolicy policy = DEFAULT_VIEWPORT_POLICY) {
+  return virtualList(std::move(source), std::identity{}, options, policy);
+}
+
+/** @brief Describe a cold model table, assembling typed schema errors inside mount.
+ * @param source Cold model or explicit navigation. @param first First typed column.
+ * @param rest Remaining same-row column specifications; all callbacks are owned.
+ * @return Ordinary table description; malformed header/schema reports the original typed cause.
+ */
+template <detail::ModelDeclarationSource Source, class... Rest>
+  requires(std::same_as<std::remove_cvref_t<Rest>, TableColumnSpec<typename Source::Row>> && ...)
+auto virtualTable(Source source, TableColumnSpec<typename Source::Row> first, Rest &&...rest) {
+  using T = typename Source::Row;
+  auto specs = std::tuple{std::move(first), std::forward<Rest>(rest)...};
+  auto description = detail::Access::cold<VirtualTable<T>>(
+    [source = std::move(source), specs = std::move(specs)](
+      ManagedScene &scene, Node<Widget> parent,
+      detail::MountContext &context) mutable -> std::expected<Node<VirtualTable<T>>, ManagedError> {
+      auto effective = detail::controlVirtualTableOptions(*context.controlSettings, VirtualTableOptions{});
+      auto columns = std::apply(
+        [&](const auto &...column) {
+          return tableColumns(effective.width_policy, column...);
+        },
+        specs);
+      if (!columns) {
+        return std::unexpected(detail::textError(parent, columns.error()));
+      }
+      auto model = detail::ModelAccess::source(scene, source, context);
+      if (!model) {
+        return std::unexpected(model.error());
+      }
+      auto node = scene.virtualTable<T>(parent, *model, *columns, effective);
+      if (!node) {
+        return std::unexpected(node.error());
+      }
+      detail::ModelAccess::keep(scene, *node, context);
+      auto bound = detail::ModelAccess::bind(scene, *node, source, context);
+      return bound ? node : std::unexpected(bound.error());
+    });
+  return detail::Access::configuredControl(std::move(description), "VirtualTable");
+}
 
 template <class Content, class Initial>
 Description<DataStateView> detail::Access::dataState(Initial initial, Description<Content> content,
@@ -281,6 +404,56 @@ template <class T, class Config>
 Description<VirtualTable<T>>
 virtualTable(ManagedModel<T> model, std::type_identity_t<std::span<const TableColumn<T>>> columns, Config &&config) {
   return virtualTable(model, columns, config.options, config.policy, std::forward<Config>(config).prepared);
+}
+
+/** @brief Describe a cold provider model table with existing owning columns and named settings.
+ * @tparam T Immutable model row; no copy or read of provider rows is required at mount.
+ * @tparam Config Exactly VirtualTableConfig<T>, optionally cv/ref qualified.
+ * @param model Cold single-scene model; tables retain independent navigation.
+ * @param columns Definitions copied now, including headers and formatter captures.
+ * @param config Settings copied from lvalues or consumed from rvalues; captures may throw.
+ * @return Ordinary table recipe using the existing managed runtime and mount rollback.
+ * An empty prepared handler uses the model default. A nonempty handler overrides it for this view.
+ */
+template <class T, class Config>
+  requires std::same_as<std::remove_cvref_t<Config>, VirtualTableConfig<T>>
+Description<VirtualTable<T>> virtualTable(Model<T> model, std::type_identity_t<std::span<const TableColumn<T>>> columns,
+                                          Config &&config) {
+  auto ownedColumns = std::vector<TableColumn<T>>(columns.begin(), columns.end());
+  auto description = detail::Access::cold<VirtualTable<T>>(
+    [model = std::move(model), columns = std::move(ownedColumns), options = config.options, policy = config.policy,
+     prepared = std::forward<Config>(config).prepared](
+      ManagedScene &scene, Node<Widget> parent,
+      detail::MountContext &context) mutable -> std::expected<Node<VirtualTable<T>>, ManagedError> {
+      auto source = detail::ModelAccess::source(scene, model, context);
+      if (!source) {
+        return std::unexpected(source.error());
+      }
+      auto effective = detail::controlVirtualTableOptions(*context.controlSettings, options);
+      auto node = scene.virtualTable(parent, *source, columns, effective, policy, std::move(prepared));
+      if (!node) {
+        return std::unexpected(node.error());
+      }
+      detail::ModelAccess::keep(scene, *node, context);
+      return node;
+    });
+  return detail::Access::configuredControl(std::move(description), "VirtualTable");
+}
+
+/** @brief Add reference publication to the same cold model table factory.
+ * @tparam T Immutable model row deduced from the model/reference, not the column span.
+ * @tparam Config Exactly VirtualTableConfig<T>, optionally cv/ref qualified.
+ * @param reference Empty observation published after the complete mount succeeds.
+ * @param model Cold single-scene model. @param columns Owning definitions copied by the factory.
+ * @param config Existing options, layout policy and optional per-view preparation override.
+ * @return The same table recipe, with no additional model or consumer registration.
+ */
+template <class T, class Config>
+  requires std::same_as<std::remove_cvref_t<Config>, VirtualTableConfig<T>>
+Description<VirtualTable<T>> virtualTable(Ref<VirtualTable<T>> reference, Model<T> model,
+                                          std::type_identity_t<std::span<const TableColumn<T>>> columns,
+                                          Config &&config) {
+  return virtualTable(std::move(model), columns, std::forward<Config>(config)).reference(std::move(reference));
 }
 
 /// @brief Describe a list using named settings without changing its managed lifecycle.

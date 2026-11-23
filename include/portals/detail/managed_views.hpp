@@ -666,6 +666,15 @@ std::expected<detail::ModelViewCheckpoint, TreeError> ManagedScene::resolveViewC
     if (hints && hints->positions.size() != ids.size()) {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
+    if (hints && !hints->positions.empty()) {
+      const auto revision = hints->positions.front().position().revision;
+      for (const auto &hint : hints->positions) {
+        if (hint.position().revision != revision) {
+          return std::unexpected(TreeError::INVALID_ARGUMENT);
+        }
+      }
+    }
+    bool requestedHistory{};
     std::shared_ptr<std::vector<RowId>> selected;
     std::shared_ptr<detail::ModelSelectionPositions> positions;
     auto preparePositions = [&](std::size_t prefix) -> std::expected<void, TreeError> {
@@ -700,6 +709,20 @@ std::expected<detail::ModelViewCheckpoint, TreeError> ManagedScene::resolveViewC
           hint = &hints->positions[index];
         } else if (originalCurrent && originalCurrent->position().row == id) {
           hint = &*originalCurrent;
+        }
+        if (located->state == RowLookupState::NOT_FOUND && hint && hint->resource() == *resource &&
+            (!changes || changes.fromRevision() != hint->position().revision) && !requestedHistory) {
+          requestedHistory = true;
+          auto proof = detail::modelPositionHistory(*frame.snapshot(), hint->position().revision);
+          if (!proof) {
+            return std::unexpected(detail::navigationTreeError(proof.error()));
+          }
+          if (proof->state == PositionResolution::UNAVAILABLE) {
+            value.selection.resolution_ = PositionResolution::UNAVAILABLE;
+            resolution = aggregate();
+            return value;
+          }
+          changes = std::move(proof->changes);
         }
         if (located->state == RowLookupState::NOT_FOUND && hint && hint->resource() == *resource && changes &&
             changes.fromRevision() == hint->position().revision) {
