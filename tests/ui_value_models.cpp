@@ -1806,6 +1806,40 @@ TEST_CASE("field addition publishes through the root and preserves unrelated fie
   CHECK(take(source.value().snapshot()) == changed);
 }
 
+TEST_CASE("live caption factories copy mutable and const expressions before their local owner expires") {
+  Fixture fixture;
+  auto source = ui::model(4);
+  ui::Ref<Label> first;
+  ui::Ref<Label> second;
+  ui::Ref<Button> third;
+  ui::Ref<Button> fourth;
+  ui::Ref<Border> frame;
+  auto recipe = [&] {
+    auto expression = text("Value {}", source);
+    const auto constant = expression;
+    auto moving = expression;
+
+    return ui::column(ui::label(first, expression), ui::label(constant).reference(second),
+                      ui::button(expression).reference(third), ui::button(fourth, constant),
+                      ui::label("body").framed(frame, "ascii", expression), ui::label("body").framed("ascii", constant),
+                      ui::label("body").framed("ascii", std::move(moving)));
+  }();
+
+  take(ui::mount(*fixture.scene, std::move(recipe)));
+  CHECK(take(first.text().get()) == "Value 4");
+  CHECK(take(second.text().get()) == "Value 4");
+  CHECK(take(third.text().get()) == "Value 4");
+  CHECK(take(fourth.text().get()) == "Value 4");
+  source.value() = 5;
+  auto painted = paintValueFrame(fixture, frame.node());
+
+  CHECK(take(first.text().get()) == "Value 5");
+  CHECK(take(second.text().get()) == "Value 5");
+  CHECK(take(third.text().get()) == "Value 5");
+  CHECK(take(fourth.text().get()) == "Value 5");
+  CHECK(std::ranges::find(painted.text, "Value 5") != painted.text.end());
+}
+
 TEST_CASE("button scalar captions preserve projections and replace complete text expressions") {
   Fixture fixture;
   auto first = ui::model(Record{4, true});

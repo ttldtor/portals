@@ -596,7 +596,9 @@ using portals::text;
 /// @cond INTERNAL
 
 template <class T>
-Description<T> &&Description<T>::framed(std::string_view pattern, ValueText title) &&
+template <class Title>
+  requires std::same_as<Title, ValueText>
+Description<T> &&Description<T>::framed(std::string_view pattern, Title title) &&
   requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>)
 {
   (void)std::move(*this).framed(pattern);
@@ -629,7 +631,9 @@ template <class Value>
 }
 
 template <class T>
-Description<T> &&Description<T>::framed(Ref<Border> outer, std::string_view pattern, ValueText title) &&
+template <class Title>
+  requires std::same_as<Title, ValueText>
+Description<T> &&Description<T>::framed(Ref<Border> outer, std::string_view pattern, Title title) &&
   requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>)
 {
   (void)std::move(*this).framed(pattern, std::move(title));

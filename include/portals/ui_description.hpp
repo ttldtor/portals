@@ -1468,12 +1468,15 @@ public:
     return std::move(*this);
   }
 
-  /** @param pattern Checked compact frame preset.
+  /** @tparam Title Exactly ValueText; deduction preserves the empty literal title overload.
+   * @param pattern Checked compact frame preset.
    * @param title Owning live text expression using the same scalar dependencies as label/button captions.
    * @return Consuming ordinary framed recipe. Native ScrollArea-owned frames use their static title API.
    * Errors reject mount; changed titles preserve frame style, decoration, allocation and size policy.
    */
-  Description &&framed(std::string_view pattern, ValueText title) &&
+  template <class Title>
+    requires std::same_as<Title, ValueText>
+  Description &&framed(std::string_view pattern, Title title) &&
     requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>);
 
   /** @tparam Value Owning scalar accepted by the standard formatter.
@@ -1536,11 +1539,14 @@ public:
     return std::move(*this);
   }
 
-  /** @param outer Empty observing slot for this frame, published after the complete subtree mounts.
+  /** @tparam Title Exactly ValueText; deduction preserves the empty literal title overload.
+   * @param outer Empty observing slot for this frame, published after the complete subtree mounts.
    * @param pattern Checked compact preset. @param title Owning live formatted title.
    * @return Same consuming child recipe; outer.model(...) may replace the complete title expression.
    */
-  Description &&framed(Ref<Border> outer, std::string_view pattern, ValueText title) &&
+  template <class Title>
+    requires std::same_as<Title, ValueText>
+  Description &&framed(Ref<Border> outer, std::string_view pattern, Title title) &&
     requires(std::derived_from<T, SizedWidget> && !std::derived_from<T, ScrollArea>);
 
   /** @tparam Value Copyable owning scalar accepted by the standard formatter.

@@ -97,11 +97,14 @@ Description<Control> valueTextControl(ValueText source, ControlStyle style = {},
 /// @endcond
 } // namespace detail
 
-/** @param source Owning expression with explicit scalar dependencies.
+/** @tparam Source Exactly ValueText, deduced so empty braces retain the literal caption overload.
+ * @param source Owning expression with explicit scalar dependencies.
  * @param style Owning manual appearances. @param policy Layout constraints.
  * @return Label using the same scalar observation and error path as other caption receivers.
  */
-inline Description<Label> label(ValueText source, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+template <class Source>
+  requires std::same_as<Source, ValueText>
+Description<Label> label(Source source, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::valueTextControl<Label>(std::move(source), style, policy);
 }
 
@@ -215,12 +218,14 @@ Description<Label> label(ModelField<T, Member> field, ControlStyle style = {},
   return label(detail::ValueModelAccess::root(field), detail::ValueModelAccess::member(field), style, policy);
 }
 
-/** @param source Owning formatted expression with explicit scalar dependencies.
+/** @tparam Source Exactly ValueText, deduced so empty braces retain the literal caption overload.
+ * @param source Owning formatted expression with explicit scalar dependencies.
  * @param style Manual appearances. @param policy Layout constraints.
  * @return Button caption using the same bounded value binding as a label; actions remain independent.
  */
-inline Description<Button> button(ValueText source, ControlStyle style = {},
-                                  SizePolicy policy = DEFAULT_CONTENT_POLICY) {
+template <class Source>
+  requires std::same_as<Source, ValueText>
+Description<Button> button(Source source, ControlStyle style = {}, SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return detail::valueTextControl<Button>(std::move(source), style, policy);
 }
 
@@ -912,16 +917,6 @@ inline Description<Button> button(std::string_view text) {
 inline Description<Label> label(Ref<Label> reference, std::string_view text, ControlStyle style = {},
                                 SizePolicy policy = DEFAULT_CONTENT_POLICY) {
   return label(text, style, policy).reference(std::move(reference));
-}
-
-/** @param reference Empty slot published after complete mount.
- * @param source Complete owning formatted expression.
- * @param style Owning manual appearances. @param policy Layout constraints.
- * @return Formatted label sharing the existing reference transaction.
- */
-inline Description<Label> label(Ref<Label> reference, ValueText source, ControlStyle style = {},
-                                SizePolicy policy = DEFAULT_CONTENT_POLICY) {
-  return label(std::move(source), style, policy).reference(std::move(reference));
 }
 
 /** @tparam T Owning scalar accepted by the model label overload.

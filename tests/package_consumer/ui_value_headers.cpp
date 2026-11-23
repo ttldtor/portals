@@ -13,6 +13,16 @@ concept CaptionSource = requires(T source) {
 static_assert(CaptionSource<portals::ui::ModelValue<int>>);
 static_assert(!CaptionSource<std::span<int>>);
 
+static_assert(requires(portals::ui::Ref<portals::Label> label, portals::ui::Ref<portals::Button> button,
+                       portals::ui::Ref<portals::Border> frame) {
+  portals::ui::label({});
+  portals::ui::button({});
+  portals::ui::label(label, {});
+  portals::ui::button(button, {});
+  portals::ui::label("body").framed("ascii", {});
+  portals::ui::label("body").framed(frame, "ascii", {});
+});
+
 void constructValueCaptions() {
   auto value = portals::ui::model(1);
   auto label = portals::ui::label(value);
