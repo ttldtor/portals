@@ -129,7 +129,7 @@ The wheel moves one displayed row per normalized step by default. Rapid input ac
 
 The scrollbar position is an approximate projection of the visible window across a known byte extent; it is not the footer coverage value. Intermediate thumb positions map across the range from byte zero to `extent - visibleSpan`. This range stays fixed during a drag, and arriving prepared windows do not move the held thumb away from the pointer. Dragging to the maximum endpoint requests the last full page, just like `End`. For a seekable source with a known exact extent, preparation first proves the encoding at the source origin, then searches backward for enough line boundaries and decodes the resulting suffix on a background worker. It retains a bounded row window without building a complete line index. Logical line numbers in a distant suffix remain unknown. A very long line without a preceding safe boundary can still require substantial background scanning. Sources without the required seeking or extent capabilities keep the cancellable forward path. Explicit `seekByte(offset)` commands keep the requested original-byte anchor and use bounded local seeks without scanning the entire preceding file.
 
-End prepares intermediate chunks independently of the paint cadence; only the completed window needs the normal layout and rendering path. Wrapped printable ASCII is processed in spans while preserving the same rows and original byte positions. This bounds retained memory, not cumulative reading: tail preparation can read bytes more than once and may still scan substantial data when logical lines are very long. There is no constant-time EOF guarantee for arbitrary sources.
+End prepares intermediate chunks independently of the paint cadence; only the completed window needs the normal layout and rendering path. Managed seekable text-tail jobs reuse their unpublished working state across bounded preparation quanta. Wrapped printable ASCII is processed in spans while preserving the same rows and original byte positions. This bounds retained memory, not cumulative reading: tail preparation can read bytes more than once and may still scan substantial data when logical lines are very long. There is no constant-time EOF guarantee for arbitrary sources.
 
 The footer reports approximate coverage through the original source bytes at the lower edge of the visible content. On the first screen, the percentage can already be greater than zero. It reaches `100.0%` only when the final original source byte is visible; decoder read-ahead and decoded UTF-8 size do not count as visible coverage. A clipped right edge of an unwrapped line does not report 100% until the source's final byte is visible. With an unknown extent, the footer shows `progress unknown` until a visible final byte proves the end; a temporarily waiting provider is not EOF. A terminal line feed does not create an extra empty display row, while actual blank rows in the document remain visible. The original byte anchor and any proven logical line number remain available through `reader.status()`. Line numbers are optional, disabled by default, and only show counts proven by scanning. Wrapped fragments retain the same logical line number. The 9-cell gutter displays up to seven digits: `?` marks an unproven line number and `+` marks a larger proven number; this display limit does not restrict 64-bit byte positions.
 
@@ -298,7 +298,7 @@ The default UTF-8 hint applies after an explicit encoding or a recognized BOM. S
 
 Replacement decoding is the default. Low-level `DocumentViewConfig::decoder` also supports strict decoding; a strict failure reports a typed preparation error. A local seek or fast EOF checks the selected decoded region, including the origin needed to determine its encoding; it does not certify an omitted prefix. Terminal control characters are rendered as visible escapes. Ordinary multi-scalar grapheme clusters, including those crossing page boundaries, are preserved. Local restart uses up to 4 KiB of grapheme precontext, in addition to independent decoder lookbehind. An oversized cluster or unprovable bounded grapheme context (for example, a regional-indicator run longer than 4 KiB) is shown as a visible dotted-circle continuation and sets `fragmentedCluster`. For a leading regional-indicator run, parity remains unproven until a non-regional-indicator resets it, including after a cached near seek. This bounded local projection does not limit logical line length.
 
-The native resource type is `DocumentView`. In the CONFIGURATION grammar its viewer-specific properties are `file` (a literal UTF-8 path), `lineNumbers`, `wrap`, `encoding` and `language`, plus `syntax` and positive `maxAutoHighlightBytes`, followed by `fastScroll`, `fastKeyModifier` and `fastWheelModifier`. A positive `fastScroll` enables the absolute fast step; modifier names `CTRL`, `ALT` and `SHIFT` are case-insensitive. Existing `keyStep` and `wheelStep` together express the `scrollStep` shorthand, and `pageOverlap` sets page overlap. The ordinary size, frame and scrollbar properties use the same semantics as their C++ modifiers. They are not accepted as viewer properties on unrelated controls.
+The native resource type is `DocumentView`. In the CONFIGURATION grammar its viewer-specific properties are `file` (a literal UTF-8 path), `lineNumbers`, `wrap`, `encoding` and `language`, plus `syntax`, positive `maxAutoHighlightBytes` and `tailWorkTurns` (1–255), followed by `fastScroll`, `fastKeyModifier` and `fastWheelModifier`. A positive `fastScroll` enables the absolute fast step; modifier names `CTRL`, `ALT` and `SHIFT` are case-insensitive. Existing `keyStep` and `wheelStep` together express the `scrollStep` shorthand, and `pageOverlap` sets page overlap. The ordinary size, frame and scrollbar properties use the same semantics as their C++ modifiers. They are not accepted as viewer properties on unrelated controls.
 
 
 [Complete resource program](examples/guide_document_view_resource.cpp)
@@ -348,7 +348,36 @@ Run this sample from the Portals source directory so `README.md` is available. P
 
 ## Resource limits {#document-view-limits}
 
-Limits bound retained capacity and work, rather than document size. The default source root reserves at most 8 MiB; applications can share and configure a `SourceBudget`. `DocumentViewConfig` defaults to 16,384 actual viewport cells, 64 KiB of prepared payload, and 256 KiB of admitted source bytes per worker turn. Source pages default to 64 KiB. A viewport exceeding its configured preparation cap reports `PAGE_TOO_LARGE`; it is not silently truncated.
+Limits bound retained capacity and work, rather than document size. The default source root reserves at most 8 MiB; applications can share and configure a `SourceBudget`. `DocumentViewConfig` defaults to 16,384 actual viewport cells, 64 KiB of prepared payload, and 256 KiB of admitted source bytes per preparation quantum. Source pages default to 64 KiB. A viewport exceeding its configured preparation cap reports `PAGE_TOO_LARGE`; it is not silently truncated.
+
+`DocumentViewConfig.tailWorkTurns` defaults to 32 and bounds the number of quanta
+in one managed seekable text-tail job. Set it to 1 for the previous single-quantum
+scheduling granularity; zero is invalid. `workBytes` bounds each quantum, so a job
+can admit up to `workBytes * tailWorkTurns` source bytes. Batching also checks an
+8 ms soft slice between quanta, including initial inspection and staging time.
+A provider operation can exceed this slice; it is not an I/O or response-time
+guarantee. Cancellation and revision checks still run at each source page.
+Other navigation, non-seekable sources, HEX and exact-color recovery keep their
+ordinary preparation path. This changes scheduling, not the retained-memory cap.
+
+For file-backed text-tail preparation, the worker opens one bounded read session
+per job and reuses its native handle across pages. Each page still checks handle
+metadata, the captured file generation and extent, and cancellation. Before
+returning either a continuation or a completed window, it validates the current
+path again and closes the session on the worker. A detected replacement, append,
+truncation or observed edit rejects that job. This does not provide an atomic
+snapshot of a file that another process is modifying.
+
+`DocumentReadBatch` exposes the same opt-in mechanism for source adapters. Its
+pages are provisional until `seal()` succeeds; callers must seal before publishing
+any derived data. A successful seal is terminal. Create, read, seal and destroy
+the batch on the same worker; it retains its source and 4 KiB of source credits,
+plus the existing per-operation envelope and bounded pages. Providers opt in with
+`ByteDocumentCapabilities.readSessions` and `openReadSession()`; ordinary source
+reads keep their existing validation. If a session reports an unknown extent,
+End releases it before using the provider's ordinary extent discovery and reads.
+A known zero extent remains valid. Memory and gzip adapters do not inherit
+the raw file session capability. No whole-file buffer is introduced.
 
 Pinned pages, immutable scanner snapshots, prepared output and cancelled work retain their credits until their actual owners finish. Provider-owned domain storage is outside the SDK's retained-page ledger. Process memory, source credits, cold-seek latency and terminal presentation time are different measurements; none is a file-size guarantee.
 
