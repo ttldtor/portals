@@ -119,6 +119,10 @@ planned work is not included. An **Unreleased** heading has no publication date.
   keeps the existing timeout; Ninja checks that the final full build adds no work.
   The relocated test consumer also avoids redundant links caused by linker
   dependency metadata on paths with spaces, without changing ordinary SDK builds.
+- Add the optional `ModelSnapshot::positionHistory()` virtual capability for bounded
+  ordering proofs. Existing provider sources need no override, but the virtual interface
+  changes: rebuild provider binaries and SDK consumers against matching installed headers
+  and library. Compatibility with an older binary SDK/provider vtable is not promised.
 
 - Refresh earlier prepared list/table navigation bindings on the next ordinary
   frame when a later view changes their shared position. Synchronization no longer
@@ -202,6 +206,18 @@ planned work is not included. An **Unreleased** heading has no publication date.
   providers. Shared-budget page leases and resumable sparse line indexes keep resident
   storage bounded without limiting logical line length or requiring a known extent.
   File reads reuse the existing backend; pages and index lookups validate source revisions.
+- Declare small owned arrays or immutable providers with cold `ui::Model`, and bind
+  projected lists/tables through an explicit `ui::Navigation` when positions should be
+  shared. Model-only views remain independent; checked/collected model switching uses
+  the existing managed runtime. Prebuilt table columns and named configs retain per-view
+  preparation overrides and support Ref-first construction.
+
+- Edit copyable owned sequences with checked insert/erase/move/clear and SDK-assigned
+  stable identities. Default capacity is 4096 rows; the rolling proof window retains
+  1024 changes. Edits continue beyond that window, live identities remain exact, and
+  older missing identities report UNAVAILABLE without discarding saved checkpoints.
+  Large providers retain their existing payload and publication ownership without
+  registration-time row reads or copies.
 
 - Add scene-owned shared navigation contexts for managed lists and tables, with
   independent current, selected-set and optional reading-anchor channels. Stable

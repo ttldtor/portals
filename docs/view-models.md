@@ -5,6 +5,34 @@
 This guide covers managed finite-model lists and tables. [LogView](log-view.md#log-view-switching-models)
 uses its own bookmark-capable source integration, including sources without a total row count.
 
+## Declare a model and its views
+
+Use `ui::model` to describe an owning small sequence or an existing immutable provider.
+Registration occurs when a view mounts. With the `City` type from the complete example:
+
+```cpp
+auto europe = ui::model(std::array{City{"Prague", 3}, City{"Vienna", 6}});
+auto navigation = ui::navigation(europe, {.readingAnchor = true});
+auto views = ui::hbox(
+  ui::virtualList(navigation, &City::name),
+  ui::virtualTable(navigation,
+    tableColumn("City", &City::name, 18),
+    tableColumn("Orders", &City::orders, 8)));
+```
+
+A list projection can be a member pointer or a lambda. Standard-formattable scalar
+rows need no projection: `ui::virtualList(model)`. Columns accept member/lambda
+projections with default formatting or an explicit formatter. Schema errors retain
+their typed cause during mount.
+
+Copies of a `ui::Model<T>` share one registration in one scene. Passing that Model to
+several views gives each independent navigation. Passing an explicit `ui::Navigation<T>`
+shares its enabled channels; separate `ui::navigation(model)` calls create separate
+sessions. These descriptions use the existing managed models, properties and preparation
+loop. They do not add another runtime or application-owned history map.
+
+## Switch models
+
 A mounted list or table remembers its current row, selected identities and reading
 anchor for each model it has visited. Switching A → B → A restores A by stable row
 identity; it does not copy an ordinal from B. Different views remember their own
@@ -35,7 +63,8 @@ such participants are rejected before any binding is replaced.
 
 A finite provider implements bounded `locateRow(RowId)` when direct navigation needs
 an identity index. Its default is UNSUPPORTED; the UI does not scan the model to guess
-an ordinal. The complete provider example below supplies that capability.
+an ordinal. The small owned sequence supplies this index; custom providers implement
+it as described in [model bookmarks](model-positions.md).
 
 An existing row stays current across insertion and reordering. A declared removal may
 choose a surviving neighbor when the provider supplies the required ordering proof.
@@ -79,6 +108,67 @@ payloads keep their own qualified resource and outcome. Delivery rejection is a 
 postcommit error and does not roll back installed state. An unsuccessful admission may
 leave a harmless layout invalidation request; it does not install part of the new group.
 
+### Edit a small owned sequence
+
+`ui::model(std::array{...})` owns copyable values and assigns stable row identities.
+Equal values remain distinct rows. After mount, its checked UI-thread operations return
+`std::expected<void, ManagedError>`:
+
+| Operation | Effect |
+| --- | --- |
+| `model.insert(index, value)` | Insert one copied value with a fresh identity. |
+| `model.erase(first, count)` | Remove a range; `count` defaults to 1. |
+| `model.move(first, count, destination)` | Preserve identities; destination is the index **after removing** the range. |
+| `model.clear()` | Remove all rows. |
+
+Handle the result before updating dependent application state. Allocation/admission
+failure preserves the installed snapshot. Empty erases, an unchanged move and clearing
+an empty sequence do not publish a revision. Erased identities are never reused, and
+successful structural changes advance a positive revision. Owning a value preserves
+its normal C++ semantics: a `string_view` or reference inside it still borrows its target.
+
+The default capacity is 4096 rows, configurable with `CollectionLimits`. The adapter
+retains the latest 1024 scalar changes by default, configurable with `PositionMapOptions`.
+Further edits keep working. A still-present identity resolves EXACT even after its old
+revision leaves that proof window. For a missing identity older than the retained proof,
+restoration reports UNAVAILABLE and keeps the checkpoint; it does not guess a neighbor.
+Within the window a proven deletion can resolve NEAREST. This proof retention is separate
+from the view/context checkpoint budget above. Provider models do not acquire these
+owning mutations; their checked mutation calls return INVALID_ARGUMENT.
+
+### Keep the provider path for large data
+
+For an existing `std::shared_ptr<const ModelSnapshot<T>>`, use `ui::model<T>(provider)`.
+Declaring or mounting it neither reads nor copies row payloads; rows may be noncopyable.
+Visible-range preparation and publication retain the existing provider ownership.
+See [immutable models](model.md) for snapshot, publisher and worker integration.
+
+Existing column arrays and named configs also work with a cold Model:
+
+```cpp
+// model, columns, config and tableRef have matching row types.
+auto view = ui::virtualTable(tableRef, model, columns, config);
+```
+
+`columns` may be a `TableColumn<T>` array/span; the recipe owns its copied definitions
+and config. An empty `config.prepared` uses the model's preparation handler; a nonempty
+handler overrides it for this view. This form keeps independent navigation and accepts
+`ui::Model<T>`, with no automatic shared-coordinate assertion for arbitrary projections.
+The existing `ManagedModel<T>` factories remain available for advanced integration.
+
+Use `model.managed()` after successful mount when an existing publisher or low-level
+API needs the checked runtime handle. Publisher admission, producer shutdown and borrowed
+capture lifetimes remain application obligations. Descriptors are single-scene: empty,
+failed, foreign-scene and closed handles produce typed errors. For a valid descriptor, `managed()` is CLOSED
+before publication and after scene closure. Mount failures follow the existing scene/
+`runApp` diagnostic path; `setModel` and sequence edits expose immediate checked errors.
+
+Providers may optionally override `ModelSnapshot::positionHistory()` to return a bounded,
+qualified change proof. Its default requires no override or per-source history storage.
+This addition is source-compatible, but changes the virtual interface: rebuild provider
+binaries and SDK consumers against matching installed headers and library. Compatibility
+with an older binary SDK/provider vtable is not promised.
+
 ### Unversioned finite models
 
 Revision zero remains a valid ordinary finite model. It lacks the positive revision
@@ -93,8 +183,8 @@ controls keep their local behavior without promising shared bookmark continuity.
 
 ![Two views switch model together and remember each model's position](images/view-models-guide.gif)
 
-[Full source](examples/guide_view_models.cpp) declares two small finite providers and
-binds a list and table to one navigation context. Move with arrows, switch regions with
+[Full source](examples/guide_view_models.cpp) declares two small owned models with
+`ui::model` and binds a projected list and table through `ui::navigation`. Move with arrows, switch regions with
 F2/F3, and return to the former region. Both views recover that region's logical place.
 Tab changes focus; F10 or Ctrl+C exits. The caption changes only after group admission.
 
@@ -106,8 +196,8 @@ current row does not lock the viewports together. A late shared-position update 
 consumed by earlier views on the next ordinary frame, without another input.
 Build `portals_docs_view_models` with tests enabled, or use the installed SDK.
 
-The provider and checked registration steps are explicit here. This is an integration
-example, not the planned compact model-descriptor API. No application-side history map,
-model copy, terminal emulator or replay driver is part of the client.
+The complete client uses cold declarations and ordinary collected model switching;
+registration and group admission stay inside the SDK. Its owned arrays are the small-data
+path. Large provider data continues to use the linked immutable-model integration.
 
 @include docs/examples/guide_view_models.cpp
