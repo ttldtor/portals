@@ -83,6 +83,12 @@ struct Access {
   }
 
   template <std::equality_comparable T>
+  static std::expected<ManagedState<T>, ManagedError> createValueState(ManagedScene &scene, const T &initial) {
+    // Owning scalar records may contain containers whose Debug move allocates inside noexcept.
+    return scene.stateFrom<T>(initial, Invalidation::PAINT, {});
+  }
+
+  template <std::equality_comparable T>
   static std::expected<void, TreeError> validateValueState(ManagedScene &scene, const ManagedState<T> &state) {
     // lock preserves the original source's affinity, lifetime and origin qualification.
     auto property = state.lock();

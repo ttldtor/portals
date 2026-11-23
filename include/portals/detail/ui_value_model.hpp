@@ -218,7 +218,7 @@ struct ValueModelAccess {
     try {
       std::expected<ManagedState<T>, ManagedError> created = data->handle;
       if (data->kind == ModelDeclarationBase::Kind::VALUE) {
-        created = scene.state(*std::static_pointer_cast<ValueModelDeclaration<T>>(base)->initial);
+        created = Access::createValueState(scene, *std::static_pointer_cast<ValueModelDeclaration<T>>(base)->initial);
       } else if (data->kind == ModelDeclarationBase::Kind::VALUE_DEFERRED_SOURCE) {
         created = std::static_pointer_cast<DeferredSourceDeclaration<T>>(base)->resolve(scene, context);
       }

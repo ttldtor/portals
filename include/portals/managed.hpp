@@ -622,50 +622,11 @@ public:
   template <std::equality_comparable T>
   std::expected<ManagedState<T>, ManagedError> state(T initial, Invalidation kind = Invalidation::PAINT,
                                                      PropertyOptions options = {}) {
-    auto allowed = boundary(ManagedPhase::STATE, root_);
-
-    if (!allowed) {
-      return std::unexpected(allowed.error());
-    }
-
-    if (kind != Invalidation::PAINT && kind != Invalidation::LAYOUT) {
-      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::INVALID_ARGUMENT));
-    }
-
-    if (!liveText_.empty() || !originProperties_.empty()) {
-      pruneLiveText();
-    }
-    if (properties_.size() >= options_.maxStates) {
-      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NODE_LIMIT));
-    }
-
-    auto created = [&] {
-      if constexpr (std::same_as<T, std::string>) {
-        // MSVC Debug string moves may allocate a proxy in noexcept; copy inside Property's checked boundary.
-        return Property<T>::create(app_.tree(), root_, std::as_const(initial), kind, options);
-      } else {
-        return Property<T>::create(app_.tree(), root_, std::move(initial), kind, options);
-      }
-    }();
-
-    if (!created) {
-      return std::unexpected(error(ManagedPhase::STATE, root_, created.error()));
-    }
-
-    try {
-      std::shared_ptr<Property<T>> model(std::move(*created));
-      ManagedState<T> handle;
-
-      handle.model_ = model;
-      handle.facade_ = facade_;
-      handle.lifetime_ = lifetime_;
-      handle.owner_ = owner_;
-      handle.scene_ = root_.id();
-      properties_.push_back(std::move(model));
-
-      return handle;
-    } catch (const std::bad_alloc &) {
-      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NO_MEMORY));
+    if constexpr (std::same_as<T, std::string>) {
+      // MSVC Debug string moves may allocate a proxy in noexcept; copy inside Property's checked boundary.
+      return stateFrom<T>(std::as_const(initial), kind, options);
+    } else {
+      return stateFrom<T>(std::move(initial), kind, options);
     }
   }
 
@@ -2016,6 +1977,48 @@ public:
   void stop(Application &app) override;
 
 private:
+  template <std::equality_comparable T, class Value>
+  std::expected<ManagedState<T>, ManagedError> stateFrom(Value &&initial, Invalidation kind, PropertyOptions options) {
+    auto allowed = boundary(ManagedPhase::STATE, root_);
+
+    if (!allowed) {
+      return std::unexpected(allowed.error());
+    }
+
+    if (kind != Invalidation::PAINT && kind != Invalidation::LAYOUT) {
+      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::INVALID_ARGUMENT));
+    }
+
+    if (!liveText_.empty() || !originProperties_.empty()) {
+      pruneLiveText();
+    }
+    if (properties_.size() >= options_.maxStates) {
+      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NODE_LIMIT));
+    }
+
+    auto created = Property<T>::create(app_.tree(), root_, std::forward<Value>(initial), kind, options);
+
+    if (!created) {
+      return std::unexpected(error(ManagedPhase::STATE, root_, created.error()));
+    }
+
+    try {
+      std::shared_ptr<Property<T>> model(std::move(*created));
+      ManagedState<T> handle;
+
+      handle.model_ = model;
+      handle.facade_ = facade_;
+      handle.lifetime_ = lifetime_;
+      handle.owner_ = owner_;
+      handle.scene_ = root_.id();
+      properties_.push_back(std::move(model));
+
+      return handle;
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NO_MEMORY));
+    }
+  }
+
   struct OriginProperty {
     std::shared_ptr<detail::ManagedOrigin> origin;
     std::weak_ptr<void> property;
