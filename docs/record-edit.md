@@ -7,7 +7,8 @@ The session owns the draft and its editing history independently of the temporar
 controls. Returning to a record restores its draft; changing the current row does
 not redirect an edit that started on the previously displayed record.
 
-Include `<portals/ui_model_edit.hpp>` for this optional API.
+Include `<portals/ui_model_edit.hpp>` for this optional API. For a declaration
+containing multiple typed fields, use [current-record forms](model-forms.md).
 
 Use session and field operations on the UI thread, including retained-draft
 inspection and receipt application. Background work receives owning request
@@ -98,3 +99,8 @@ access and the existing worker/delivery path, without loading the full model or
 performing blocking I/O in an input handler. Large text and custom widget mapping
 have their own capabilities; an ordinary field binding does not imply a full
 in-memory copy is suitable for every source.
+
+For a retained text editor, `field.draftText(originalTarget)` copies its exact
+owning bytes without parsing or source I/O. This permits explicit recovery of a
+malformed typed draft after its record was removed. It returns `nullopt` for a
+target without text state and preserves checked affinity/liveness errors.

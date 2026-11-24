@@ -19,6 +19,7 @@ static_assert(std::copy_constructible<Session>);
 static_assert(requires(Session session) {
   session.field(&Record::name);
   session.field(&Record::count);
+  session.field(&Record::count).draftText(portals::EditTarget{});
   session.commit();
   session.cancel();
 });

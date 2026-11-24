@@ -92,11 +92,25 @@ template <class Value> std::expected<std::size_t, TreeError> editValueBytes(cons
   }
 }
 
+template <class Value>
+std::expected<Value, TreeError> parseEditText(const std::shared_ptr<const EditTextCodec<Value>> &codec,
+                                              std::string_view candidate) {
+  if (codec && codec->parse) {
+    return codec->parse(candidate);
+  }
+  if constexpr (std::same_as<Value, std::string>) {
+    return std::expected<Value, TreeError>(std::in_place, candidate);
+  }
+
+  return std::unexpected(TreeError::INVALID_ARGUMENT);
+}
+
 template <class Row, class Value> class OwnedFieldEndpoint final : public EditEndpoint<Value> {
 public:
-  OwnedFieldEndpoint(Model<Row> model, Value Row::*member, EditTarget identity, std::size_t maxBytes)
+  OwnedFieldEndpoint(Model<Row> model, Value Row::*member, EditTarget identity, std::size_t maxBytes,
+                     std::optional<std::size_t> maxTextBytes)
       : model_(std::move(model)), member_(member), resource_(identity.resource), identity_(std::move(identity)),
-        maxBytes_(maxBytes) {
+        maxBytes_(maxBytes), maxTextBytes_(maxTextBytes) {
   }
 
   EditCapabilities capabilities() const noexcept override {
@@ -147,6 +161,11 @@ public:
     if (cachedRow_ == row && cachedVersion_ == version->version) {
       if (auto cached = cachedValue_.lock()) {
         return EditRecord<Value>{std::move(cached), cachedVersion_};
+      }
+    }
+    if constexpr (std::same_as<Value, std::string>) {
+      if (maxTextBytes_ && (previous->rows()[location.index].value.*member_).size() > *maxTextBytes_) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
     }
     auto size = editValueBytes(previous->rows()[location.index].value.*member_);
@@ -210,6 +229,7 @@ private:
   ModelResource resource_;
   EditTarget identity_;
   std::size_t maxBytes_;
+  std::optional<std::size_t> maxTextBytes_;
   std::shared_ptr<OwnedEditVersion> version_;
   RowId cachedRow_;
   std::weak_ptr<const Value> cachedValue_;
@@ -218,8 +238,10 @@ private:
 
 template <class Row, class Value> class ReadOnlyFieldEndpoint final : public EditEndpoint<Value> {
 public:
-  ReadOnlyFieldEndpoint(Model<Row> model, Value Row::*member, ModelResource resource)
-      : model_(std::move(model)), member_(member), resource_(resource) {
+  ReadOnlyFieldEndpoint(Model<Row> model, Value Row::*member, ModelResource resource, std::size_t maxBytes,
+                        std::optional<std::size_t> maxTextBytes)
+      : model_(std::move(model)), member_(member), resource_(resource), maxBytes_(maxBytes),
+        maxTextBytes_(maxTextBytes) {
   }
 
   EditCapabilities capabilities() const noexcept override {
@@ -246,7 +268,18 @@ public:
     if (rows.state != RangeState::READY || rows.rows.size() != 1 || rows.rows.front().id != row) {
       return std::unexpected(TreeError::WOULD_BLOCK);
     }
-    return EditRecord<Value>{std::make_shared<const Value>(rows.rows.front().value.*member_), (*snapshot)->revision()};
+    const auto &value = rows.rows.front().value.*member_;
+    if constexpr (std::same_as<Value, std::string>) {
+      if (maxTextBytes_ && value.size() > *maxTextBytes_) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
+      }
+    }
+    auto size = editValueBytes(value);
+    if (!size || *size > maxBytes_) {
+      return std::unexpected(size ? TreeError::NODE_LIMIT : size.error());
+    }
+
+    return EditRecord<Value>{std::make_shared<const Value>(value), (*snapshot)->revision()};
   }
 
   std::expected<EditReceipt, TreeError> submit(EditRequest<Value> request) override {
@@ -261,6 +294,8 @@ private:
   Model<Row> model_;
   Value Row::*member_;
   ModelResource resource_;
+  std::size_t maxBytes_;
+  std::optional<std::size_t> maxTextBytes_;
 };
 
 inline std::shared_ptr<portals::detail::EditTextBinding>
@@ -283,6 +318,25 @@ inline bool preferredEditBinding(const std::vector<std::weak_ptr<portals::detail
   return selectEditBinding(bindings, candidate->displayedEntry) == candidate;
 }
 
+// Preserve registration order: the first eligible live FormField wins over plain editors.
+// A cold recipe has no displayed draft, and a removed editor closes its binding.
+inline std::shared_ptr<portals::detail::EditTextBinding>
+selectEditPolicy(const std::vector<std::weak_ptr<portals::detail::EditTextBinding>> &bindings, const void *definition) {
+  std::shared_ptr<portals::detail::EditTextBinding> chosen;
+  for (const auto &weak : bindings) {
+    auto binding = weak.lock();
+    if (!binding || binding->closed || !binding->displayed || binding->definition != definition ||
+        !binding->validateForCommit) {
+      continue;
+    }
+    if (!chosen || (binding->validatedByEditor && !chosen->validatedByEditor)) {
+      chosen = std::move(binding);
+    }
+  }
+
+  return chosen;
+}
+
 template <class Row> struct EditState;
 
 struct EditDefinitionBase {
@@ -297,8 +351,9 @@ template <class Row, class Value> struct EditDefinition final : EditDefinitionBa
   Value Row::*member{};
   std::shared_ptr<EditEndpoint<Value>> endpoint;
   std::function<bool(const Value &)> validate;
+  std::shared_ptr<const EditTextCodec<Value>> textCodec;
+  std::optional<std::size_t> maxTextBytes;
   bool active{};
-  bool asynchronous{};
 };
 
 struct EditEntryBase {
@@ -343,6 +398,21 @@ template <class Row, class Value> struct EditEntry final : EditEntryBase {
   std::uint64_t observedVersion{};  // Version paired with the admitted accepted value.
   std::uint64_t witnessedVersion{}; // Read/receipt watermark, including values refused by the budget.
   std::uint64_t validatedGeneration{std::numeric_limits<std::uint64_t>::max()};
+  bool requiresAsyncValidation{};
+
+  std::expected<std::string, TreeError> format(const Value &value) const {
+    if (definition->textCodec && definition->textCodec->format) {
+      return definition->textCodec->format(value);
+    }
+    if constexpr (std::same_as<Value, std::string>) {
+      return std::expected<std::string, TreeError>(std::in_place, value);
+    }
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  std::expected<Value, TreeError> parse(std::string_view value) const {
+    return parseEditText(definition->textCodec, value);
+  }
 
   std::expected<std::size_t, TreeError> retainedCharge(const Value *candidate, std::size_t nextTextCharge,
                                                        bool copiesCandidate = false,
@@ -489,7 +559,7 @@ template <class Row, class Value> struct EditEntry final : EditEntryBase {
     auto nextSnapshot = textSnapshot;
     auto nextSnapshotBytes = snapshotCharge;
     if constexpr (std::same_as<Value, std::string>) {
-      if (!nextSnapshot || nextSnapshot->revision != value->version) {
+      if (!definition->textCodec && (!nextSnapshot || nextSnapshot->revision != value->version)) {
         if (value->value->capacity() >
             std::numeric_limits<std::size_t>::max() - sizeof(PropertyChange<std::string>) - 1) {
           return localFailure(TreeError::NODE_LIMIT);
@@ -510,11 +580,20 @@ template <class Row, class Value> struct EditEntry final : EditEntryBase {
       }
     }
     if constexpr (std::same_as<Value, std::string>) {
-      if (!nextSnapshot || nextSnapshot->revision != value->version) {
+      if (!definition->textCodec && (!nextSnapshot || nextSnapshot->revision != value->version)) {
         nextSnapshot = std::make_shared<const PropertyChange<std::string>>(
           PropertyChange<std::string>{*value->value, value->version});
         nextSnapshotBytes = sizeof(PropertyChange<std::string>) + nextSnapshot->value.capacity() + 1;
       }
+    }
+    if (definition->textCodec && (!nextSnapshot || nextSnapshot->revision != value->version)) {
+      auto formatted = format(*value->value);
+      if (!formatted) {
+        return localFailure(formatted.error());
+      }
+      nextSnapshot =
+        std::make_shared<const PropertyChange<std::string>>(PropertyChange<std::string>{*formatted, value->version});
+      nextSnapshotBytes = sizeof(PropertyChange<std::string>) + nextSnapshot->value.capacity() + 1;
     }
     if (charge) {
       auto nextCharge =
@@ -559,79 +638,75 @@ template <class Row, class Value> struct EditEntry final : EditEntryBase {
            (!text || !text->history->operationCount()) && (!validation || validation->status == FieldStatus::UNCHECKED);
   }
 
-  std::expected<void, TreeError> setRetainedText(const std::string &value) {
-    if constexpr (!std::same_as<Value, std::string>) {
-      return std::unexpected(TreeError::INVALID_ARGUMENT);
-    } else {
-      const auto state = owner.lock();
-      if (!state || state->endpointClosed || discarded || !text) {
-        return std::unexpected(TreeError::CLOSED);
-      }
-      if (text->generation == std::numeric_limits<std::uint64_t>::max()) {
-        return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
-      }
-      auto precharge = retainedCharge(&value, textCharge, true);
-      if (!precharge) {
-        return std::unexpected(precharge.error());
-      }
-      auto checked = state->checkCredit(*this, *precharge);
-      if (!checked) {
-        return checked;
-      }
-      const auto beforeGeneration = text->generation;
-      auto prepared = text->history->prepareEdit({std::string(text->text.bytes()), text->cursor, text->anchor},
-                                                 {value, value.size(), value.size()}, TextHistoryKind::PROGRAMMATIC);
-      if (!prepared) {
-        return std::unexpected(prepared.error() == TextHistoryError::NO_MEMORY ? TreeError::NO_MEMORY
-                                                                               : TreeError::INVALID_ARGUMENT);
-      }
-      std::unique_ptr<GraphemeText> mask;
-      if (text->mask) {
-        auto masked =
-          GraphemeText::from(std::string(prepared->text()->graphemes().size(), '*'), text->text.policy(), text->limits);
-        if (!masked) {
-          return std::unexpected(TreeError::INVALID_ARGUMENT);
-        }
-        mask = std::make_unique<GraphemeText>(std::move(*masked));
-      }
-      auto candidate = std::make_shared<const Value>(value);
-      auto nextTextCharge =
-        portals::detail::EditStorageAccess::draftBytes(*prepared->text(), mask.get(), prepared->retainedBytes());
-      if (!nextTextCharge) {
-        return std::unexpected(nextTextCharge.error());
-      }
-      auto finalCharge = retainedCharge(candidate.get(), *nextTextCharge);
-      if (!finalCharge) {
-        return std::unexpected(finalCharge.error());
-      }
-      auto ready = text->history->checkPrepared(*prepared);
-      if (!ready || beforeGeneration != text->generation) {
-        return std::unexpected(TreeError::WOULD_BLOCK);
-      }
-      if (discarded || state->endpointClosed) {
-        return std::unexpected(TreeError::CLOSED);
-      }
-      auto admitted = state->admit(*this, *finalCharge);
-      if (!admitted) {
-        return admitted;
-      }
-      const auto cursor = prepared->cursor();
-      const auto anchor = prepared->anchor();
-      prepared->takeText(text->text);
-      auto committed = text->history->commit(std::move(*prepared));
-      if (!committed) {
-        return std::unexpected(TreeError::WOULD_BLOCK);
-      }
-      text->mask = std::move(mask);
-      text->cursor = cursor;
-      text->anchor = anchor;
-      text->dirty = true;
-      ++text->generation;
-      textCharge = *nextTextCharge;
-      draft = std::move(candidate);
-      status = EditStatus::DIRTY;
-      return {};
+  std::expected<void, TreeError> setRetainedText(const Value &typedValue, const std::string &value) {
+    const auto state = owner.lock();
+    if (!state || state->endpointClosed || discarded || !text) {
+      return std::unexpected(TreeError::CLOSED);
     }
+    if (text->generation == std::numeric_limits<std::uint64_t>::max()) {
+      return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+    }
+    auto precharge = retainedCharge(&typedValue, textCharge, true);
+    if (!precharge) {
+      return std::unexpected(precharge.error());
+    }
+    auto checked = state->checkCredit(*this, *precharge);
+    if (!checked) {
+      return checked;
+    }
+    const auto beforeGeneration = text->generation;
+    auto prepared = text->history->prepareEdit({std::string(text->text.bytes()), text->cursor, text->anchor},
+                                               {value, value.size(), value.size()}, TextHistoryKind::PROGRAMMATIC);
+    if (!prepared) {
+      return std::unexpected(prepared.error() == TextHistoryError::NO_MEMORY ? TreeError::NO_MEMORY
+                                                                             : TreeError::INVALID_ARGUMENT);
+    }
+    std::unique_ptr<GraphemeText> mask;
+    if (text->mask) {
+      auto masked =
+        GraphemeText::from(std::string(prepared->text()->graphemes().size(), '*'), text->text.policy(), text->limits);
+      if (!masked) {
+        return std::unexpected(TreeError::INVALID_ARGUMENT);
+      }
+      mask = std::make_unique<GraphemeText>(std::move(*masked));
+    }
+    auto candidate = std::make_shared<const Value>(typedValue);
+    auto nextTextCharge =
+      portals::detail::EditStorageAccess::draftBytes(*prepared->text(), mask.get(), prepared->retainedBytes());
+    if (!nextTextCharge) {
+      return std::unexpected(nextTextCharge.error());
+    }
+    auto finalCharge = retainedCharge(candidate.get(), *nextTextCharge);
+    if (!finalCharge) {
+      return std::unexpected(finalCharge.error());
+    }
+    auto ready = text->history->checkPrepared(*prepared);
+    if (!ready || beforeGeneration != text->generation) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
+    }
+    if (discarded || state->endpointClosed) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+    auto admitted = state->admit(*this, *finalCharge);
+    if (!admitted) {
+      return admitted;
+    }
+    const auto cursor = prepared->cursor();
+    const auto anchor = prepared->anchor();
+    prepared->takeText(text->text);
+    auto committed = text->history->commit(std::move(*prepared));
+    if (!committed) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
+    }
+    text->mask = std::move(mask);
+    text->cursor = cursor;
+    text->anchor = anchor;
+    text->dirty = true;
+    ++text->generation;
+    textCharge = *nextTextCharge;
+    draft = std::move(candidate);
+    status = EditStatus::DIRTY;
+    return {};
   }
 
   std::expected<EditReceipt, TreeError> commit() override;
@@ -761,8 +836,21 @@ struct EditState final : portals::detail::EditNavigationParticipant, std::enable
       return std::unexpected(channel.error());
     }
     auto snapshot = channel->snapshot();
-    return snapshot ? std::expected<NavigationPosition, TreeError>((*snapshot)->value)
-                    : std::unexpected(snapshot.error());
+
+    if (!snapshot) {
+      return std::unexpected(snapshot.error());
+    }
+
+    auto position = (*snapshot)->value;
+
+    // NEAREST describes how navigation selected this already-resolved current row. A new editor
+    // addresses that concrete RowId exactly; it never resolves or rewrites an older retained target.
+    // Keep the navigation channel/bookmark diagnostic unchanged and retain exact entry/endpoint checks.
+    if (position.kind == PositionKind::ITEM && position.row && position.resolution == PositionResolution::NEAREST) {
+      position.resolution = PositionResolution::EXACT;
+    }
+
+    return position;
   }
 
   void prunePristine(const NavigationPosition &target, SourceStamp sourceIdentity) {
@@ -856,11 +944,11 @@ struct EditState final : portals::detail::EditNavigationParticipant, std::enable
     } else {
       auto model = EditAccess::model<Row>(actualSource);
       if (EditAccess::sequence(model)) {
-        value->endpoint = std::make_shared<OwnedFieldEndpoint<Row, Value>>(model, definition->member, value->target,
-                                                                           options.maxRetainedBytes);
+        value->endpoint = std::make_shared<OwnedFieldEndpoint<Row, Value>>(
+          model, definition->member, value->target, options.maxRetainedBytes, definition->maxTextBytes);
       } else {
-        value->endpoint =
-          std::make_shared<ReadOnlyFieldEndpoint<Row, Value>>(model, definition->member, position.resource);
+        value->endpoint = std::make_shared<ReadOnlyFieldEndpoint<Row, Value>>(
+          model, definition->member, position.resource, options.maxRetainedBytes, definition->maxTextBytes);
       }
     }
     auto ready = value->refresh();
@@ -1017,29 +1105,115 @@ template <class Row, class Value> std::expected<EditReceipt, TreeError> EditEntr
   if (!capabilities.writable) {
     return EditReceipt{target, EditStatus::READ_ONLY};
   }
-  if constexpr (std::same_as<Value, std::string>) {
-    if (text && text->dirty && (!draft || *draft != text->text.bytes())) {
-      draft = std::make_shared<const Value>(text->text.bytes());
+  if (text && text->dirty && !definition->textCodec) {
+    if constexpr (std::same_as<Value, std::string>) {
+      if (!draft || *draft != text->text.bytes()) {
+        draft = std::make_shared<const Value>(text->text.bytes());
+      }
     }
-    if (text && text->dirty && definition->asynchronous && validatedGeneration != text->generation) {
-      return EditReceipt{target, EditStatus::REJECTED, 0, TreeError::WOULD_BLOCK};
+  } else if (text && text->dirty) {
+    auto parsed = parse(text->text.bytes());
+    if (!parsed) {
+      if (parsed.error() != TreeError::INVALID_ARGUMENT) {
+        return std::unexpected(parsed.error());
+      }
+      status = EditStatus::INVALID;
+
+      return EditReceipt{target, status};
     }
+    auto candidate = std::make_shared<const Value>(*parsed);
+    auto chargedBytes = retainedCharge(candidate.get(), textCharge);
+    if (!chargedBytes) {
+      return std::unexpected(chargedBytes.error());
+    }
+    auto admitted = state->admit(*this, *chargedBytes);
+    if (!admitted) {
+      return std::unexpected(admitted.error());
+    }
+    draft = std::move(candidate);
   }
   if (!draft) {
     return status == EditStatus::ACCEPTED ? lastReceipt : EditReceipt{target, status};
   }
   const auto candidate = draft;
   const auto previousGeneration = text ? text->generation : generation;
-  const auto rule = definition->validate;
-  if (rule && (!text || validatedGeneration != text->generation) && !rule(*candidate)) {
-    status = EditStatus::INVALID;
-    return EditReceipt{target, status};
+  const auto previousText = text.get();
+  const auto previousTarget = target;
+  const bool editorValidated = text && validatedGeneration == text->generation;
+  const auto policy = selectEditPolicy(state->bindings, definition.get());
+  if (policy) {
+    requiresAsyncValidation = policy->asynchronous;
   }
-  if (state->endpointClosed) {
+  // An admitted async draft keeps its approval barrier after widget removal. A replacement
+  // mounted editor may supply a new policy, but a cold recipe cannot authorize publication.
+  if (requiresAsyncValidation && !editorValidated) {
+    return EditReceipt{target, EditStatus::REJECTED, 0, TreeError::WOULD_BLOCK};
+  }
+  bool policyValidated{};
+  if (policy && !editorValidated) {
+    std::optional<std::string> formatted;
+    std::string_view bytes;
+    if (text) {
+      // Semantic validators may reenter the typed setter and replace this retained draft.
+      // Keep the entire candidate alive independently of the entry until validation returns.
+      formatted.emplace(text->text.bytes());
+      bytes = *formatted;
+    } else if constexpr (std::same_as<Value, std::string>) {
+      if (!definition->textCodec) {
+        bytes = *candidate;
+      } else {
+        auto value = format(*candidate);
+        if (!value) {
+          return std::unexpected(value.error());
+        }
+        formatted.emplace(*value);
+        bytes = *formatted;
+      }
+    } else {
+      auto value = format(*candidate);
+      if (!value) {
+        return std::unexpected(value.error());
+      }
+      formatted.emplace(*value);
+      bytes = *formatted;
+    }
+    for (const auto *validate : {&policy->validateBeforeParse, &policy->validateForCommit}) {
+      if (!*validate) {
+        continue;
+      }
+      auto checked = (*validate)(bytes);
+      if (state->endpointClosed || discarded || endpoint != endpointOwner) {
+        return std::unexpected(TreeError::CLOSED);
+      }
+      // Check supersession before interpreting a result or entering the next parsing phase.
+      // A reentrant inner publication owns its status and must not be overwritten by this call.
+      if (policy->closed || draft != candidate || text.get() != previousText || target != previousTarget ||
+          previousGeneration != (text ? text->generation : generation)) {
+        return EditReceipt{previousTarget, EditStatus::CONFLICT};
+      }
+      if (!checked) {
+        return std::unexpected(checked.error());
+      }
+      if (!*checked) {
+        status = EditStatus::INVALID;
+        return EditReceipt{target, status};
+      }
+    }
+    policyValidated = true;
+  }
+  const bool modelValidated = editorValidated || (policyValidated && policy->validatedByEditor);
+  const auto rule = definition->validate;
+  const bool modelValid = !rule || modelValidated || rule(*candidate);
+  if (state->endpointClosed || discarded || endpoint != endpointOwner) {
     return std::unexpected(TreeError::CLOSED);
   }
-  if (draft != candidate || previousGeneration != (text ? text->generation : generation)) {
-    return EditReceipt{target, EditStatus::CONFLICT};
+  if (draft != candidate || text.get() != previousText || target != previousTarget ||
+      previousGeneration != (text ? text->generation : generation)) {
+    return EditReceipt{previousTarget, EditStatus::CONFLICT};
+  }
+  if (!modelValid) {
+    status = EditStatus::INVALID;
+    return EditReceipt{target, status};
   }
   if (!pending.empty() && (!capabilities.conditional || !capabilities.ordered)) {
     status = EditStatus::PENDING;
@@ -1165,6 +1339,7 @@ std::expected<bool, TreeError> EditEntry<Row, Value>::reply(const EditReceipt &r
   }
   if (currentGeneration == operation.generation) {
     draft.reset();
+    requiresAsyncValidation = false;
     if (text) {
       text->dirty = false;
     }
@@ -1211,12 +1386,12 @@ template <class Row, class Value> std::expected<void, TreeError> EditEntry<Row, 
   std::unique_ptr<GraphemeText> mask;
   std::shared_ptr<const PropertyChange<std::string>> emptySnapshot;
   auto nextTextCharge = textCharge;
-  if constexpr (std::same_as<Value, std::string>) {
+  if (text) {
     if (discard) {
       emptySnapshot = std::make_shared<const PropertyChange<std::string>>();
     }
-    if (text && (discard || text->dirty || text->history->operationCount() || text->text.bytes() != *accepted)) {
-      const auto bytes = discard ? std::string_view{} : std::string_view(*accepted);
+    if (discard || text->dirty || text->history->operationCount() || text->text.bytes() != textSnapshot->value) {
+      const auto bytes = discard ? std::string_view{} : std::string_view(textSnapshot->value);
       auto baseline = text->history->prepareResetBaseline({std::string(bytes), bytes.size(), bytes.size()});
       if (!baseline) {
         return std::unexpected(TreeError::NO_MEMORY);
@@ -1276,6 +1451,7 @@ template <class Row, class Value> std::expected<void, TreeError> EditEntry<Row, 
   }
   textCharge = nextTextCharge;
   draft.reset();
+  requiresAsyncValidation = false;
   ++generation;
   if (discard) {
     pending.swap(retiredPending);

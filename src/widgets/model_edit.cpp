@@ -134,7 +134,19 @@ public:
 
   std::expected<EditorValidationDecision, TreeError> check(std::string_view candidate,
                                                            EditorValidationIdentity identity) override {
-    return validator_ ? validator_->check(candidate, identity) : EditorValidationDecision::ACCEPT;
+    bool valid = true;
+    if (value_->checkCandidate) {
+      auto checked = value_->checkCandidate(candidate);
+      if (!checked) {
+        return std::unexpected(checked.error());
+      }
+      valid = *checked;
+    }
+    if (validator_) {
+      return validator_->check(candidate, identity);
+    }
+
+    return valid ? EditorValidationDecision::ACCEPT : EditorValidationDecision::REJECT;
   }
 
   void retire() noexcept override {

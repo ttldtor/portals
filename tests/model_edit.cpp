@@ -1516,4 +1516,29 @@ TEST_CASE("temporary cold declaration keeps the actual managed rebound write cap
   take(scene->close());
   CHECK_FALSE(name.set("closed"));
 }
+
+TEST_CASE("readonly user text and Enter keep the actual application running and allow focus traversal") {
+  ui::LineEditConfig config;
+  config.options.readOnly = true;
+  Fixture fixture(EditMode::EXPLICIT, std::move(config));
+  ReadyTerminal terminal;
+  ActiveSession cleanup{*fixture.app};
+
+  take(fixture.app->start(*fixture.scene, terminal));
+  cleanup.started = true;
+  CHECK_FALSE(take(fixture.app->step()).finished);
+  terminal.input = TextInputEvent{U'X'};
+  CHECK_FALSE(take(fixture.app->step()).finished);
+  CHECK(fixture.text() == "A");
+  terminal.input = KeyEvent{InputKey::ENTER};
+  CHECK_FALSE(take(fixture.app->step()).finished);
+  CHECK(fixture.text() == "A");
+  CHECK(take(fixture.scene->diagnostics()).errors.empty());
+  terminal.input = KeyEvent{InputKey::TAB};
+  CHECK_FALSE(take(fixture.app->step()).finished);
+  terminal.input = TextInputEvent{U'Y'};
+  CHECK_FALSE(take(fixture.app->step()).finished);
+  CHECK(take(fixture.countryEditor.text().get()) == "AAY");
+}
+
 } // namespace

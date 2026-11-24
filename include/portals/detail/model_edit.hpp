@@ -55,6 +55,11 @@ struct EditStorageAccess {
   }
 };
 
+// Preserve a typed scalar conversion error across the existing bool validation callback.
+struct EditTextFailure {
+  TreeError error;
+};
+
 /** Optional bridge; its owning closures retain the field session, never a scene. */
 struct EditTextBinding {
   EditTextDraft *displayed{};
@@ -63,12 +68,18 @@ struct EditTextBinding {
   void *preparedEntry{};
   LineEditStatus publicationStatus{LineEditStatus::FAILED};
   bool validatedByEditor{};
+  bool asynchronous{};
+  const void *definition{};
+  bool readOnly{};
   bool writable{};
   bool retentionRefused{};
   bool closed{};
   std::function<std::expected<std::shared_ptr<const FieldValidation>, TreeError>()> validation;
   std::function<std::expected<void, TreeError>(std::shared_ptr<const FieldValidation>)> displayValidation;
   std::function<std::expected<void, TreeError>()> preserveValidation;
+  std::function<std::expected<bool, TreeError>(std::string_view)> checkCandidate;
+  std::function<std::expected<bool, TreeError>(std::string_view)> validateBeforeParse;
+  std::function<std::expected<bool, TreeError>(std::string_view)> validateForCommit;
   std::function<std::expected<void, TreeError>(const LineEditOptions &)> initialize;
   std::function<std::expected<void, TreeError>()> prepare;
   std::function<std::expected<void, TreeError>(const NavigationPosition &, const std::shared_ptr<ManagedModelSource> &)>
