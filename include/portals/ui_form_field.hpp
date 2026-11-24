@@ -36,6 +36,9 @@ struct FormFieldConfig {
   FormFieldAppearance appearance{};    ///< Manual composition style/layout defaults; contains no validation policy.
   AsyncFieldValidator validateAsync{}; ///< Optional worker rule after synchronous checks; never called during paint.
   FieldValidationLimits validationLimits{}; ///< Independent positive worker request/result byte bounds.
+  /// @cond INTERNAL
+  std::function<Description<Label>(ControlStyle)> captionRecipe;
+  /// @endcond
 };
 
 namespace detail {

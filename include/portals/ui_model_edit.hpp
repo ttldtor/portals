@@ -10,6 +10,20 @@ namespace portals::ui {
 template <class Row> class EditSession;
 template <class Row, class Value> class EditField;
 
+/** @brief Owning scalar conversion used by the existing current-record text editor.
+ * @tparam Value Owning copyable field value. Callbacks run synchronously on the UI thread,
+ * must be short and non-reentrant, and must not retain the borrowed candidate/value.
+ * Formatting may allocate; parsing rejects the complete candidate with INVALID_ARGUMENT.
+ * Other errors retain their typed diagnostic. This is a scalar adapter, not a windowed text source.
+ */
+template <class Value> struct EditTextCodec {
+  /** @brief Keep owning callback transfers fallible before the checked mount boundary. */
+  ~EditTextCodec() = default;
+
+  std::function<std::expected<std::string, TreeError>(const Value &)> format; ///< Complete owning editor text.
+  std::function<std::expected<Value, TreeError>(std::string_view)> parse; ///< Complete typed candidate, or an error.
+};
+
 /** @brief Owning inspection of one exact retained target, independent of navigation. */
 template <class Value> struct EditFieldSnapshot {
   EditTarget target; ///< Exact resource, source incarnation, edit session, record and field qualification.
@@ -187,12 +201,30 @@ public:
       if (!(*entry)->endpoint->capabilities().writable) {
         return EditStatus::READ_ONLY;
       }
-      if constexpr (std::same_as<Value, std::string>) {
+      if (editorValidate_ && !(*editorValidate_)(value)) {
+        return EditStatus::INVALID;
+      }
+      if (definition->textCodec || std::same_as<Value, std::string>) {
+        std::optional<std::string> formattedValue;
+        const std::string *formatted = nullptr;
+        if constexpr (std::same_as<Value, std::string>) {
+          if (!definition->textCodec) {
+            formatted = &value;
+          }
+        }
+        if (!formatted) {
+          auto converted = (*entry)->format(value);
+          if (!converted) {
+            return std::unexpected(converted.error());
+          }
+          formattedValue.emplace(*converted);
+          formatted = &*formattedValue;
+        }
         for (const auto &weak : state->bindings) {
           auto binding = weak.lock();
           if (binding && !binding->closed && binding->displayedEntry == entry->get() &&
               detail::preferredEditBinding(state->bindings, binding)) {
-            auto result = binding->setText(value);
+            auto result = binding->setText(*formatted);
             if (!result) {
               return std::unexpected(result.error());
             }
@@ -203,10 +235,8 @@ public:
                                                                          : EditStatus::DIRTY;
           }
         }
-      }
-      if constexpr (std::same_as<Value, std::string>) {
         if ((*entry)->text) {
-          auto updated = (*entry)->setRetainedText(value);
+          auto updated = (*entry)->setRetainedText(value, *formatted);
           if (!updated) {
             return std::unexpected(updated.error());
           }
@@ -258,6 +288,33 @@ public:
     }
   }
 
+  /** @brief Copy retained editor bytes without parsing, refreshing or changing the displayed target.
+   * @param target Exact retained record/field destination, including an orphan after deletion or source closure.
+   * @return Owning complete text, including malformed input, or nullopt when this target has no text editor state.
+   * The call is UI-thread-affine and copies only on explicit inspection. Allocation failure returns NO_MEMORY;
+   * stale or foreign targets retain their checked identity error. The copy survives discard and navigation.
+   */
+  std::expected<std::optional<std::string>, TreeError> draftText(const EditTarget &target) const {
+    try {
+      auto entry = retained(target);
+      if (!entry) {
+        return std::unexpected(entry.error());
+      }
+      if (!(*entry)->text) {
+        return std::expected<std::optional<std::string>, TreeError>(std::in_place, std::nullopt);
+      }
+
+      return std::expected<std::optional<std::string>, TreeError>(std::in_place, std::in_place,
+                                                                  (*entry)->text->text.bytes());
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(TreeError::NO_MEMORY);
+    } catch (const std::length_error &) {
+      return std::unexpected(TreeError::NO_MEMORY);
+    } catch (...) {
+      return std::unexpected(TreeError::CALLBACK_FAILED);
+    }
+  }
+
   /** @param target Frozen destination, never resolved through nearest/current.
    * @return Checked removal of this retained draft and its history; other targets are unchanged.
    * A live admitted write returns WOULD_BLOCK until its final receipt, preserving serialization.
@@ -290,6 +347,7 @@ public:
   /// @cond INTERNAL
   std::shared_ptr<detail::EditState<Row>> state_;
   std::shared_ptr<detail::EditDefinition<Row, Value>> definition_;
+  std::shared_ptr<const std::function<bool(const Value &)>> editorValidate_;
   /// @endcond
 
 private:
@@ -316,9 +374,18 @@ private:
 
   static std::expected<EditFieldSnapshot<Value>, TreeError> inspect(detail::EditEntry<Row, Value> &entry) {
     auto draft = entry.draft;
-    if constexpr (std::same_as<Value, std::string>) {
-      if (entry.text && entry.text->dirty) {
-        draft = std::make_shared<const Value>(entry.text->text.bytes());
+    if (entry.text && entry.text->dirty) {
+      if constexpr (std::same_as<Value, std::string>) {
+        if (!entry.definition->textCodec) {
+          draft = std::make_shared<const Value>(entry.text->text.bytes());
+        }
+      }
+      if (entry.definition->textCodec) {
+        auto candidate = entry.parse(entry.text->text.bytes());
+        if (!candidate && candidate.error() != TreeError::INVALID_ARGUMENT) {
+          return std::unexpected(candidate.error());
+        }
+        draft = candidate ? std::make_shared<const Value>(*candidate) : nullptr;
       }
     }
     return EditFieldSnapshot<Value>{
@@ -472,6 +539,9 @@ inline std::expected<EditReceipt, TreeError> commitEditField(const EditCommandFi
   }
   if (field.binding->closed || field.binding->displayedEntry != field.entry.get()) {
     return EditReceipt{field.entry->target, EditStatus::CONFLICT};
+  }
+  if (!field.entry->hasDraft() && (field.binding->readOnly || !field.binding->writable)) {
+    return EditReceipt{field.entry->target, EditStatus::CLEAN};
   }
   auto completed = field.binding->complete(false);
   if (!completed) {
@@ -630,20 +700,21 @@ template <class Row> std::expected<void, TreeError> EditSession<Row>::cancelChec
 
 namespace detail {
 /// @cond INTERNAL
-template <class Row> struct EditTextMount {
-  EditField<Row, std::string> field;
+template <class Row, class Value> struct EditTextMount {
+  EditField<Row, Value> field;
   portals::detail::EditTextBinding *binding{};
   LineEditOptions options;
   std::unique_ptr<portals::detail::EditTextDraft> empty;
   std::shared_ptr<const PropertyChange<std::string>> emptySnapshot;
   std::shared_ptr<const FieldValidation> unchecked;
-  EditEntry<Row, std::string> *creditedEntry{};
+  EditEntry<Row, Value> *creditedEntry{};
   std::size_t preparedCharge{};
   std::size_t preparedTextCharge{};
   bool preparedRetention{};
 
   std::expected<void, TreeError> initialize(const LineEditOptions &value) {
     options = value;
+    binding->readOnly = options.readOnly;
     auto text = GraphemeText::from("", options.widthPolicy, options.limits);
     if (!text) {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
@@ -663,13 +734,22 @@ template <class Row> struct EditTextMount {
     return {};
   }
 
-  std::expected<void, TreeError> prepareText(const std::shared_ptr<EditEntry<Row, std::string>> &entry) {
+  std::expected<void, TreeError> prepareText(const std::shared_ptr<EditEntry<Row, Value>> &entry) {
     if (!entry->text) {
       if (field.state_->nextGeneration == std::numeric_limits<std::uint64_t>::max()) {
         return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
       }
-      auto text =
-        GraphemeText::from(entry->draft ? *entry->draft : *entry->accepted, options.widthPolicy, options.limits);
+      std::optional<std::string> formatted;
+      std::string_view initial = entry->textSnapshot->value;
+      if (entry->draft) {
+        auto candidate = entry->format(*entry->draft);
+        if (!candidate) {
+          return std::unexpected(candidate.error());
+        }
+        formatted.emplace(*candidate);
+        initial = *formatted;
+      }
+      auto text = GraphemeText::from(initial, options.widthPolicy, options.limits);
       if (!text) {
         return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
@@ -773,7 +853,7 @@ template <class Row> struct EditTextMount {
   }
 
   std::expected<std::shared_ptr<const PropertyChange<std::string>>, TreeError> snapshot() {
-    auto *entry = static_cast<EditEntry<Row, std::string> *>(binding->displayedEntry);
+    auto *entry = static_cast<EditEntry<Row, Value> *>(binding->displayedEntry);
     if (!entry) {
       return emptySnapshot;
     }
@@ -789,7 +869,7 @@ template <class Row> struct EditTextMount {
 
   std::expected<std::shared_ptr<const PropertyChange<std::string>>, TreeError> cancelSnapshot() {
     binding->retentionRefused = false;
-    auto *entry = static_cast<EditEntry<Row, std::string> *>(binding->displayedEntry);
+    auto *entry = static_cast<EditEntry<Row, Value> *>(binding->displayedEntry);
     if (!entry) {
       return emptySnapshot;
     }
@@ -807,13 +887,30 @@ template <class Row> struct EditTextMount {
   }
 
   std::expected<std::optional<PropertyUpdate<std::string>>, TreeError> publish(const std::string &candidate) {
-    auto *entry = static_cast<EditEntry<Row, std::string> *>(binding->displayedEntry);
+    auto *entry = static_cast<EditEntry<Row, Value> *>(binding->displayedEntry);
     if (!entry || field.state_->endpointClosed) {
       return std::unexpected(TreeError::CLOSED);
     }
     binding->publicationStatus = LineEditStatus::FAILED;
     binding->retentionRefused = false;
-    auto charge = entry->retainedCharge(&candidate, entry->textCharge, true);
+    std::optional<Value> parsed;
+    const Value *typedCandidate = nullptr;
+    if constexpr (std::same_as<Value, std::string>) {
+      if (!field.definition_->textCodec) {
+        typedCandidate = &candidate;
+      }
+    }
+    if (!typedCandidate) {
+      auto converted = entry->parse(candidate);
+      if (!converted) {
+        binding->publicationStatus =
+          converted.error() == TreeError::INVALID_ARGUMENT ? LineEditStatus::VALIDATION_FAILED : LineEditStatus::FAILED;
+        return std::unexpected(converted.error());
+      }
+      parsed.emplace(*converted);
+      typedCandidate = &*parsed;
+    }
+    auto charge = entry->retainedCharge(typedCandidate, entry->textCharge, true);
     if (!charge) {
       binding->retentionRefused = charge.error() == TreeError::NODE_LIMIT;
       return std::unexpected(charge.error());
@@ -823,7 +920,7 @@ template <class Row> struct EditTextMount {
       binding->retentionRefused = checked.error() == TreeError::NODE_LIMIT;
       return std::unexpected(checked.error());
     }
-    auto retained = std::make_shared<const std::string>(candidate);
+    auto retained = std::make_shared<const Value>(*typedCandidate);
     auto snapshot = std::make_shared<PropertyChange<std::string>>(PropertyChange<std::string>{candidate, 0});
     const auto snapshotBytes = sizeof(PropertyChange<std::string>) + snapshot->value.capacity() + 1;
     charge = entry->retainedCharge(retained.get(), entry->textCharge, false, {}, nullptr,
@@ -866,7 +963,7 @@ template <class Row> struct EditTextMount {
   }
 
   std::expected<void, TreeError> preserveValidation() {
-    auto *entry = static_cast<EditEntry<Row, std::string> *>(binding->displayedEntry);
+    auto *entry = static_cast<EditEntry<Row, Value> *>(binding->displayedEntry);
     if (!entry || !binding->validation) {
       return {};
     }
@@ -899,7 +996,7 @@ template <class Row> struct EditTextMount {
   }
 
   std::expected<void, TreeError> admit(std::size_t textBytes, bool retain) {
-    auto *entry = static_cast<EditEntry<Row, std::string> *>(binding->displayedEntry);
+    auto *entry = static_cast<EditEntry<Row, Value> *>(binding->displayedEntry);
     if (!entry) {
       return std::unexpected(TreeError::WOULD_BLOCK);
     }
@@ -927,17 +1024,42 @@ template <class Row> struct EditTextMount {
     creditedEntry->textCharge = preparedTextCharge;
     if (preparedRetention) {
       creditedEntry->status = EditStatus::DIRTY;
+      creditedEntry->requiresAsyncValidation = binding->asynchronous;
     }
     creditedEntry = nullptr;
   }
 };
 
-template <class Row>
-std::shared_ptr<portals::detail::EditTextBinding> editTextBinding(EditField<Row, std::string> field) {
+template <class Row, class Value>
+std::shared_ptr<portals::detail::EditTextBinding> editTextBinding(EditField<Row, Value> field,
+                                                                  bool validateLocal = true) {
   auto binding = std::make_shared<portals::detail::EditTextBinding>();
-  auto mount = std::make_shared<EditTextMount<Row>>();
+  auto mount = std::make_shared<EditTextMount<Row, Value>>();
   mount->field = field;
   mount->binding = binding.get();
+  binding->definition = field.definition_.get();
+  if (const auto codec = field.definition_->textCodec) {
+    binding->checkCandidate = [codec](std::string_view candidate) -> std::expected<bool, TreeError> {
+      auto parsed = codec->parse(candidate);
+      if (!parsed && parsed.error() != TreeError::INVALID_ARGUMENT) {
+        return std::unexpected(parsed.error());
+      }
+
+      return static_cast<bool>(parsed);
+    };
+  }
+  if (validateLocal && field.editorValidate_) {
+    binding->checkCandidate = [field](std::string_view candidate) -> std::expected<bool, TreeError> {
+      auto parsed = parseEditText(field.definition_->textCodec, candidate);
+      if (!parsed) {
+        return parsed.error() == TreeError::INVALID_ARGUMENT ? std::expected<bool, TreeError>(false)
+                                                             : std::unexpected(parsed.error());
+      }
+
+      return (*field.editorValidate_)(*parsed);
+    };
+    binding->validateForCommit = binding->checkCandidate;
+  }
   binding->initialize = [mount](const LineEditOptions &options) {
     return mount->initialize(options);
   };
@@ -987,8 +1109,8 @@ std::shared_ptr<portals::detail::EditTextBinding> editTextBinding(EditField<Row,
 
 namespace detail {
 /// @cond INTERNAL
-template <class Row>
-Description<LineEdit> editLineEditRecipe(EditField<Row, std::string> field,
+template <class Row, class Value>
+Description<LineEdit> editLineEditRecipe(EditField<Row, Value> field,
                                          std::shared_ptr<portals::detail::EditTextBinding> source,
                                          LineEditConfig config) {
   if (!field.state_ || !field.definition_) {
@@ -1001,15 +1123,16 @@ Description<LineEdit> editLineEditRecipe(EditField<Row, std::string> field,
     detail::Access::cold<LineEdit>([field, source, options = config.options, policy = config.policy](
                                      ManagedScene &scene, Node<Widget> parent,
                                      detail::MountContext &context) -> std::expected<Node<LineEdit>, ManagedError> {
-      auto resolved = field.state_->resolve(scene, context);
-      if (!resolved) {
-        return std::unexpected(detail::error(parent, resolved.error()));
-      }
       const ControlSettings empty;
       const auto &settings = context.controlSettings ? *context.controlSettings : empty;
       auto effective = detail::controlLineEditOptions(settings, options, scene.widthPolicy(), {}, parent);
       if (!effective) {
         return std::unexpected(effective.error());
+      }
+      field.definition_->maxTextBytes = effective->limits.max_input_bytes;
+      auto resolved = field.state_->resolve(scene, context);
+      if (!resolved) {
+        return std::unexpected(detail::error(parent, resolved.error()));
       }
       effective->editMode = field.state_->options.mode;
       auto placeholder = detail::lineEditPlaceholder(*effective, parent);
@@ -1020,7 +1143,7 @@ Description<LineEdit> editLineEditRecipe(EditField<Row, std::string> field,
     });
   config.result = [source,
                    result = std::move(config.result)](LineEditResult receipt) -> std::expected<void, TreeError> {
-    auto *entry = static_cast<EditEntry<Row, std::string> *>(source->displayedEntry);
+    auto *entry = static_cast<EditEntry<Row, Value> *>(source->displayedEntry);
     if (receipt.status == LineEditStatus::CANCELLED && entry && !entry->discarded && !entry->cancelReadPinned) {
       // The existing editor already restored its owning baseline and reset history.
       // Keep admitted backend work; canceling input never withdraws a submitted request.
@@ -1044,8 +1167,8 @@ Description<LineEdit> editLineEditRecipe(EditField<Row, std::string> field,
  * @return Existing LineEdit runtime with retained target-local draft and history.
  */
 template <class Row> Description<LineEdit> lineEdit(EditField<Row, std::string> field, LineEditConfig config = {}) {
-  if (!field.state_ || !field.definition_) {
-    return detail::editLineEditRecipe(std::move(field), {}, std::move(config));
+  if (!field.state_ || !field.definition_ || field.definition_->textCodec) {
+    return detail::editLineEditRecipe(EditField<Row, std::string>{}, {}, std::move(config));
   }
   auto source = detail::editTextBinding(field);
   return detail::editLineEditRecipe(std::move(field), std::move(source), std::move(config));
@@ -1059,18 +1182,36 @@ Description<LineEdit> lineEdit(Ref<LineEdit> reference, EditField<Row, std::stri
   return lineEdit(std::move(field), std::move(config)).reference(std::move(reference));
 }
 
-/** @param caption Standard FormField caption. @param field Current-record string field.
- * @param config Existing required/sync/async validation and editor settings.
- * @return Existing FormField composition over the real session-bound LineEdit.
- */
-template <class Row>
-Description<FormField> formField(std::string_view caption, EditField<Row, std::string> field,
-                                 FormFieldConfig config = {}) {
-  if (!field.state_ || !field.definition_) {
-    return detail::Access::formField(std::string(caption), detail::Access::erase(lineEdit(field)), {});
+namespace detail {
+/// @cond INTERNAL
+template <class Row, class Value>
+bool configureEditTextCodec(const EditField<Row, Value> &field,
+                            const std::shared_ptr<const EditTextCodec<Value>> &codec) {
+  if (!field.state_ || !field.definition_ || !codec || !codec->format || !codec->parse ||
+      field.state_->ownerThread != std::this_thread::get_id()) {
+    return false;
   }
-  auto source = detail::editTextBinding(field);
-  field.definition_->asynchronous = static_cast<bool>(config.validateAsync);
+  if (field.definition_->textCodec && field.definition_->textCodec != codec) {
+    return false;
+  }
+  // A text representation is part of the retained field definition, not a mutable view setting.
+  // Never reinterpret an already admitted draft/history with a different codec.
+  if (!field.definition_->textCodec && field.definition_->active) {
+    return false;
+  }
+  field.definition_->textCodec = codec;
+  return true;
+}
+
+template <class Row, class Value>
+Description<FormField> boundFormField(std::string_view caption, EditField<Row, Value> field,
+                                      FormFieldConfig config = {}) {
+  if (!field.state_ || !field.definition_) {
+    return detail::Access::formField(std::string(caption),
+                                     detail::Access::erase(detail::editLineEditRecipe(field, {}, {})), {});
+  }
+  auto source = detail::editTextBinding(field, false);
+  source->asynchronous = static_cast<bool>(config.validateAsync);
   source->validatedByEditor = true;
   const auto required = config.required;
   const auto requiredMessage = config.requiredMessage;
@@ -1086,12 +1227,38 @@ Description<FormField> formField(std::string_view caption, EditField<Row, std::s
       }
       return result;
     });
-  config.validate = [semantic](std::string_view candidate) {
-    return (*semantic)(candidate);
-  };
   config.editor.validate = {};
-  field.definition_->validate = [semantic](const std::string &candidate) {
+  const auto definition = field.definition_;
+  const auto codec = definition->textCodec;
+  auto typedPolicy = std::make_shared<std::function<std::expected<bool, TreeError>(std::string_view)>>(
+    [codec, definition,
+     localRule = field.editorValidate_](std::string_view candidate) -> std::expected<bool, TreeError> {
+      auto parsed = parseEditText(codec, candidate);
+      if (!parsed) {
+        return parsed.error() == TreeError::INVALID_ARGUMENT ? std::expected<bool, TreeError>(false)
+                                                             : std::unexpected(parsed.error());
+      }
+      const auto typedRule = definition->validate;
+
+      return (!typedRule || typedRule(*parsed)) && (!localRule || (*localRule)(*parsed));
+    });
+  config.validate = [semantic, typedPolicy](std::string_view candidate) {
+    auto result = (*semantic)(candidate);
+    if (result.status != FieldStatus::VALID) {
+      return result;
+    }
+    auto typed = (*typedPolicy)(candidate);
+    if (!typed) {
+      throw portals::detail::EditTextFailure{typed.error()};
+    }
+
+    return *typed ? result : FieldValidation::invalid("Invalid value");
+  };
+  source->validateBeforeParse = [semantic](std::string_view candidate) -> std::expected<bool, TreeError> {
     return (*semantic)(candidate).status == FieldStatus::VALID;
+  };
+  source->validateForCommit = [typedPolicy](std::string_view candidate) {
+    return (*typedPolicy)(candidate);
   };
   auto canceledPresentation = std::make_shared<const FieldValidation>();
   config.editor.result = [source, canceledPresentation, result = std::move(config.editor.result)](
@@ -1118,5 +1285,57 @@ Description<FormField> formField(std::string_view caption, EditField<Row, std::s
     .setup([source](ManagedScene &scene, Node<FormField> node) {
       return detail::Access::connectEditValidation(scene, node, source);
     });
+}
+
+/// @endcond
+} // namespace detail
+
+/** @tparam Row Owning current-record type. @tparam Value Owning copyable scalar field type.
+ * @param field Exact typed field sharing the session's targets, drafts and history.
+ * @param codec Owning complete scalar conversion; retained by the field definition.
+ * @param config Existing editor appearance, limits and publication validation.
+ * @return Existing LineEdit recipe; invalid/mismatched codecs fail mount with INVALID_ARGUMENT.
+ * Reuse the same codec owner when mounting the same field again. Codecs cannot replace admitted history.
+ */
+template <class Row, class Value>
+Description<LineEdit> lineEdit(EditField<Row, Value> field, std::shared_ptr<const EditTextCodec<Value>> codec,
+                               LineEditConfig config = {}) {
+  if (!detail::configureEditTextCodec(field, codec)) {
+    return detail::editLineEditRecipe(EditField<Row, Value>{}, {}, std::move(config));
+  }
+  auto source = detail::editTextBinding(field);
+
+  return detail::editLineEditRecipe(std::move(field), std::move(source), std::move(config));
+}
+
+/** @tparam Row Owning current-record type. @tparam Value Owning scalar selected by the field.
+ * @param caption Literal UTF-8 caption, copied now. @param field Exact typed field.
+ * @param codec Owning scalar conversion shared with any other editor for this field.
+ * @param config Existing required/synchronous/asynchronous validation and native editor settings.
+ * @return Real FormField/LineEdit composition preserving session modes and exact-target replies.
+ */
+template <class Row, class Value>
+Description<FormField> formField(std::string_view caption, EditField<Row, Value> field,
+                                 std::shared_ptr<const EditTextCodec<Value>> codec, FormFieldConfig config = {}) {
+  if (!detail::configureEditTextCodec(field, codec)) {
+    field = {};
+  }
+
+  return detail::boundFormField(caption, std::move(field), std::move(config));
+}
+
+/** @tparam Row Owning current-record type.
+ * @param caption Standard literal FormField caption. @param field Current-record string field.
+ * @param config Existing required/sync/async validation and editor settings.
+ * @return Existing FormField composition over the real session-bound LineEdit.
+ */
+template <class Row>
+Description<FormField> formField(std::string_view caption, EditField<Row, std::string> field,
+                                 FormFieldConfig config = {}) {
+  if (field.definition_ && field.definition_->textCodec) {
+    field = {};
+  }
+
+  return detail::boundFormField(caption, std::move(field), std::move(config));
 }
 } // namespace portals::ui

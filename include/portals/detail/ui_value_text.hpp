@@ -363,11 +363,11 @@ struct ValueTextAccess {
       return runtime->render(false);
     });
     if (!initial) {
-      auto failure = ManagedError{ManagedPhase::BIND, node.id(), initial.error(), {}, {}};
+      auto initialFailure = ManagedError{ManagedPhase::BIND, node.id(), initial.error(), {}, {}};
 
-      failure.resource = runtime->resourceFailure;
+      initialFailure.resource = runtime->resourceFailure;
 
-      return std::unexpected(failure);
+      return std::unexpected(initialFailure);
     }
 
     auto output = Access::valueTextState(scene, **initial, graph);
@@ -425,11 +425,13 @@ struct ValueTextAccess {
     auto arguments =
       std::make_shared<const std::tuple<OwnedTextArgument<Args>...>>(retainedTextArgument(std::forward<Args>(args))...);
     bool hasResolver = true;
-    if constexpr (requires { static_cast<bool>(resolver); }) {
-      hasResolver = static_cast<bool>(resolver);
+    if constexpr (std::is_pointer_v<Resolver>) {
+      hasResolver = resolver != nullptr;
+    } else if constexpr (requires { resolver.operator bool(); }) {
+      hasResolver = resolver.operator bool();
     }
     auto adapted = [resolver = std::move(resolver)](std::string_view key,
-                                                    const TextArgumentValue<Args> &...values) mutable {
+                                                    [[maybe_unused]] const TextArgumentValue<Args> &...values) mutable {
       if constexpr (ValueResourceResolver<Resolver, TextArgumentValue<Args>...>) {
         return std::invoke(resolver, key, values...);
       } else {
@@ -658,6 +660,7 @@ template <class Value>
 
   return std::move(*this);
 }
+
 /// @endcond
 
 } // namespace portals::ui

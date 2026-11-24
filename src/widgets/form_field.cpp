@@ -294,6 +294,8 @@ std::expected<bool, ManagedError> detail::Access::validateField(ManagedScene &sc
     auto updated = setFormFieldValidation(scene.app_.tree(), record->field, std::move(value));
 
     return updated ? std::expected<bool, ManagedError>(valid) : std::unexpected(fieldError(node, updated.error()));
+  } catch (const portals::detail::EditTextFailure &failure) {
+    return std::unexpected(fieldError(node, failure.error));
   } catch (const std::bad_alloc &) {
     return std::unexpected(fieldError(node, TreeError::NO_MEMORY));
   } catch (...) {
@@ -305,13 +307,14 @@ Description<FormField> detail::Access::formFieldComposition(
   std::string caption,
   portals::detail::MoveOnlyFunction<std::expected<Description<Widget>, ManagedError>(const ControlSettings &)> editor,
   FormFieldOptions options, std::shared_ptr<RecipeLayout> layout,
-  std::shared_ptr<std::weak_ptr<portals::detail::FormFieldRecord>> bridge) {
+  std::shared_ptr<std::weak_ptr<portals::detail::FormFieldRecord>> bridge,
+  std::function<Description<Label>(ControlStyle)> captionRecipe) {
   ControlSettings arguments;
 
   arguments.spinnerLabel = TextValue(caption);
 
   auto recipe = cold<FormField>([caption = std::move(caption), editor = std::move(editor), options = std::move(options),
-                                 bridge = std::move(bridge)](
+                                 bridge = std::move(bridge), captionRecipe = std::move(captionRecipe)](
                                   ManagedScene &scene, Node<Widget> parent,
                                   MountContext &context) mutable -> std::expected<Node<FormField>, ManagedError> {
     const ControlSettings settings = context.controlSettings ? *context.controlSettings : ControlSettings{};
@@ -380,12 +383,31 @@ Description<FormField> detail::Access::formFieldComposition(
       return std::unexpected(scope.error());
     }
 
-    if (options.required) {
+    Node<Widget> heading = *field;
+    Node<Label> requiredMarker;
+    if (captionRecipe && options.required) {
+      auto row = mount(hbox().classes("form-field-heading"), scene, *field, context);
+      if (!row) {
+        return std::unexpected(row.error());
+      }
+      heading = *row;
+    } else if (options.required) {
       caption += " (required)";
     }
 
-    auto labelNode =
-      mount(label(caption, options.appearance.labelStyle).classes("form-field-label"), scene, *field, context);
+    auto labelNode = mount(
+      (captionRecipe ? captionRecipe(options.appearance.labelStyle) : label(caption, options.appearance.labelStyle))
+        .classes("form-field-label"),
+      scene, heading, context);
+    if (captionRecipe && options.required && labelNode) {
+      auto marker =
+        mount(label(" (required)", options.appearance.labelStyle).classes("form-field-label form-field-required"),
+              scene, heading, context);
+      if (!marker) {
+        return std::unexpected(marker.error());
+      }
+      requiredMarker = *marker;
+    }
 
     if (!labelNode) {
       return std::unexpected(labelNode.error());
@@ -422,40 +444,58 @@ Description<FormField> detail::Access::formFieldComposition(
 
     record->message = *message;
 
-    auto labelEntry = scene.bindingEntry(*labelNode);
+    auto connectLabel = [&](Node<Label> label) -> std::expected<void, ManagedError> {
+      auto labelEntry = scene.bindingEntry(label);
 
-    if (!labelEntry) {
-      return std::unexpected(labelEntry.error());
-    }
+      if (!labelEntry) {
+        return std::unexpected(labelEntry.error());
+      }
 
-    auto linked = scene.app_.router().bind(
-      *labelNode,
-      [&scene, field = *field, alive = lifetime(scene)](Label &, const RoutedEvent &event) {
-        const auto *mouse = std::get_if<MouseInputEvent>(&event);
+      auto linked = scene.app_.router().bind(
+        label,
+        [&scene, field = *field, alive = lifetime(scene)](Label &, const RoutedEvent &event) {
+          const auto *mouse = std::get_if<MouseInputEvent>(&event);
 
-        if (!mouse || mouse->button != MouseButton::LEFT || mouse->action != MouseAction::PRESS) {
-          return EventReply::IGNORED;
-        }
+          if (!mouse || mouse->button != MouseButton::LEFT || mouse->action != MouseAction::PRESS) {
+            return EventReply::IGNORED;
+          }
 
-        if (alive.expired()) {
+          if (alive.expired()) {
+            return EventReply::HANDLED;
+          }
+
+          auto focused = scene.focus(field);
+
+          if (!focused) {
+            scene.remember(focused.error());
+          }
+
           return EventReply::HANDLED;
-        }
+        },
+        false);
 
-        auto focused = scene.focus(field);
+      if (!linked) {
+        return std::unexpected(fieldError(label, linked.error()));
+      }
 
-        if (!focused) {
-          scene.remember(focused.error());
-        }
+      (*labelEntry)->binding.emplace<ActionBinding>(std::move(*linked));
 
-        return EventReply::HANDLED;
-      },
-      false);
+      return {};
+    };
 
-    if (!linked) {
-      return std::unexpected(fieldError(*labelNode, linked.error()));
+    auto captionLinked = connectLabel(*labelNode);
+
+    if (!captionLinked) {
+      return std::unexpected(captionLinked.error());
     }
 
-    (*labelEntry)->binding.emplace<ActionBinding>(std::move(*linked));
+    if (requiredMarker != Node<Label>{}) {
+      auto markerLinked = connectLabel(requiredMarker);
+
+      if (!markerLinked) {
+        return std::unexpected(markerLinked.error());
+      }
+    }
 
     return field;
   });
@@ -465,7 +505,8 @@ Description<FormField> detail::Access::formFieldComposition(
 }
 
 Description<FormField> detail::Access::formField(std::string caption, Description<Widget> editor,
-                                                 FormFieldOptions options) {
+                                                 FormFieldOptions options,
+                                                 std::function<Description<Label>(ControlStyle)> captionRecipe) {
   auto layout = captureLayouts(editor);
   auto factory = [editor = std::move(editor)](
                    const ControlSettings &settings) mutable -> std::expected<Description<Widget>, ManagedError> {
@@ -486,7 +527,8 @@ Description<FormField> detail::Access::formField(std::string caption, Descriptio
     return std::move(editor);
   };
 
-  return formFieldComposition(std::move(caption), std::move(factory), std::move(options), std::move(layout));
+  return formFieldComposition(std::move(caption), std::move(factory), std::move(options), std::move(layout), {},
+                              std::move(captionRecipe));
 }
 
 Description<FormField> detail::Access::formField(std::string caption, std::string initial, FormFieldConfig config) {
@@ -580,7 +622,8 @@ detail::Access::formField(std::string caption,
 
     return editor(std::move(config), std::move(patch));
   };
-  auto recipe = formFieldComposition(std::move(caption), std::move(factory), std::move(options), {}, bridge);
+  auto recipe = formFieldComposition(std::move(caption), std::move(factory), std::move(options), {}, bridge,
+                                     std::move(config.captionRecipe));
 
   // Parent setup runs after the composition has mounted its real children, before Ref publication.
   return std::move(recipe).setup([bridge, rule = std::move(rule), async = std::move(async),

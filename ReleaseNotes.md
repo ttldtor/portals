@@ -7,6 +7,16 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Declarative current-record forms map typed fields to the existing FormField/LineEdit
+  controls, with required/typed validation, readonly fields and live localized captions.
+  Ordinary child recipes can add a Save/Cancel row directly. The optional
+  `ui_model_form.hpp` header provides bounded string and numeric defaults, explicit
+  owning codecs and custom editor factories. Large/windowed text requires an explicit
+  capability-aware editor/source. Invalid typed drafts retain their exact-target text
+  and history; `draftText(target)` provides explicit owning recovery after deletion.
+  Save retains per-field pending/partial results and adds no multi-field atomicity.
+  FormFieldConfig has changed layout; rebuild consumers with matching headers and library.
+
 - Current-record edit sessions retain drafts and editor history by exact record and
   field. They reuse the existing editing modes and distinguish pending submission
   from source acceptance. A complete declarative city-directory guide demonstrates

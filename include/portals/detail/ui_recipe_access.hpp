@@ -481,7 +481,8 @@ struct Access {
     std::string caption,
     portals::detail::MoveOnlyFunction<std::expected<Description<Widget>, ManagedError>(const ControlSettings &)> editor,
     FormFieldOptions options, std::shared_ptr<RecipeLayout> layout = {},
-    std::shared_ptr<std::weak_ptr<portals::detail::FormFieldRecord>> bridge = {});
+    std::shared_ptr<std::weak_ptr<portals::detail::FormFieldRecord>> bridge = {},
+    std::function<Description<Label>(ControlStyle)> captionRecipe = {});
   static std::expected<void, ManagedError> connectEditValidation(ManagedScene &, Node<FormField>,
                                                                  std::shared_ptr<portals::detail::EditTextBinding>);
   static std::expected<Subscription, TreeError> observeEditNavigation(ManagedNavigation, Node<LineEdit>,
@@ -492,7 +493,8 @@ struct Access {
                                           std::function<Description<Widget>(LineEditConfig, ControlSettings)> editor,
                                           FormFieldConfig config);
   static Description<FormField> formField(std::string caption, std::string initial, FormFieldConfig config);
-  static Description<FormField> formField(std::string caption, Description<Widget> editor, FormFieldOptions options);
+  static Description<FormField> formField(std::string caption, Description<Widget> editor, FormFieldOptions options,
+                                          std::function<Description<Label>(ControlStyle)> captionRecipe = {});
   static std::expected<std::shared_ptr<portals::detail::FormFieldRecord>, ManagedError> fieldRecord(ManagedScene &scene,
                                                                                                     Node<Widget> node);
   static std::expected<FieldValidation, ManagedError> fieldValidation(ManagedScene &scene, Node<Widget> node);

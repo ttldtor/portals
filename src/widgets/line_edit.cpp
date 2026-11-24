@@ -847,8 +847,18 @@ struct LineEditBinding::State {
     // both node and model before committing; never borrow widget text across user code.
     std::string candidate(edit.editText().bytes());
 
-    if (validate && !validate(candidate)) {
-      return {LineEditStatus::VALIDATION_FAILED};
+    if (validate) {
+      bool valid{};
+
+      try {
+        valid = validate(candidate);
+      } catch (const detail::EditTextFailure &failure) {
+        return validationGateFailed(failure.error);
+      }
+
+      if (!valid) {
+        return {LineEditStatus::VALIDATION_FAILED};
+      }
     }
 
     auto allowed = alive();
@@ -1098,7 +1108,8 @@ struct LineEditBinding::State {
     }
 
     if (const auto *action = std::get_if<ActionEvent>(&event)) {
-      return action->action == Action::ERASE_BACKWARD || action->action == Action::ERASE_FORWARD;
+      return action->action == Action::ERASE_BACKWARD || action->action == Action::ERASE_FORWARD ||
+             action->action == Action::ACTIVATE;
     }
 
     const auto scalar = shortcutCharacter(std::get_if<KeyEvent>(&event));
