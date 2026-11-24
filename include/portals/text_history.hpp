@@ -6,6 +6,7 @@
 #include <portals/text.hpp>
 
 #include <cstddef>
+#include <cstdint>
 #include <expected>
 #include <memory>
 #include <string>
@@ -29,6 +30,8 @@ struct TextHistoryOptions {
   bool groupTyping{true};
   /** @brief Combine adjacent deletions of the same direction until a boundary. */
   bool groupDeletion{true};
+  /** @brief Retain opaque content-state tokens for model anchors; default history has no per-entry token storage. */
+  bool trackContentStates{false};
 };
 
 /** @brief Semantic editing categories; only the first three can form groups. */
@@ -115,6 +118,10 @@ public:
    * @return Byte offset of the fixed selection end, or zero for an empty handle.
    */
   [[nodiscard]] std::size_t anchor() const noexcept;
+  /** @return Opaque owner-local content state after publication; zero for an empty handle.
+   * Undo/Redo restore earlier tokens; tokens identify content states, not resources.
+   */
+  [[nodiscard]] std::uint64_t contentState() const noexcept;
   /** @brief Borrow the already segmented target before publication.
    * @return Target text, or nullptr for an empty handle or after takeText; expires on transfer/destruction.
    */
@@ -139,7 +146,8 @@ private:
  * Values contain no editor, model, widget, callback or external buffer references.
  * The caller synchronizes operations; editor owners normally use their UI thread.
  * All retained undo and redo groups share one count and logical memory budget.
- * Memory counts sizeof(entry) and both string capacities. Container storage,
+ * Memory counts sizeof(entry), both string capacities, and an optional pair of
+ * content-state tokens per group when tracking is enabled. Container storage,
  * shared ownership control blocks, allocator bookkeeping, the current editor
  * text and temporary staging allocations are excluded; this is not an RSS cap.
  * Staging copies only shared entry handles, never all retained strings.
@@ -147,6 +155,10 @@ private:
  */
 class TextHistory {
 public:
+  /** @return Current opaque owner-local content state; initially one when enabled, otherwise zero.
+   * Tokens remain distinct after branching and baseline reset. This is not a save authority.
+   */
+  [[nodiscard]] std::uint64_t contentState() const noexcept;
   /** @brief Create an empty history under immutable text validation settings.
    * @param options Retention and grouping configuration, captured by value.
    * @param policy Width policy applied to every prepared snapshot.

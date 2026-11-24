@@ -50,6 +50,21 @@ template <std::equality_comparable T> struct DeferredSourceDeclaration : ScalarM
 };
 
 struct ValueModelAccess {
+  template <std::equality_comparable T>
+  static Model<T> deferred(typename DeferredSourceDeclaration<T>::Factory factory) {
+    try {
+      Model<T> result;
+
+      result.data_ = std::make_shared<DeferredSourceDeclaration<T>>(std::move(factory));
+
+      return result;
+    } catch (const std::bad_alloc &) {
+      return ModelAccess::failed<T>(TreeError::NO_MEMORY);
+    } catch (...) {
+      return ModelAccess::failed<T>(TreeError::CALLBACK_FAILED);
+    }
+  }
+
   template <class T> static std::shared_ptr<void> identity(const Model<T> &model) {
     return ModelAccess::identity(model);
   }

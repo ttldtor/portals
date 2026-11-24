@@ -7,6 +7,16 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Text bookmarks follow edits with insertion affinity and Unicode grapheme-boundary
+  qualification. An optional finite document session retains selection, Undo/Redo,
+  logical identity and savepoints independently of its views and physical save target.
+  Save acknowledgements preserve newer dirty edits; external replacement requires
+  explicit conflict resolution. `ui_text_document.hpp` provides checked commands
+  and read-only label bindings, with 4096-byte/grapheme UI defaults. The metadata-only
+  change map does not require loading a provider's complete text. Windowed editing
+  and file I/O remain provider/application responsibilities. Content-state history
+  tracking is opt-in; rebuild consumers for the changed TextHistoryOptions layout.
+
 - Declarative current-record forms map typed fields to the existing FormField/LineEdit
   controls, with required/typed validation, readonly fields and live localized captions.
   Ordinary child recipes can add a Save/Cancel row directly. The optional

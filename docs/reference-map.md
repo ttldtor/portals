@@ -100,3 +100,5 @@ for source revisions and update rules.
 ## Experimental browser host
 
 [WASM Gallery and Level](wasm-gallery.md): build, host tools, input, lifecycle and device qualification limits.
+
+- [Text anchors, document selection and savepoints](text-anchors.md).
