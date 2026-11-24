@@ -100,9 +100,9 @@ std::expected<Value, TreeError> parseEditText(const std::shared_ptr<const EditTe
   }
   if constexpr (std::same_as<Value, std::string>) {
     return std::expected<Value, TreeError>(std::in_place, candidate);
+  } else {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
-
-  return std::unexpected(TreeError::INVALID_ARGUMENT);
 }
 
 template <class Row, class Value> class OwnedFieldEndpoint final : public EditEndpoint<Value> {
@@ -406,8 +406,9 @@ template <class Row, class Value> struct EditEntry final : EditEntryBase {
     }
     if constexpr (std::same_as<Value, std::string>) {
       return std::expected<std::string, TreeError>(std::in_place, value);
+    } else {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
-    return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
   std::expected<Value, TreeError> parse(std::string_view value) const {
