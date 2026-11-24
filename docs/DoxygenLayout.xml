@@ -88,6 +88,7 @@
         <tab type="user" title="Properties" url="@ref docs/property.md" />
         <tab type="user" title="Value models and captions" url="@ref docs/value-models.md" />
         <tab type="user" title="Immutable models" url="@ref docs/model.md" />
+        <tab type="user" title="Text anchors" url="@ref docs/text-anchors.md" />
         <tab type="user" title="Model bookmarks" url="@ref docs/model-positions.md" />
         <tab type="user" title="Shared model navigation" url="@ref docs/model-navigation.md" />
         <tab type="user" title="Switch models" url="@ref docs/view-models.md" />
@@ -251,6 +252,7 @@
       <tab type="user" title="Фокус" url="@ref docs/ru/focus.md" />
       <tab type="user" title="Модели" url="@ref docs/ru/model.md" />
       <tab type="user" title="Модели значений и подписи" url="@ref docs/ru/value-models.md" />
+      <tab type="user" title="Текстовые якоря" url="@ref docs/ru/text-anchors.md" />
       <tab type="user" title="Закладки модели" url="@ref docs/ru/model-positions.md" />
       <tab type="user" title="Общая навигация модели" url="@ref docs/ru/model-navigation.md" />
       <tab type="user" title="Смена модели" url="@ref docs/ru/view-models.md" />

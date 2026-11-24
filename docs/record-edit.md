@@ -104,3 +104,5 @@ For a retained text editor, `field.draftText(originalTarget)` copies its exact
 owning bytes without parsing or source I/O. This permits explicit recovery of a
 malformed typed draft after its record was removed. It returns `nullopt` for a
 target without text state and preserves checked affinity/liveness errors.
+
+For text-document selection, bookmarks and savepoints, see [text anchors](text-anchors.md).
