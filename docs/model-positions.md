@@ -94,3 +94,5 @@ foundation.
 For shared current and reading positions, see [model navigation](model-navigation.md).
 
 For finite text sessions and provider-level text change proofs, see [text anchors](text-anchors.md).
+
+For optional portable metadata export/import, see [navigation checkpoints](navigation-checkpoint.md).

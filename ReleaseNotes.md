@@ -5,6 +5,14 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ## Unreleased
 
+### Added
+
+- Optional bounded navigation checkpoints preserve location roles through explicit
+  provider codecs and portable resource keys. Versioned envelopes validate structure
+  and accidental corruption before restore; imported positions do not grant write
+  authority. Application-owned storage remains optional and synchronous, with no
+  implicit filesystem or UI-thread I/O.
+
 ### Changed
 
 - Text bookmarks follow edits with insertion affinity and Unicode grapheme-boundary
