@@ -28,6 +28,7 @@ The [first application](first-application.md) develops a quick-note form in four
 | Place controls in cells | [Grid and overlay](grid.md) |
 | Change a control through a reference | [Control references](text-property.md) |
 | Keep text bookmarks through edits | [Text anchors](text-anchors.md) |
+| Save navigation metadata across reopen | [Navigation checkpoints](navigation-checkpoint.md) |
 | Edit text | [LineEdit](line-edit.md) |
 | Adjust a bounded numeric value | [Numeric sliders](sliders.md) |
 | Enter a bounded numeric value | [Numeric editors](spin-boxes.md) |
