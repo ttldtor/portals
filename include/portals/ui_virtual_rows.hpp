@@ -12,7 +12,28 @@
 
 namespace portals::ui::detail {
 /// @cond INTERNAL
+struct RowPositionState {
+  ManagedState<VirtualRowsPosition> value;
+};
+
 struct RowAccess {
+  static std::expected<ManagedState<VirtualRowsPosition>, ManagedError>
+  positionState(ManagedScene &scene, Node<Widget> node, VirtualRowsState &state) {
+    if (!state.positionState) {
+      auto origin = std::make_shared<portals::detail::ManagedOrigin>();
+      origin->tree = &tree(scene);
+      origin->node = node;
+      origin->lifetime = Access::lifetime(scene);
+      Scope scope(scene, std::move(origin));
+      auto created = scene.state(state.position);
+      if (!created) {
+        return std::unexpected(created.error());
+      }
+      state.positionState = std::make_shared<RowPositionState>(RowPositionState{*created});
+    }
+    return state.positionState->value;
+  }
+
   struct Scope {
     ManagedScene &scene;
     std::shared_ptr<portals::detail::ManagedOrigin> previous;
@@ -786,6 +807,35 @@ Description<FormField> formField(std::string_view caption, RowField<Row, Value> 
 #include <portals/detail/ui_virtual_rows.hpp>
 
 namespace portals::ui {
+template <class T>
+Model<VirtualRowsPosition> Ref<T>::position() const
+  requires requires { typename T::VirtualRow; }
+{
+  return detail::ValueModelAccess::deferred<VirtualRowsPosition>(
+    [reference =
+       *this](ManagedScene &scene,
+              detail::MountContext &context) -> std::expected<ManagedState<VirtualRowsPosition>, ManagedError> {
+      const auto target = detail::Access::captionTarget(reference.target(), context);
+      auto owner = detail::eventScene(target);
+      if (!owner) {
+        return std::unexpected(owner.error());
+      }
+      if (*owner != &scene) {
+        return std::unexpected(detail::error(target->node, TreeError::WRONG_SESSION));
+      }
+      std::shared_ptr<detail::VirtualRowsState> state;
+      auto read = detail::RowAccess::tree(scene).read(target->node, [&](const Widget &widget) {
+        if (const auto *host = dynamic_cast<const T *>(&widget)) {
+          state = host->state();
+        }
+      });
+      if (!read || !state) {
+        return std::unexpected(detail::error(target->node, !read ? read.error() : TreeError::INVALID_ARGUMENT));
+      }
+      return detail::RowAccess::positionState(scene, target->node, *state);
+    });
+}
+
 template <class T>
 template <class Row>
   requires std::same_as<T, VirtualRows<Row>>

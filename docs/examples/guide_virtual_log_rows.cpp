@@ -7,7 +7,15 @@
 
 #include <expected>
 #include <filesystem>
+#include <format>
 #include <string>
+
+std::string logPosition(const portals::VirtualRowsPosition &position) {
+  const auto above = position.hasBefore ? (*position.hasBefore ? "more above" : "start") : "above unknown";
+  const auto below = position.hasAfter ? (*position.hasAfter ? "more below" : "end") : "below unknown";
+
+  return std::format("{} records visible | {} | {}", position.visible, above, below);
+}
 
 int main(int argc, char **argv) {
   using namespace portals;
@@ -30,6 +38,8 @@ int main(int argc, char **argv) {
     }
 
     ui::Ref<Label> inspected;
+    ui::Ref<VirtualRows<LogLine>> rows;
+    auto position = rows.position();
     auto model = ui::model<LogLine>(*file);
 
     return ui::scene(ui::vbox(
@@ -43,9 +53,13 @@ int main(int argc, char **argv) {
           }),
           ui::spacing(1),
           ui::label(std::string(row.value().text)));
-      }).height(10).framed("rounded", "Log records"),
+      }).reference(rows).height(10).framed("rounded", "Log records"),
       ui::label(inspected, "Choose Inspect to read a record here."),
-      ui::label("Wheel: scroll | Tab: controls | F10: quit")))
+      ui::label(position, logPosition),
+      ui::label(position, [](const VirtualRowsPosition &value) -> std::string {
+        return value.editing ? "Enter/Space Inspect | Esc rows | F10 quit"
+                             : "Up/Down rows | F2 controls | F10 quit";
+      })).maxWidth(88))
       | ui::theme(nordTheme())
       | ui::onKey("F10 | Ctrl+C", ui::quit);
   }

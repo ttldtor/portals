@@ -29,10 +29,27 @@ struct RowsController : VirtualRowsState,
   ManagedModel<T> initialModel;
   std::shared_ptr<const void> layoutLease;
   std::optional<ActionBinding> inputBinding;
+  std::optional<ActionBinding> focusBinding;
+  std::shared_ptr<ScrollController> scrollController;
+  std::uint64_t scrollRevision{};
+  std::optional<std::uint64_t> desiredCurrent;
+  std::optional<RowId> desiredCurrentRow;
+
+  struct EnterIntent {
+    ModelResource resource;
+    std::uint64_t focusGeneration{};
+  };
+
+  std::optional<EnterIntent> pendingEnter;
+  std::size_t retainedColumn{};
+  std::optional<EditFieldKey> retainedField;
+  bool selecting{};
+  std::optional<RowId> restoredCurrent;
   std::vector<std::shared_ptr<RowAssignment<T>>> rows = std::vector<std::shared_ptr<RowAssignment<T>>>(0);
   std::shared_ptr<RowAssignment<T>> editPin;
   std::weak_ptr<portals::detail::ManagedModelSourceOf<T>> previousSource;
   std::uint64_t revision{};
+  std::uint64_t dataRevision{};
   std::uint64_t desiredFirst{};
   CellSize viewport;
   bool dirty{true};
@@ -61,6 +78,10 @@ struct RowsController : VirtualRowsState,
   std::optional<ModelRequest<T>> finiteRequest;
   RowRange finiteRange;
   std::uint64_t finiteRevision{};
+  std::shared_ptr<ModelRange<T>> pendingViewport;
+  std::weak_ptr<portals::detail::ManagedModelSourceOf<T>> pendingViewportSource;
+  RowRange pendingViewportRows;
+  std::uint64_t pendingViewportRevision{};
 
   std::expected<void, TreeError> replaceModel(Model<T> target, ModelRebindOptions rebind) override try {
     if (!active()) {
@@ -145,61 +166,424 @@ struct RowsController : VirtualRowsState,
     return {};
   }
 
-  std::expected<void, TreeError> bindInput() {
-    auto binding = RowAccess::app(scene).router().bind(
-      node,
-      [weak = this->weak_from_this()](VirtualRows<T> &, const RoutedEvent &event) {
-        auto owner = weak.lock();
-        if (!owner || !owner->active()) {
-          return EventReply::IGNORED;
-        }
-        const auto *mouse = std::get_if<MouseInputEvent>(&event);
-        const auto *key = std::get_if<KeyEvent>(&event);
-        const bool wheel = mouse && mouse->action == MouseAction::SCROLL &&
-                           (mouse->button == MouseButton::WHEEL_UP || mouse->button == MouseButton::WHEEL_DOWN);
-        const bool page = key && key->action != KeyAction::RELEASE &&
-                          (key->key == InputKey::PAGE_UP || key->key == InputKey::PAGE_DOWN);
-        if (wheel || page) {
-          const bool backwards = wheel ? mouse->button == MouseButton::WHEEL_UP : key->key == InputKey::PAGE_UP;
-          if (wheel &&
-              (mouse->modifiers.alt || mouse->modifiers.control || mouse->modifiers.super || mouse->modifiers.shift)) {
-            return EventReply::IGNORED;
-          }
-          auto changed = page ? owner->requestPage(backwards) : owner->requestWheel(mouse->wheelDelta, backwards);
-          if (!changed) {
-            owner->failure = changed.error();
-          }
-          return EventReply::HANDLED;
-        }
-        const auto *action = std::get_if<ActionEvent>(&event);
-        if (!action || (action->action != portals::Action::MOVE_UP && action->action != portals::Action::MOVE_DOWN &&
-                        action->action != portals::Action::MOVE_HOME && action->action != portals::Action::MOVE_END)) {
-          return EventReply::IGNORED;
-        }
-        std::expected<void, TreeError> changed;
-        if (action->action == portals::Action::MOVE_UP) {
-          changed = owner->requestMove(-1);
-        } else if (action->action == portals::Action::MOVE_DOWN) {
-          changed = owner->requestMove(1);
-        } else if (action->action == portals::Action::MOVE_HOME) {
-          changed =
-            owner->sourceCapabilities ? owner->requestAnchor({}, SourceDirection::FORWARD) : owner->requestFirst(0);
-        } else if (owner->exactCount) {
-          changed = owner->requestFirst(*owner->exactCount ? *owner->exactCount - 1 : 0);
-        } else {
-          changed = owner->requestAnchor({SourceAnchorKind::TAIL, {}, {}}, SourceDirection::BACKWARD);
-        }
-        if (!changed) {
-          owner->failure = changed.error();
-        }
+  std::expected<void, TreeError> prepareChrome() {
+    auto glyph = GraphemeText::from(">", scene.widthPolicy());
+    if (!glyph) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    this->currentGlyph = std::move(*glyph);
+    auto scope = RowAccess::app(scene).router().focusScope(node, node);
+    if (!scope) {
+      return std::unexpected(scope.error());
+    }
+    focusBinding.emplace(std::move(*scope));
+    auto composite = portals::detail::RowTreeAccess::focusScope(RowAccess::app(scene).router(), node);
+    if (!composite) {
+      return composite;
+    }
+    if (options.scrollbar) {
+      auto controller = ScrollController::create();
+      if (!controller) {
+        return std::unexpected(controller.error());
+      }
+      scrollController = *controller;
+      auto bar = scene.scrollBar(node, scrollController);
+      if (!bar) {
+        return std::unexpected(EditAccess::cause(bar.error()));
+      }
+      this->scrollbar = *bar;
+      auto chrome = portals::detail::RowTreeAccess::focusScope(RowAccess::app(scene).router(), node, {}, *bar);
+      if (!chrome) {
+        return chrome;
+      }
+      auto hidden = RowAccess::tree(scene).setVisible(*bar, false);
+      if (!hidden) {
+        return hidden;
+      }
+    }
+    return {};
+  }
+
+  EventReply handleInput(const RoutedEvent &event) {
+    const auto *mouse = std::get_if<MouseInputEvent>(&event);
+    const auto *key = std::get_if<KeyEvent>(&event);
+    const auto *action = std::get_if<ActionEvent>(&event);
+    if ((key && key->action != KeyAction::RELEASE && key->key == InputKey::F2) ||
+        (action && action->action == portals::Action::ACTIVATE)) {
+      auto entered = this->enterEditing();
+      if (!entered) {
+        this->failure = entered.error();
+      } else {
+        this->failure.reset();
+      }
+      return EventReply::HANDLED;
+    }
+    if (action && action->action == portals::Action::CANCEL) {
+      auto left = this->leaveEditing();
+      if (!left) {
+        this->failure = left.error();
+      } else {
+        this->failure.reset();
+      }
+      return EventReply::HANDLED;
+    }
+    const bool wheel = mouse && mouse->action == MouseAction::SCROLL &&
+                       (mouse->button == MouseButton::WHEEL_UP || mouse->button == MouseButton::WHEEL_DOWN);
+    const bool page =
+      key && key->action != KeyAction::RELEASE && (key->key == InputKey::PAGE_UP || key->key == InputKey::PAGE_DOWN);
+    if (wheel || page) {
+      pendingEnter.reset();
+      const bool backwards = wheel ? mouse->button == MouseButton::WHEEL_UP : key->key == InputKey::PAGE_UP;
+      if (wheel &&
+          (mouse->modifiers.alt || mouse->modifiers.control || mouse->modifiers.super || mouse->modifiers.shift)) {
+        return EventReply::IGNORED;
+      }
+      const auto step = static_cast<std::int64_t>(std::max<std::size_t>(1, this->rows.size()));
+      auto changed =
+        page ? (this->position.editing ? this->requestPage(backwards) : this->moveCurrent(backwards ? -step : step))
+             : this->requestWheel(mouse->wheelDelta, backwards);
+      if (!changed) {
+        this->failure = changed.error();
+      }
+      return EventReply::HANDLED;
+    }
+    if (!action || (action->action != portals::Action::MOVE_UP && action->action != portals::Action::MOVE_DOWN &&
+                    action->action != portals::Action::MOVE_HOME && action->action != portals::Action::MOVE_END)) {
+      return EventReply::IGNORED;
+    }
+    auto focused = RowAccess::app(this->scene).router().focused();
+    if (!focused || *focused != this->node) {
+      // An editor owns its arrow grammar. An ignored direction still belongs to
+      // the row, rather than becoming a spatial jump to an unrelated outer control.
+      return EventReply::HANDLED;
+    }
+    std::expected<void, TreeError> changed;
+    pendingEnter.reset();
+    if (action->action == portals::Action::MOVE_UP) {
+      changed = this->moveCurrent(-1);
+    } else if (action->action == portals::Action::MOVE_DOWN) {
+      changed = this->moveCurrent(1);
+    } else if (action->action == portals::Action::MOVE_HOME) {
+      changed = this->sourceCapabilities ? this->selectAnchor({}, SourceDirection::FORWARD) : this->selectCurrent(0);
+    } else if (this->exactCount) {
+      changed = this->selectCurrent(*this->exactCount ? *this->exactCount - 1 : 0);
+    } else {
+      if (this->sourceCapabilities && (!this->sourceCapabilities->tail || !this->sourceCapabilities->backward)) {
         return EventReply::HANDLED;
-      },
-      false);
+      }
+      changed = this->selectAnchor({SourceAnchorKind::TAIL, {}, {}}, SourceDirection::BACKWARD);
+    }
+    if (!changed) {
+      this->failure = changed.error();
+    }
+    return EventReply::HANDLED;
+  }
+
+  std::expected<void, TreeError> bindInput() {
+    auto prepared = prepareChrome();
+    if (!prepared) {
+      return prepared;
+    }
+    auto binding = RowAccess::app(scene).router().bind(
+      node, [weak = this->weak_from_this()](VirtualRows<T> &, const RoutedEvent &event) {
+        auto owner = weak.lock();
+        return owner && owner->active() ? owner->handleInput(event) : EventReply::IGNORED;
+      });
     if (!binding) {
       return std::unexpected(binding.error());
     }
     inputBinding.emplace(std::move(*binding));
     return {};
+  }
+
+  std::expected<void, TreeError> publishPosition() {
+    if (this->positionState) {
+      auto changed = this->positionState->value.set(this->position);
+      if (!changed) {
+        return std::unexpected(changed.error());
+      }
+    }
+    return {};
+  }
+
+  std::expected<void, TreeError> enterEditing() {
+    if (rows.empty() || !this->position.current) {
+      return {};
+    }
+    const auto found = std::ranges::find(rows, *this->position.current, [](const auto &row) {
+      return row->id;
+    });
+    if (found == rows.end()) {
+      const auto generation = portals::detail::RowTreeAccess::focusGeneration(RowAccess::app(scene).router());
+      if (!generation) {
+        return std::unexpected(TreeError::WOULD_BLOCK);
+      }
+      auto revealed = moveCurrent(0);
+      if (revealed && active() &&
+          generation == portals::detail::RowTreeAccess::focusGeneration(RowAccess::app(scene).router())) {
+        pendingEnter = EnterIntent{this->position.resource, generation};
+      }
+      return revealed;
+    }
+    if (retainedField) {
+      for (const auto &weak : (*found)->edit->bindings) {
+        auto binding = weak.lock();
+        if (!binding || binding->closed) {
+          continue;
+        }
+        const auto definition = std::ranges::find_if((*found)->edit->definitions, [&](const auto &entry) {
+          return entry.get() == binding->definition && entry->key == *retainedField;
+        });
+        auto eligible = RowAccess::tree(scene).inputEligible(binding->receiver);
+        if (definition != (*found)->edit->definitions.end() && eligible && *eligible) {
+          auto local = portals::detail::RowTreeAccess::focusScope(RowAccess::app(scene).router(), node, (*found)->root);
+          auto focused = local ? RowAccess::app(scene).router().setFocus(binding->receiver) : local;
+          if (!focused) {
+            return focused;
+          }
+          this->position.editing = true;
+          return publishPosition();
+        }
+      }
+    }
+    auto entered =
+      portals::detail::RowTreeAccess::enterRow(RowAccess::app(scene).router(), node, (*found)->root, retainedColumn);
+    if (!entered) {
+      return std::unexpected(entered.error());
+    }
+    this->position.editing = *entered != node;
+    return publishPosition();
+  }
+
+  std::expected<void, TreeError> leaveEditing() {
+    pendingEnter.reset();
+    auto observed = observeFocus();
+    if (!observed) {
+      return observed;
+    }
+    for (const auto &row : rows) {
+      if (focusedNode == node || !RowAccess::tree(scene).contains(row->root, focusedNode).value_or(false)) {
+        continue;
+      }
+      for (const auto &participant : row->participants) {
+        auto allowed = participant->beforeLeave();
+        if (!allowed) {
+          return allowed;
+        }
+      }
+      if (row->dirty() && row->edit->options.mode == EditMode::ON_COMPLETION) {
+        return std::unexpected(TreeError::WOULD_BLOCK);
+      }
+    }
+    auto collapsed = portals::detail::RowTreeAccess::focusScope(RowAccess::app(scene).router(), node);
+    if (!collapsed) {
+      return collapsed;
+    }
+    auto focused = RowAccess::app(scene).router().setFocus(node);
+    if (!focused) {
+      return focused;
+    }
+    this->position.editing = false;
+    return publishPosition();
+  }
+
+  std::expected<void, TreeError> selectCurrent(std::uint64_t target) {
+    if (!this->exactCount) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    target = *this->exactCount ? std::min(target, *this->exactCount - 1) : 0;
+    const auto visible = std::max<std::uint64_t>(1, viewport.height / options.rowHeight);
+    auto nextFirst = desiredFirst;
+    if (target < nextFirst) {
+      nextFirst = target;
+    } else if (target - nextFirst >= visible) {
+      nextFirst = target - visible + 1;
+    }
+    auto allowed = requestFirst(nextFirst);
+    if (!allowed) {
+      return allowed;
+    }
+    desiredCurrent = target;
+    selecting = true;
+    return {};
+  }
+
+  virtual std::expected<void, TreeError> moveCurrent(std::int64_t delta) {
+    const auto current = desiredCurrent.value_or(this->position.currentIndex.value_or(first));
+    const auto amount = delta < 0 ? static_cast<std::uint64_t>(-(delta + 1)) + 1 : static_cast<std::uint64_t>(delta);
+    if (delta < 0) {
+      return selectCurrent(current - std::min(current, amount));
+    }
+    return selectCurrent(current + std::min(amount, std::numeric_limits<std::uint64_t>::max() - current));
+  }
+
+  std::expected<void, TreeError> selectAnchor(SourceAnchor anchor, SourceDirection direction) {
+    auto admitted = this->requestAnchor(anchor, direction);
+    if (!admitted) {
+      return admitted;
+    }
+    this->currentSlot = direction == SourceDirection::BACKWARD ? options.maxRows - 1 : 0;
+    selecting = true;
+    return {};
+  }
+
+  std::expected<void, TreeError> syncScrollBar() {
+    if (!scrollController) {
+      return {};
+    }
+    auto snapshot = scrollController->snapshot();
+    if (!snapshot) {
+      return std::unexpected(snapshot.error());
+    }
+    if (scrollRevision && snapshot->revision != scrollRevision && this->exactCount &&
+        snapshot->vertical.offset.raster != desiredFirst) {
+      auto admitted = requestFirst(snapshot->vertical.offset.raster);
+      if (!admitted) {
+        // The bar has already published its user intent. A checked editor refusal
+        // restores only that presentation; the committed viewport and draft never move.
+        auto restored = setScrollOffset(RowAccess::tree(scene), this->scrollbar, ScrollAxis::VERTICAL, {first});
+        if (restored) {
+          auto current = scrollController->snapshot();
+          if (current) {
+            scrollRevision = current->revision;
+          }
+        }
+        return admitted;
+      }
+    }
+    scrollRevision = snapshot->revision;
+    return {};
+  }
+
+  void updateOrientation(ModelResource resource) {
+    auto next = this->position;
+    const bool same = next.resource == resource;
+    next.resource = resource;
+    next.count = this->exactCount;
+    next.firstIndex = this->exactCount ? std::optional(first) : std::nullopt;
+    next.visible = rows.size();
+    next.windowStatus = this->sourceStatus;
+    this->visibleCurrentSlot.reset();
+    if (this->exactCount) {
+      if (*this->exactCount) {
+        const auto index = std::min(desiredCurrent.value_or(first), *this->exactCount - 1);
+        next.current = desiredCurrentRow;
+        next.currentIndex = next.current ? std::optional(index) : std::nullopt;
+        if (index >= first && index - first < rows.size()) {
+          next.current = rows[static_cast<std::size_t>(index - first)]->id;
+          this->currentSlot = static_cast<std::size_t>(index - first);
+          this->visibleCurrentSlot = this->currentSlot;
+        }
+      } else {
+        next.current.reset();
+        next.currentIndex.reset();
+      }
+      next.hasBefore = first > 0;
+      next.hasAfter = first + rows.size() < *this->exactCount;
+    } else {
+      next.currentIndex.reset();
+      if (!same) {
+        this->currentSlot = 0;
+        next.current = restoredCurrent;
+        restoredCurrent.reset();
+      }
+      const auto found = next.current ? std::ranges::find(rows, *next.current,
+                                                          [](const auto &row) {
+                                                            return row->id;
+                                                          })
+                                      : rows.end();
+      if (selecting && !rows.empty()) {
+        this->currentSlot = std::min(this->currentSlot, rows.size() - 1);
+        next.current = rows[this->currentSlot]->id;
+        this->visibleCurrentSlot = this->currentSlot;
+      } else if (found != rows.end()) {
+        this->currentSlot = static_cast<std::size_t>(found - rows.begin());
+        this->visibleCurrentSlot = this->currentSlot;
+      } else if (!rows.empty() && !next.current) {
+        this->currentSlot = std::min(this->currentSlot, rows.size() - 1);
+        next.current = rows[this->currentSlot]->id;
+        this->visibleCurrentSlot = this->currentSlot;
+      } else if (rows.empty() && !same) {
+        next.current.reset();
+      }
+    }
+    this->position = next;
+    selecting = false;
+  }
+
+  std::expected<void, TreeError> admitCurrent(std::optional<RowId> row, ModelResource resource) {
+    if constexpr (std::same_as<Source, Navigation<T>>) {
+      if (ModelAccess::bindings(source).current) {
+        auto navigation = source.managed();
+        if (!navigation) {
+          return std::unexpected(EditAccess::cause(navigation.error()));
+        }
+        auto channel = navigation->current();
+        if (!channel) {
+          return std::unexpected(channel.error());
+        }
+        auto current = channel->snapshot();
+        if (!current) {
+          return std::unexpected(current.error());
+        }
+        if ((*current)->value.resource != resource) {
+          return std::unexpected(TreeError::WOULD_BLOCK);
+        }
+        if (observedCurrent && *observedCurrent != (*current)->value && (*current)->value.row != row) {
+          return std::unexpected(TreeError::WOULD_BLOCK);
+        }
+        if ((*current)->value.row == row) {
+          observedCurrent = (*current)->value;
+          return {};
+        }
+        auto moved = row ? navigation->navigate(*row) : navigation->clearCurrent();
+        if (!moved) {
+          return moved;
+        }
+        auto accepted = channel ? channel->snapshot()
+                                : std::expected<std::shared_ptr<const PropertyChange<NavigationPosition>>, TreeError>(
+                                    std::unexpected(channel.error()));
+        if (!accepted) {
+          return std::unexpected(accepted.error());
+        }
+        if ((*accepted)->value.resource == resource && (*accepted)->value.row == row) {
+          observedCurrent = (*accepted)->value;
+        }
+      }
+    } else {
+      (void)row;
+      (void)resource;
+    }
+    return {};
+  }
+
+  std::expected<void, TreeError> publishScrollBar() {
+    if (scrollController && this->exactCount) {
+      auto metrics = setScrollMetrics(RowAccess::tree(scene), this->scrollbar,
+                                      {*this->exactCount, static_cast<std::uint64_t>(rows.size())});
+      if (!metrics) {
+        return metrics;
+      }
+      auto offset = setScrollOffset(RowAccess::tree(scene), this->scrollbar, ScrollAxis::VERTICAL, {first});
+      if (!offset) {
+        return offset;
+      }
+      auto snapshot = scrollController->snapshot();
+      if (!snapshot) {
+        return std::unexpected(snapshot.error());
+      }
+      scrollRevision = snapshot->revision;
+    }
+    return {};
+  }
+
+  std::expected<void, TreeError> publishOrientation(ModelResource resource, bool announce = true) {
+    updateOrientation(resource);
+    if (!announce) {
+      return {};
+    }
+    auto bar = publishScrollBar();
+    return bar ? publishPosition() : bar;
   }
 
   bool active() const noexcept override {
@@ -211,6 +595,14 @@ struct RowsController : VirtualRowsState,
                  [](const UiScope &) {
                  })
       .has_value();
+  }
+
+  virtual bool acceptedResource(ModelResource resource) {
+    if (!active()) {
+      return false;
+    }
+    auto actual = currentSource();
+    return actual && (*actual)->navigationResource == resource;
   }
 
   void cancel() noexcept override {
@@ -225,6 +617,7 @@ struct RowsController : VirtualRowsState,
     if (finiteConsumer) {
       (void)finiteConsumer->close();
     }
+    pendingViewport.reset();
     for (auto &row : rows) {
       row->close();
     }
@@ -482,7 +875,52 @@ struct RowsController : VirtualRowsState,
       blockedAttempt = false;
     }
     focusedNode = *focused;
-    return {};
+    this->hasFocus = *focused == node ||
+                     (*focused != Node<Widget>{} && RowAccess::tree(scene).contains(node, *focused).value_or(false));
+    auto editing = false;
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+      const auto &row = rows[index];
+      if (*focused != Node<Widget>{} && RowAccess::tree(scene).contains(row->root, *focused).value_or(false)) {
+        auto column = portals::detail::RowTreeAccess::column(RowAccess::app(scene).router(), row->root, *focused);
+        if (!column) {
+          return std::unexpected(column.error());
+        }
+        retainedColumn = *column;
+        retainedField.reset();
+        for (const auto &weak : row->edit->bindings) {
+          auto binding = weak.lock();
+          if (!binding || binding->closed || binding->receiver != *focused) {
+            continue;
+          }
+          const auto definition = std::ranges::find_if(row->edit->definitions, [&](const auto &entry) {
+            return entry.get() == binding->definition && entry->key.persistent();
+          });
+          if (definition != row->edit->definitions.end()) {
+            retainedField = (*definition)->key;
+          }
+        }
+        this->currentSlot = index;
+        dirty = dirty || this->position.current != row->id;
+        selecting = selecting || this->position.current != row->id;
+        if (this->exactCount) {
+          desiredCurrent = first + index;
+        }
+        auto local = portals::detail::RowTreeAccess::focusScope(RowAccess::app(scene).router(), node, row->root);
+        if (!local) {
+          return local;
+        }
+        editing = true;
+        break;
+      }
+    }
+    if (!editing) {
+      auto collapsed = portals::detail::RowTreeAccess::focusScope(RowAccess::app(scene).router(), node);
+      if (!collapsed) {
+        return collapsed;
+      }
+    }
+    this->position.editing = editing;
+    return publishPosition();
   }
 
   std::expected<void, TreeError> ensureHistory() {
@@ -514,6 +952,16 @@ struct RowsController : VirtualRowsState,
     }
     portals::detail::ModelViewCheckpoint checkpoint;
     checkpoint.first = first;
+    if (this->position.current && this->position.currentIndex) {
+      auto bookmark = ModelBookmark::create(previous->navigationResource,
+                                            {PositionKind::ITEM, *this->position.current, *this->position.currentIndex,
+                                             dataRevision, PositionAffinity::FORWARD},
+                                            {}, options.checkpoints.bookmarks);
+      if (!bookmark) {
+        return std::unexpected(portals::detail::navigationTreeError(bookmark.error()));
+      }
+      checkpoint.current = *bookmark;
+    }
     if (!rows.empty()) {
       auto bookmark = ModelBookmark::create(
         previous->navigationResource,
@@ -534,11 +982,41 @@ struct RowsController : VirtualRowsState,
   restoredFirst(const std::shared_ptr<portals::detail::ManagedModelSourceOf<T>> &actual, const ModelFrame<T> &frame,
                 SourceStamp incarnation) {
     const bool switched = previousSource.lock() && previousSource.lock() != actual;
+    desiredCurrentRow.reset();
     auto target = switched ? std::uint64_t{} : desiredFirst;
+    if (switched) {
+      desiredCurrent = 0;
+    } else if (!selecting && this->position.current) {
+      auto located = frame.locateRow(*this->position.current);
+      if (!located) {
+        return std::unexpected(located.error());
+      }
+      if (located->state == RowLookupState::FOUND) {
+        desiredCurrent = located->index;
+        desiredCurrentRow = this->position.current;
+      } else {
+        desiredCurrent = frame.rowCount() ? std::min(this->position.currentIndex.value_or(0), frame.rowCount() - 1) : 0;
+      }
+    }
     if (switched && history && !resetRestoration) {
       auto saved = history->find(actual, historyRole);
       if (saved) {
         target = saved->value.first;
+        if (saved->value.current) {
+          auto resolver = FinitePositionResolver<T>::create(actual->navigationResource, incarnation, frame.snapshot(),
+                                                            actual->navigationChanges);
+          if (!resolver) {
+            return std::unexpected(portals::detail::navigationTreeError(resolver.error()));
+          }
+          auto restored = resolver->resolve({incarnation, frame.dataRevision(), 1, *saved->value.current}, {});
+          if (!restored) {
+            return std::unexpected(portals::detail::navigationTreeError(restored.error()));
+          }
+          if (restored->state == PositionResolution::EXACT || restored->state == PositionResolution::NEAREST) {
+            desiredCurrent = restored->position.offset;
+            desiredCurrentRow = restored->position.row;
+          }
+        }
         if (saved->value.reading) {
           auto resolver = FinitePositionResolver<T>::create(actual->navigationResource, incarnation, frame.snapshot(),
                                                             actual->navigationChanges);
@@ -590,6 +1068,10 @@ struct RowsController : VirtualRowsState,
           if (!found) {
             return std::unexpected(found.error());
           }
+          if (!reading && found->state == RowLookupState::FOUND) {
+            desiredCurrent = found->index;
+            desiredCurrentRow = position.row;
+          }
           const auto visible = static_cast<std::uint64_t>(viewport.height / options.rowHeight +
                                                           (viewport.height % options.rowHeight != 0));
           if (found->state == RowLookupState::FOUND &&
@@ -611,7 +1093,93 @@ struct RowsController : VirtualRowsState,
     return frame.rowCount() ? std::min(target, frame.rowCount() - 1) : 0;
   }
 
+  std::expected<std::optional<ModelRange<T>>, TreeError>
+  readFiniteRange(const std::shared_ptr<portals::detail::ManagedModelSourceOf<T>> &actual, const ModelFrame<T> &frame,
+                  RowRange requested) {
+    auto range = frame.read(requested);
+    if (!range) {
+      return std::unexpected(range.error());
+    }
+    if (range->state() == RangeState::PENDING) {
+      if (consumerSource.lock() != actual) {
+        auto opened = actual->model->openRange();
+        if (!opened) {
+          return std::unexpected(opened.error());
+        }
+        finiteRequest.reset();
+        finiteConsumer.emplace(std::move(*opened));
+        consumerSource = actual;
+      }
+      const bool sameRequest = finiteRequest && finiteRevision == frame.dataRevision() &&
+                               finiteRange.first == requested.first && finiteRange.count == requested.count;
+      if (sameRequest) {
+        auto completed = frame.range(finiteConsumer->id());
+        if (!completed) {
+          return std::unexpected(completed.error());
+        }
+        range = std::move(completed);
+      } else {
+        auto action = actual->preparation;
+        if (!action) {
+          return std::unexpected(TreeError::INVALID_ARGUMENT);
+        }
+        auto work = finiteConsumer->request(requested);
+        if (!work) {
+          return std::unexpected(work.error());
+        }
+        finiteRange = requested;
+        finiteRevision = frame.dataRevision();
+        finiteRequest = std::move(*work);
+        auto sent = (*action)(frame, finiteRequest);
+        if (!sent) {
+          return std::unexpected(sent.error());
+        }
+        return std::optional<ModelRange<T>>{};
+      }
+    }
+    if (range->state() == RangeState::PENDING) {
+      return std::optional<ModelRange<T>>{};
+    }
+    if (range->state() != RangeState::READY) {
+      return std::unexpected(TreeError::CALLBACK_FAILED);
+    }
+    return std::optional<ModelRange<T>>(std::move(*range));
+  }
+
+  std::expected<bool, TreeError>
+  prepareFiniteCurrent(const std::shared_ptr<portals::detail::ManagedModelSourceOf<T>> &actual,
+                       const ModelFrame<T> &frame, std::uint64_t target, std::span<const DeliveredRow<T>> values) {
+    if (!frame.rowCount()) {
+      desiredCurrentRow.reset();
+      return true;
+    }
+    const auto index = std::min(desiredCurrent.value_or(target), frame.rowCount() - 1);
+    desiredCurrent = index;
+    if (index >= target && index - target < values.size()) {
+      desiredCurrentRow = values[static_cast<std::size_t>(index - target)].id;
+      return true;
+    }
+    if (desiredCurrentRow) {
+      return true;
+    }
+    // Resolve one qualified record independently of the visible page. The existing
+    // single range consumer handles PENDING; no synchronous provider I/O or scan is added.
+    auto point = readFiniteRange(actual, frame, {index, 1});
+    if (!point) {
+      return std::unexpected(point.error());
+    }
+    if (!*point) {
+      return false;
+    }
+    desiredCurrentRow = (**point).rows().front().id;
+    return true;
+  }
+
   std::expected<void, TreeError> update() {
+    auto scrolled = syncScrollBar();
+    if (!scrolled) {
+      return scrolled;
+    }
     auto actual = currentSource();
     if (!actual || (*actual)->retired || !(*actual)->model) {
       return std::unexpected(actual ? TreeError::CLOSED : actual.error());
@@ -655,7 +1223,8 @@ struct RowsController : VirtualRowsState,
     if (visible > options.maxRows) {
       return std::unexpected(TreeError::NODE_LIMIT);
     }
-    if (!dirty && previousSource.lock() == *actual && revision == frame->revision()) {
+    if (!dirty && previousSource.lock() == *actual && revision == frame->revision() && target == first &&
+        desiredCurrent == this->position.currentIndex) {
       return {};
     }
     auto allowed = preflight(target, visible);
@@ -663,64 +1232,43 @@ struct RowsController : VirtualRowsState,
       return allowed;
     }
     if (!visible) {
+      pendingViewport.reset();
       return commitRows(*actual, {}, {}, frame->revision(), target, (*actual)->navigationResource, *incarnation,
                         std::move(*saved));
     }
-    auto range = frame->read({target, visible});
-    if (!range) {
-      return std::unexpected(range.error());
-    }
-    if (range->state() == RangeState::PENDING) {
-      if (consumerSource.lock() != *actual) {
-        auto opened = (*actual)->model->openRange();
-        if (!opened) {
-          return std::unexpected(opened.error());
-        }
-        finiteRequest.reset();
-        finiteConsumer.emplace(std::move(*opened));
-        consumerSource = *actual;
+    auto pin = pendingViewport;
+    if (!pin || pendingViewportSource.lock() != *actual || pendingViewportRevision != frame->dataRevision() ||
+        pendingViewportRows.first != target || pendingViewportRows.count != visible) {
+      pendingViewport.reset();
+      auto range = readFiniteRange(*actual, *frame, {target, visible});
+      if (!range) {
+        return std::unexpected(range.error());
       }
-      const RowRange requested{target, visible};
-      const bool sameRequest = finiteRequest && finiteRevision == frame->dataRevision() &&
-                               finiteRange.first == target && finiteRange.count == visible;
-      if (sameRequest) {
-        auto completed = frame->range(finiteConsumer->id());
-        if (!completed) {
-          return std::unexpected(completed.error());
-        }
-        range = std::move(completed);
-      } else {
-        auto action = (*actual)->preparation;
-        if (!action) {
-          return std::unexpected(TreeError::INVALID_ARGUMENT);
-        }
-        auto requestedWork = finiteConsumer->request(requested);
-        if (!requestedWork) {
-          return std::unexpected(requestedWork.error());
-        }
-        finiteRange = requested;
-        finiteRevision = frame->dataRevision();
-        finiteRequest = std::move(*requestedWork);
-        auto sent = (*action)(*frame, finiteRequest);
-        if (!sent) {
-          return sent;
-        }
+      if (!*range) {
         return {};
       }
+      pin = std::make_shared<ModelRange<T>>(std::move(**range));
     }
-    if (range->state() == RangeState::PENDING) {
-      return {};
-    }
-    if (range->state() != RangeState::READY) {
-      return std::unexpected(TreeError::CALLBACK_FAILED);
-    }
-    auto pin = std::make_shared<ModelRange<T>>(std::move(*range));
     attempt = {*actual, frame->revision(), intentGeneration, viewport};
     std::vector<DeliveredRow<T>> values(0);
     values.reserve(visible);
     for (const auto &value : pin->rows()) {
       values.push_back({value.id, &value.value, frame->dataRevision()});
     }
+    auto current = prepareFiniteCurrent(*actual, *frame, target, values);
+    if (!current) {
+      return std::unexpected(current.error());
+    }
+    if (!*current) {
+      // Retain this one bounded ready viewport while the same consumer resolves
+      // an offscreen current; otherwise two PENDING intervals could replace each other forever.
+      pendingViewport = pin;
+      pendingViewportSource = *actual;
+      pendingViewportRows = {target, visible};
+      pendingViewportRevision = frame->dataRevision();
+      return {};
+    }
+    pendingViewport.reset();
     return commitRows(*actual, pin, values, frame->revision(), target, (*actual)->navigationResource, *incarnation,
                       std::move(*saved));
   }
@@ -815,10 +1363,38 @@ struct RowsController : VirtualRowsState,
           nextPin = row;
         }
       }
+      const bool retiringFocus = focusedNode != Node<Widget>{} && std::ranges::any_of(rows, [&](const auto &row) {
+                                   return std::ranges::find(staging, row) == staging.end() &&
+                                          RowAccess::tree(scene).contains(row->root, focusedNode).value_or(false);
+                                 });
       if (!active() || intentGeneration != stagedIntent) {
         rollback();
         return std::unexpected(TreeError::WOULD_BLOCK);
       }
+      auto admitted = admitCurrent(desiredCurrentRow, resource);
+      if (!admitted) {
+        rollback();
+        return admitted;
+      }
+      if (!active() || intentGeneration != stagedIntent) {
+        rollback();
+        return std::unexpected(TreeError::WOULD_BLOCK);
+      }
+      if (retiringFocus) {
+        auto collapsed = portals::detail::RowTreeAccess::focusScope(RowAccess::app(scene).router(), node);
+        auto focused = collapsed ? RowAccess::app(scene).router().setFocus(node) : collapsed;
+        if (!focused) {
+          rollback();
+          return focused;
+        }
+        focusedNode = node;
+        this->position.editing = false;
+      }
+      if (!active() || intentGeneration != stagedIntent) {
+        rollback();
+        return std::unexpected(TreeError::WOULD_BLOCK);
+      }
+      auto nextDataRevision = dataRevision;
       if (actual) {
         auto latest = currentSource();
         auto latestFrame = actual->model ? actual->model->pin()
@@ -827,6 +1403,7 @@ struct RowsController : VirtualRowsState,
           rollback();
           return std::unexpected(TreeError::WOULD_BLOCK);
         }
+        nextDataRevision = latestFrame->dataRevision();
       }
       auto &tree = RowAccess::tree(scene);
       // Validate every identity before the allocation/callback-free visibility publication.
@@ -852,9 +1429,14 @@ struct RowsController : VirtualRowsState,
         }
       }
       std::vector<Node<Widget>> visibleNodes(0);
-      visibleNodes.reserve(staging.size());
+      visibleNodes.reserve(staging.size() + 1);
       for (const auto &row : staging) {
         visibleNodes.push_back(row->root);
+      }
+      const bool showBar = this->scrollbar != Node<ScrollBar>{} && this->exactCount &&
+                           *this->exactCount > staging.size() && viewport.width > 1 && viewport.height > 0;
+      if (showBar) {
+        visibleNodes.push_back(this->scrollbar);
       }
       if (saved && !history->valid(*saved)) {
         rollback();
@@ -873,10 +1455,12 @@ struct RowsController : VirtualRowsState,
       }
       rows.swap(staging);
       placements.swap(placement);
+      this->scrollbarVisible = showBar;
       editPin.swap(nextPin);
       first = desiredFirst = target;
       previousSource = actual;
       revision = publication;
+      dataRevision = nextDataRevision;
       dirty = false;
       blockedAttempt = false;
       committedIntent = intentGeneration;
@@ -889,6 +1473,10 @@ struct RowsController : VirtualRowsState,
       if (saved) {
         history->commit(std::move(*saved));
       }
+      auto orientation = publishOrientation(resource, false);
+      if (!orientation) {
+        return orientation;
+      }
       // Destructors and unmount callbacks see the fully published assignment set.
       for (const auto &row : staging) {
         if (std::ranges::find(rows, row) == rows.end() && row != editPin) {
@@ -900,6 +1488,10 @@ struct RowsController : VirtualRowsState,
       }
       if (!active()) {
         return {};
+      }
+      orientation = publishOrientation(resource);
+      if (!orientation || !active()) {
+        return orientation;
       }
       if constexpr (std::same_as<Source, Navigation<T>>) {
         if (!rows.empty() && ModelAccess::bindings(source).readingAnchor) {
@@ -932,6 +1524,19 @@ struct RowsController : VirtualRowsState,
           if (!active()) {
             return {};
           }
+        }
+      }
+      if (pendingEnter) {
+        const auto requested = *std::exchange(pendingEnter, {});
+        auto focused = RowAccess::app(scene).router().focused();
+        if (!focused) {
+          return std::unexpected(focused.error());
+        }
+        if (requested.resource == resource && *focused == node && requested.focusGeneration &&
+            requested.focusGeneration ==
+              portals::detail::RowTreeAccess::focusGeneration(RowAccess::app(scene).router()) &&
+            acceptedResource(requested.resource)) {
+          return enterEditing();
         }
       }
       return {};
@@ -1026,6 +1631,10 @@ private:
 
 template <class T, class Factory> struct WindowRowsController final : RowsController<T, Model<T>, Factory> {
   using Base = RowsController<T, Model<T>, Factory>;
+
+  bool acceptedResource(ModelResource resource) override {
+    return this->active() && declaration.resource == resource;
+  }
   enum class LoadKind {
     NONE,
     REPLACE,
@@ -1078,6 +1687,7 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
   std::weak_ptr<WindowProvider<T>> preparedProvider;
   ModelResource preparedResource;
   std::uint64_t preparedRevision{};
+  std::optional<std::int64_t> deferredCurrentDelta;
 
   std::expected<void, TreeError> protocol(SourceError error) {
     this->sourceFailure = error;
@@ -1241,6 +1851,64 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     return requestMove(backwards ? -page : page);
   }
 
+  std::expected<void, TreeError> moveCurrent(std::int64_t delta) override {
+    const auto limit = this->options.maxPendingRows;
+    if (deferredCurrentDelta) {
+      if (delta < -limit - *deferredCurrentDelta || delta > limit - *deferredCurrentDelta) {
+        return protocol(SourceError::WOULD_BLOCK);
+      }
+      *deferredCurrentDelta += delta;
+      return {};
+    }
+    if (this->rows.empty()) {
+      return requestMove(delta);
+    }
+    auto current = wanted + static_cast<std::int64_t>(this->currentSlot);
+    if (!this->selecting && this->position.current) {
+      std::optional<std::size_t> found;
+      for (std::size_t index = 0; index < storedRows(); ++index) {
+        if (rowAt(index) == this->position.current) {
+          found = index;
+          break;
+        }
+      }
+      if (found) {
+        current = static_cast<std::int64_t>(*found);
+      } else if (window->capabilities().seekRow) {
+        auto requested = requestAnchor({SourceAnchorKind::ROW, {}, *this->position.current}, SourceDirection::FORWARD);
+        if (!requested) {
+          return requested;
+        }
+        deferredCurrentDelta = std::clamp(delta, -limit, limit);
+        return {};
+      } else {
+        return protocol(SourceError::UNSUPPORTED);
+      }
+    }
+    const auto boundedDelta = std::clamp(delta, -limit, limit);
+    auto target = current + boundedDelta;
+    if (entryKnown) {
+      target = std::max(std::int64_t{}, target);
+    }
+    const auto visible = static_cast<std::int64_t>(std::max<std::size_t>(1, visibleRows));
+    const auto nextFirst = target < wanted ? target : target - wanted >= visible ? target - visible + 1 : wanted;
+    const auto movement = nextFirst - wanted;
+    if (movement < 0 && !window->capabilities().backward && wanted == 0) {
+      return {};
+    }
+    auto moved =
+      movement ? requestMove(movement) : RowAccess::tree(this->scene).invalidate(this->node, Invalidation::PAINT);
+    if (!moved) {
+      return moved;
+    }
+    this->currentSlot = static_cast<std::size_t>(target - nextFirst);
+    this->selecting = true;
+    this->dirty = true;
+    this->blockedAttempt = false;
+    ++this->intentGeneration;
+    return {};
+  }
+
   std::expected<void, TreeError> requestAnchor(SourceAnchor target, SourceDirection traversal) override {
     if (!this->active()) {
       return std::unexpected(TreeError::CLOSED);
@@ -1253,11 +1921,16 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     if (!allowed) {
       return allowed;
     }
+    auto invalidated = RowAccess::tree(this->scene).invalidate(this->node, Invalidation::PAINT);
+    if (!invalidated) {
+      return invalidated;
+    }
     auto requested = startLoad(target, traversal, LoadKind::REPLACE);
     if (!requested) {
       return requested;
     }
     wanted = 0;
+    deferredCurrentDelta.reset();
     initialLoad = false;
     entryKnown = target.kind == SourceAnchorKind::ENTRY && traversal == SourceDirection::FORWARD;
     ++this->intentGeneration;
@@ -1297,6 +1970,16 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     }
     portals::detail::ModelViewCheckpoint checkpoint;
     checkpoint.reading = *bookmark;
+    if (this->position.current) {
+      auto current = ModelBookmark::create(
+        preparedResource, {PositionKind::ITEM, *this->position.current, 0, preparedRevision, PositionAffinity::FORWARD},
+        {}, this->options.checkpoints.bookmarks);
+      if (!current) {
+        this->sourceFailure = current.error();
+        return std::unexpected(rowSourceError(current.error()));
+      }
+      checkpoint.current = *current;
+    }
     auto saved = this->history->stageResource(preparedResource, provider, this->historyRole, std::move(checkpoint));
     return saved ? std::expected<std::optional<portals::detail::ModelViewHistoryChange>, TreeError>(
                      std::optional(std::move(*saved)))
@@ -1325,10 +2008,14 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
       return std::unexpected(saved.error());
     }
     SourceAnchor restore;
+    std::optional<RowId> restoreCurrent;
     if (rebind.restore == ModelRestorePolicy::REMEMBER && this->history) {
       auto checkpoint = this->history->find(target.resource, this->historyRole, false);
       if (checkpoint && checkpoint->value.reading) {
         restore = {SourceAnchorKind::ROW, {}, checkpoint->value.reading->position().row};
+        if (checkpoint->value.current) {
+          restoreCurrent = checkpoint->value.current->position().row;
+        }
       }
     }
     auto nextDeclaration = target;
@@ -1362,6 +2049,8 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     window = std::move(*created);
     consumer.emplace(std::move(*opened));
     declaration = std::move(nextDeclaration);
+    this->restoredCurrent = restoreCurrent;
+    deferredCurrentDelta.reset();
     pending.reset();
     this->sourceCapabilities = window->capabilities();
     this->sourceStatus = WindowStatus::EMPTY;
@@ -1474,6 +2163,7 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
       next.temporaryAfter = pin.edge() == SourceEdge::TEMPORARY_TAIL;
     } else {
       next.beforeEnd = pin.edge() == SourceEdge::FINAL_END;
+      next.temporaryAfter = anchor.kind == SourceAnchorKind::TAIL && loading == LoadKind::REPLACE;
     }
     if (loading == LoadKind::REPLACE || !segmentCount || bufferRevision != pin.dataRevision()) {
       segments[0] = std::move(next);
@@ -1481,6 +2171,11 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
       segmentCount = 1;
       segments[0].beforeEnd = segments[0].beforeEnd || entryKnown;
       offset = replacementOffset;
+      if (direction == SourceDirection::BACKWARD && anchor.kind == SourceAnchorKind::TAIL) {
+        wanted =
+          std::max<std::int64_t>(0, static_cast<std::int64_t>(pin.size()) - static_cast<std::int64_t>(visibleRows));
+        offset = wanted;
+      }
     } else if (!pin.size()) {
       if (loading == LoadKind::APPEND) {
         segments[segmentCount - 1].afterEnd = next.afterEnd;
@@ -1590,6 +2285,10 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     failedSerial = bufferSerial;
     failedIntent = this->intentGeneration;
     failedOffset = wanted;
+    const bool hasBefore = wanted > 0 || (window->capabilities().backward && segmentCount && !segments[0].beforeEnd);
+    const bool hasAfter =
+      wanted + static_cast<std::int64_t>(values.size()) < static_cast<std::int64_t>(storedRows()) ||
+      (segmentCount && !segments[segmentCount - 1].afterEnd && !segments[segmentCount - 1].temporaryAfter);
 
     struct Metadata {
       WindowRowsController &host;
@@ -1598,17 +2297,30 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
       std::uint64_t revision;
       std::int64_t offset;
       std::uint64_t serial;
-    } metadata{*this, declaration.provider, declaration.resource, bufferRevision, wanted, bufferSerial};
+      bool before;
+      bool after;
+    } metadata{*this,   declaration.provider, declaration.resource, bufferRevision, wanted, bufferSerial, hasBefore,
+               hasAfter};
 
-    return this->commitRows({}, {}, values, ++publication, 0, declaration.resource, window->stamp(), {},
-                            {&metadata, [](void *context) noexcept {
-                               auto &next = *static_cast<Metadata *>(context);
-                               next.host.preparedProvider.swap(next.provider);
-                               next.host.preparedResource = next.resource;
-                               next.host.preparedRevision = next.revision;
-                               next.host.offset = next.offset;
-                               next.host.renderedSerial = next.serial;
-                             }});
+    auto committed = this->commitRows({}, {}, values, ++publication, 0, declaration.resource, window->stamp(), {},
+                                      {&metadata, [](void *context) noexcept {
+                                         auto &next = *static_cast<Metadata *>(context);
+                                         next.host.preparedProvider.swap(next.provider);
+                                         next.host.preparedResource = next.resource;
+                                         next.host.preparedRevision = next.revision;
+                                         next.host.offset = next.offset;
+                                         next.host.renderedSerial = next.serial;
+                                         next.host.position.hasBefore = next.before;
+                                         next.host.position.hasAfter = next.after;
+                                       }});
+    if (!committed || !this->active()) {
+      return committed;
+    }
+    if (deferredCurrentDelta) {
+      const auto delta = *std::exchange(deferredCurrentDelta, {});
+      return moveCurrent(delta);
+    }
+    return {};
   }
 
   std::expected<void, TreeError> updateWindow() {

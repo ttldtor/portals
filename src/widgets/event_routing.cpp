@@ -11,6 +11,10 @@ bool detail::RowTreeAccess::dispatching(const EventRouter &router) noexcept {
   return router.state_->dispatching || router.state_->deliveringFocus;
 }
 
+std::uint64_t detail::RowTreeAccess::focusGeneration(const EventRouter &router) noexcept {
+  return router.focusGeneration();
+}
+
 namespace {
 std::optional<Action> keyAction(InputKey key) {
   switch (key) {
@@ -545,6 +549,26 @@ std::expected<DispatchResult, TreeError> EventRouter::dispatch(const InputEvent 
       }
 
       if (action && key->action != KeyAction::RELEASE) {
+        if (*action == Action::CANCEL) {
+          // Row navigation owns Escape admission. Sending it to a line editor first
+          // would silently cancel its draft before the host can refuse the transition.
+          for (auto ancestor = *target; ancestor != Node<Widget>{};) {
+            const auto *entry = scope(ancestor);
+
+            if (entry && entry->composite && *target != entry->root) {
+              return route(entry->root, ActionEvent{*action, key->modifiers, ClickSource::KEYBOARD, key->action}, true);
+            }
+
+            auto parent = tree().inputParent(ancestor);
+
+            if (!parent) {
+              return std::unexpected(parent.error());
+            }
+
+            ancestor = *parent;
+          }
+        }
+
         struct DialogKeyPhase {
           EventRouter::State &state;
           bool cancel;

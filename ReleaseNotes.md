@@ -25,6 +25,14 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Virtual rows now provide one outer Tab stop and separate row-navigation and
+  control-editing modes. Up/Down move the current row instead of only shifting
+  the reading window; Enter/F2 enters row controls and Escape returns after
+  checked editing admission. Finite views expose a styled scrollbar and current
+  marker; read-only position bindings distinguish exact indices from unknown
+  source extents. Updated examples bound their width and identify the accepted
+  active source separately from keyboard focus.
+
 - Model-workspace guides connect shared selection, accepted values, per-record drafts,
   source switching and reading-place recovery. The city example includes a list,
   table and form; a read-only domain snapshot demonstrates a non-file LogView.

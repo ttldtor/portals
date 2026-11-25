@@ -183,14 +183,15 @@ struct Task {
 struct Fixture {
   std::unique_ptr<Application> app = take(Application::create());
   std::unique_ptr<ManagedScene> scene;
+  CellSize available{40, 2};
 
   explicit Fixture(ManagedOptions options = {}) : scene(take(ManagedScene::create(*app, options))) {
   }
 
   void prepare() {
     take(scene->afterDispatch(*app));
-    take(scene->prepare(*app, {40, 2}));
-    const auto bounds = take(CellRect::from({}, {40, 2}));
+    take(scene->prepare(*app, available));
+    const auto bounds = take(CellRect::from({}, available));
     std::optional<LayoutSnapshot> snapshot;
     take(app->tree().frame([&] {
       take(layoutTree(app->tree(), app->root(), bounds, bounds));
@@ -205,6 +206,387 @@ struct Fixture {
     prepare();
   }
 };
+
+TEST_CASE("row navigation is one outer tab stop and arrows retain host focus") {
+  Fixture fixture;
+  fixture.available = {40, 4};
+  ui::Ref<Button> before;
+  ui::Ref<Button> after;
+  auto model = ui::model(std::array{Task{false, "A"}, Task{false, "B"}, Task{false, "C"}, Task{false, "D"}});
+  ui::Ref<VirtualRows<Task>> host;
+  take(ui::mount(*fixture.scene, ui::vbox(ui::button("Before")
+                                            .onClick([] {
+                                            })
+                                            .reference(before),
+                                          ui::virtualRows(model,
+                                                          [](auto row) {
+                                                            return ui::hbox(ui::checkbox("", row.field(&Task::done)),
+                                                                            ui::label(row.value().caption));
+                                                          })
+                                            .reference(host),
+                                          ui::button("After")
+                                            .onClick([] {
+                                            })
+                                            .reference(after))));
+  fixture.settle();
+  auto position = [&] {
+    VirtualRowsPosition result;
+    take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+      INFO("host failure=", view.lastError() ? static_cast<int>(*view.lastError()) : -1);
+      CHECK_FALSE(view.lastError());
+      result = view.position();
+    }));
+    return result;
+  };
+  CHECK(position().currentIndex == 0);
+  CHECK(position().firstIndex == 0);
+  CHECK(position().count == 4);
+  CHECK(position().visible == 2);
+  take(fixture.app->router().setFocus(before.node()));
+  CHECK(take(fixture.app->router().traverse()) == host.node());
+  for (int step = 0; step != 8; ++step) {
+    take(fixture.app->router().dispatch(KeyEvent{InputKey::DOWN}));
+    fixture.settle();
+    CHECK(take(fixture.app->router().focused()) == host.node());
+  }
+  CHECK(position().currentIndex == 3);
+  CHECK(position().firstIndex == 2);
+  CHECK(position().hasBefore == true);
+  CHECK(position().hasAfter == false);
+  CHECK(take(fixture.app->router().traverse()) == after.node());
+  CHECK(take(fixture.app->router().traverse(true)) == host.node());
+  CHECK(take(fixture.app->router().traverse(true)) == before.node());
+  Node<ScrollBar> scrollbar;
+  take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+    scrollbar = view.state()->scrollbar;
+  }));
+  take(fixture.app->router().setFocus(scrollbar));
+  CHECK(take(fixture.app->router().traverse()) == after.node());
+}
+
+TEST_CASE("current row controls use a local Tab cycle and Escape retains column") {
+  Fixture fixture;
+  auto model = ui::model(std::array{Task{false, "A"}, Task{false, "B"}, Task{false, "C"}});
+  ui::Ref<VirtualRows<Task>> host;
+
+  struct Controls {
+    RowId id;
+    ui::Ref<CheckBox> box;
+    ui::Ref<LineEdit> editor;
+  };
+
+  std::vector<Controls> controls;
+  take(ui::mount(*fixture.scene, ui::virtualRows(model, [&](auto row) {
+                                   Controls current{row.id()};
+                                   controls.push_back(current);
+                                   return ui::hbox(ui::checkbox("", row.field(&Task::done)).reference(current.box),
+                                                   ui::lineEdit(row.field(&Task::caption)).reference(current.editor));
+                                 }).reference(host)));
+  fixture.settle();
+  take(fixture.app->router().setFocus(host.node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ENTER}));
+  CHECK(take(fixture.app->router().focused()) == controls[0].box.node());
+  CHECK(take(fixture.app->router().traverse()) == controls[0].editor.node());
+  CHECK(take(fixture.app->router().traverse()) == controls[0].box.node());
+  CHECK(take(fixture.app->router().traverse(true)) == controls[0].editor.node());
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::UP}));
+  CHECK(take(fixture.app->router().focused()) == controls[0].editor.node());
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ESCAPE}));
+  CHECK(take(fixture.app->router().focused()) == host.node());
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::DOWN}));
+  fixture.settle();
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::F2}));
+  CHECK(take(fixture.app->router().focused()) == controls[1].editor.node());
+}
+
+TEST_CASE("Escape row navigation admission does not cancel completion drafts") {
+  Fixture fixture;
+  auto model = ui::model(std::array{Task{false, "A"}, Task{false, "B"}, Task{false, "C"}});
+  ui::Ref<VirtualRows<Task>> host;
+  std::vector<ui::Ref<LineEdit>> editors;
+  std::vector<ui::RowContext<Task>> rows;
+  take(ui::mount(*fixture.scene, ui::virtualRows(model,
+                                                 [&](auto row) {
+                                                   ui::Ref<LineEdit> editor;
+                                                   rows.push_back(row);
+                                                   editors.push_back(editor);
+                                                   return ui::lineEdit(row.field(&Task::caption)).reference(editor);
+                                                 },
+                                                 {.editing = {.mode = EditMode::ON_COMPLETION}})
+                                   .reference(host)));
+  fixture.settle();
+  take(fixture.app->router().setFocus(host.node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ENTER}));
+  CHECK(take(rows[0].field(&Task::caption).set("unfinished")) == EditStatus::DIRTY);
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ESCAPE}));
+  CHECK(take(fixture.app->router().focused()) == editors[0].node());
+  CHECK(*take(rows[0].field(&Task::caption).snapshot()).draft == "unfinished");
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    CHECK(view.lastError() == TreeError::WOULD_BLOCK);
+  }));
+  auto refused = setVirtualRowsFirst(fixture.app->tree(), host.node(), 2);
+  REQUIRE_FALSE(refused);
+  CHECK(refused.error() == TreeError::WOULD_BLOCK);
+  take(rows[0].commit());
+  fixture.settle();
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ESCAPE}));
+  CHECK(take(fixture.app->router().focused()) == host.node());
+}
+
+TEST_CASE("row position is reactive read-only and qualified by the original host lifetime") {
+  Fixture fixture;
+  fixture.available = {40, 3};
+  auto model = ui::model(std::array{0, 1, 2, 3});
+  ui::Ref<VirtualRows<int>> host;
+  auto position = host.position();
+  take(ui::mount(*fixture.scene, ui::vbox(ui::virtualRows(model,
+                                                          [](auto row) {
+                                                            return ui::label(std::to_string(row.value()));
+                                                          })
+                                            .reference(host),
+                                          ui::label(position, [](const VirtualRowsPosition &value) {
+                                            return std::to_string(value.currentIndex.value_or(99));
+                                          }))));
+  fixture.settle();
+  CHECK(take(position.value().snapshot())->value.currentIndex == 0);
+  take(fixture.app->router().setFocus(host.node()));
+  for (int step = 0; step != 3; ++step) {
+    take(fixture.app->router().dispatch(KeyEvent{InputKey::DOWN}));
+  }
+  fixture.settle();
+  CHECK(take(position.value().snapshot())->value.currentIndex == 3);
+  auto denied = position.value().set(take(position.value().snapshot())->value);
+  REQUIRE_FALSE(denied);
+  CHECK(std::get<TreeError>(denied.error().cause) == TreeError::INVALID_ARGUMENT);
+  take(fixture.scene->remove(host.node()));
+  CHECK_FALSE(position.value().snapshot());
+}
+
+TEST_CASE("wheel eviction of an editing row retains current and recovers to its host") {
+  Fixture fixture;
+  auto model = ui::model(std::array{Task{false, "A"}, Task{false, "B"}, Task{false, "C"}, Task{false, "D"}});
+  ui::Ref<VirtualRows<Task>> host;
+  std::vector<ui::Ref<LineEdit>> editors;
+  take(ui::mount(*fixture.scene, ui::virtualRows(model, [&](auto row) {
+                                   ui::Ref<LineEdit> editor;
+                                   editors.push_back(editor);
+                                   return ui::lineEdit(row.field(&Task::caption)).reference(editor);
+                                 }).reference(host)));
+  fixture.settle();
+  // Direct focus has the same complete order as mouse focus, independent of collapsed outer Tab.
+  take(fixture.app->router().setFocus(editors[0].node()));
+  CHECK(take(fixture.app->router().traverse()) == editors[0].node());
+  take(scrollVirtualRows(fixture.app->tree(), host.node(), 2));
+  fixture.settle();
+  CHECK(take(fixture.app->router().focused()) == host.node());
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    CHECK(view.position().currentIndex == 0);
+    CHECK(view.position().firstIndex == 2);
+    CHECK_FALSE(view.position().editing);
+  }));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::DOWN}));
+  fixture.settle();
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    CHECK(view.position().currentIndex == 1);
+    CHECK(view.position().firstIndex == 1);
+  }));
+}
+
+TEST_CASE("semantic current survives source round trip and current removal selects nearest") {
+  Fixture fixture;
+  auto a = ui::model(std::array{0, 1, 2, 3, 4});
+  auto b = ui::model(std::array{10, 11, 12, 13});
+  auto navigation = ui::navigation(a);
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(navigation, [](auto row) {
+                                   return ui::label(std::to_string(row.value()));
+                                 }).reference(host)));
+  auto position = [&] {
+    VirtualRowsPosition result;
+    take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+      INFO("host failure=", view.lastError() ? static_cast<int>(*view.lastError()) : -1);
+      CHECK_FALSE(view.lastError());
+      result = view.position();
+    }));
+    return result;
+  };
+  fixture.settle();
+  take(fixture.app->router().setFocus(host.node()));
+  for (int index = 0; index != 3; ++index) {
+    take(fixture.app->router().dispatch(KeyEvent{InputKey::DOWN}));
+  }
+  fixture.settle();
+  const auto remembered = position();
+  CHECK(remembered.currentIndex == 3);
+  CHECK(take(navigation.currentRow()) == remembered.current);
+  take(navigation.setModel(b));
+  fixture.settle();
+  CHECK(position().resource != remembered.resource);
+  CHECK(position().currentIndex == 0);
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::DOWN}));
+  fixture.settle();
+  take(navigation.setModel(a));
+  fixture.settle();
+  CHECK(position().current == remembered.current);
+  CHECK(position().currentIndex == remembered.currentIndex);
+  CHECK(position().firstIndex == remembered.firstIndex);
+  take(a.erase(3));
+  fixture.settle();
+  CHECK(position().currentIndex == 3);
+  CHECK(position().current != remembered.current);
+  take(a.clear());
+  fixture.settle();
+  CHECK(position().count == 0);
+  CHECK(position().visible == 0);
+  CHECK_FALSE(position().current);
+  for (const auto key : {InputKey::UP, InputKey::DOWN, InputKey::HOME, InputKey::END}) {
+    take(fixture.app->router().dispatch(KeyEvent{key}));
+    fixture.settle();
+    CHECK(take(fixture.app->router().focused()) == host.node());
+  }
+}
+
+TEST_CASE("persistent field identity takes precedence over a changed row column order") {
+  Fixture fixture;
+  auto model = ui::model(std::array{Task{false, "A"}, Task{true, "B"}});
+  ui::Ref<VirtualRows<Task>> host;
+  std::vector<ui::Ref<LineEdit>> editors;
+  take(ui::mount(*fixture.scene, ui::virtualRows(model, [&](auto row) {
+                                   ui::Ref<LineEdit> editor;
+                                   editors.push_back(editor);
+                                   auto field =
+                                     ui::lineEdit(row.field("caption", &Task::caption, {})).reference(editor);
+                                   auto box = ui::checkbox("", row.field(&Task::done));
+                                   return row.value().done ? ui::hbox(std::move(field), std::move(box))
+                                                           : ui::hbox(std::move(box), std::move(field));
+                                 }).reference(host)));
+  fixture.settle();
+  take(fixture.app->router().setFocus(editors[0].node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ESCAPE}));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::DOWN}));
+  fixture.settle();
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ENTER}));
+  CHECK(take(fixture.app->router().focused()) == editors[1].node());
+}
+
+TEST_CASE("offscreen finite current survives source history and resolves deletion independently of viewport") {
+  for (const bool shared : {false, true}) {
+    INFO("shared navigation=", shared);
+    Fixture fixture;
+    auto a = ui::model(std::array{0, 1, 2, 3, 4, 5});
+    auto b = ui::model(std::array{10, 11, 12});
+    auto navigation = ui::navigation(a);
+    ui::Ref<VirtualRows<int>> host;
+    auto factory = [](auto row) {
+      return ui::label(std::to_string(row.value()));
+    };
+    auto view = shared ? ui::virtualRows(navigation, factory) : ui::virtualRows(a, factory);
+    take(ui::mount(*fixture.scene, std::move(view).reference(host)));
+    auto position = [&] {
+      VirtualRowsPosition value;
+      take(fixture.app->tree().read(host.node(), [&](const auto &widget) {
+        CHECK_FALSE(widget.lastError());
+        value = widget.position();
+      }));
+      return value;
+    };
+    auto change = [&](ui::Model<int> target) {
+      if (shared) {
+        take(navigation.setModel(std::move(target)));
+      } else {
+        take(host.setModel(std::move(target)));
+      }
+      fixture.settle();
+    };
+    fixture.settle();
+    take(scrollVirtualRows(fixture.app->tree(), host.node(), 3));
+    fixture.settle();
+    CHECK(position().current == RowId{1, 1});
+    CHECK(position().currentIndex == 0);
+    change(b);
+    change(a);
+    CHECK(position().current == RowId{1, 1});
+    CHECK(position().currentIndex == 0);
+    CHECK(position().firstIndex == 3);
+    take(a.erase(0));
+    fixture.settle();
+    CHECK(position().current == RowId{2, 1});
+    CHECK(position().currentIndex == 0);
+    if (shared) {
+      CHECK(take(navigation.currentRow()) == position().current);
+    } else {
+      CHECK(position().firstIndex == 2);
+    }
+  }
+}
+
+TEST_CASE("enter reveals an offscreen current and delayed handoff does not steal outside focus") {
+  Fixture fixture;
+  fixture.available = {40, 3};
+  auto model = ui::model(std::array{Task{false, "A"}, Task{false, "B"}, Task{false, "C"}, Task{false, "D"}});
+  ui::Ref<VirtualRows<Task>> host;
+  ui::Ref<Button> after;
+  std::vector<std::pair<RowId, ui::Ref<LineEdit>>> editors;
+  take(ui::mount(*fixture.scene,
+                 ui::vbox(ui::virtualRows(model,
+                                          [&](auto row) {
+                                            ui::Ref<LineEdit> editor;
+                                            editors.emplace_back(row.id(), editor);
+                                            return ui::lineEdit(row.field(&Task::caption)).reference(editor);
+                                          })
+                            .reference(host),
+                          ui::button("After")
+                            .onClick([] {
+                            })
+                            .reference(after))));
+  fixture.settle();
+  take(fixture.app->router().setFocus(host.node()));
+  take(scrollVirtualRows(fixture.app->tree(), host.node(), 2));
+  fixture.settle();
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ENTER}));
+  fixture.settle();
+  auto current = std::ranges::find_if(editors.rbegin(), editors.rend(), [](const auto &entry) {
+    return entry.first == RowId{1, 1};
+  });
+  REQUIRE(current != editors.rend());
+  CHECK(take(fixture.app->router().focused()) == current->second.node());
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ESCAPE}));
+  take(scrollVirtualRows(fixture.app->tree(), host.node(), 2));
+  fixture.settle();
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::F2}));
+  take(fixture.app->router().setFocus(after.node()));
+  fixture.settle();
+  CHECK(take(fixture.app->router().focused()) == after.node());
+  take(fixture.app->router().setFocus(host.node()));
+  take(scrollVirtualRows(fixture.app->tree(), host.node(), 2));
+  fixture.settle();
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::F2}));
+  take(fixture.app->router().setFocus(after.node()));
+  take(fixture.app->router().setFocus(host.node()));
+  fixture.settle();
+  CHECK(take(fixture.app->router().focused()) == host.node());
+}
+
+TEST_CASE("Page in a row editor scrolls its viewport while retaining semantic current") {
+  Fixture fixture;
+  auto source = ui::model(std::array{Task{false, "A"}, Task{false, "B"}, Task{false, "C"}, Task{false, "D"}});
+  ui::Ref<VirtualRows<Task>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source, [](auto row) {
+                                   return ui::lineEdit(row.field(&Task::caption));
+                                 }).reference(host)));
+  fixture.settle();
+  take(fixture.app->router().setFocus(host.node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ENTER}));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::PAGE_DOWN}));
+  fixture.settle();
+  CHECK(take(fixture.app->router().focused()) == host.node());
+  take(fixture.app->tree().read(host.node(), [](const auto &widget) {
+    CHECK_FALSE(widget.lastError());
+    CHECK(widget.position().current == RowId{1, 1});
+    CHECK(widget.position().currentIndex == 0);
+    CHECK(widget.position().firstIndex == 2);
+  }));
+}
 
 TEST_CASE("real delegated checkbox writes exact model record and survives eviction and reorder") {
   Fixture fixture;
@@ -411,6 +793,64 @@ private:
   std::array<ModelRow<int>, 8> rows_;
 };
 
+class LargeFiniteRows final : public ModelSnapshot<int> {
+public:
+  static constexpr std::uint64_t COUNT = (std::uint64_t{1} << 54) + 7;
+
+  LargeFiniteRows() : ModelSnapshot(1, COUNT) {
+  }
+
+  ModelRows<int> read(RowRange range) const override {
+    ++reads;
+    if (range.first <= 1 && range.count <= 2 - range.first) {
+      return {RangeState::READY, std::span(first_).subspan(range.first, range.count), {}};
+    }
+    if (range.first >= COUNT - 2 && range.count <= COUNT - range.first) {
+      return {RangeState::READY, std::span(last_).subspan(range.first - (COUNT - 2), range.count), {}};
+    }
+    return {};
+  }
+
+  RowLookup locateRow(RowId id) const override {
+    return id.generation == 1 && id.value > 0 && id.value <= COUNT ? RowLookup{RowLookupState::FOUND, id.value - 1}
+                                                                   : RowLookup{RowLookupState::NOT_FOUND, 0};
+  }
+
+  mutable std::size_t reads{};
+
+private:
+  std::array<ModelRow<int>, 2> first_{{{{1, 1}, 0}, {{2, 1}, 1}}};
+  std::array<ModelRow<int>, 2> last_{{{{COUNT - 1, 1}, 2}, {{COUNT, 1}, 3}}};
+};
+
+TEST_CASE("finite current and scrollbar preserve exact uint64 positions above double precision") {
+  Fixture fixture;
+  auto provider = std::make_shared<LargeFiniteRows>();
+  auto source = ui::model<int>(provider);
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source, [](auto row) {
+                                   return ui::label(std::to_string(row.value()));
+                                 }).reference(host)));
+  fixture.settle();
+  take(fixture.app->router().setFocus(host.node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::END}));
+  fixture.settle();
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    CHECK_FALSE(view.lastError());
+    CHECK(view.position().count == LargeFiniteRows::COUNT);
+    CHECK(view.position().currentIndex == LargeFiniteRows::COUNT - 1);
+    CHECK(view.position().firstIndex == LargeFiniteRows::COUNT - 2);
+  }));
+  take(setVirtualRowsFirst(fixture.app->tree(), host.node(), LargeFiniteRows::COUNT - 1));
+  fixture.settle();
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    CHECK_FALSE(view.lastError());
+    CHECK(view.position().firstIndex == LargeFiniteRows::COUNT - 1);
+    CHECK(view.position().visible == 1);
+  }));
+  CHECK(provider->reads <= 4);
+}
+
 TEST_CASE("finite pending sources retain one qualified request and consume its completion") {
   Fixture fixture;
   std::optional<ModelRequest<int>> work;
@@ -440,6 +880,55 @@ TEST_CASE("finite pending sources retain one qualified request and consume its c
   fixture.settle();
   CHECK(built == std::vector<int>{0, 1});
   CHECK(requests == 1);
+}
+
+TEST_CASE("finite pending offscreen current shares one consumer without replacing the ready viewport") {
+  Fixture fixture;
+  std::optional<ModelRequest<int>> work;
+  std::vector<RowRange> requests;
+  auto source = ui::model<int>(std::make_shared<FiniteRows>(false), {},
+                               [&](const auto &, const auto &request) -> std::expected<void, TreeError> {
+                                 if (request) {
+                                   work = *request;
+                                   requests.push_back(request->range());
+                                 }
+                                 return {};
+                               });
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source, [](auto row) {
+                                   return ui::label(std::to_string(row.value()));
+                                 }).reference(host)));
+  auto deliver = [&] {
+    auto request = std::exchange(work, {});
+    REQUIRE(request);
+    std::jthread worker([&] {
+      take(request->complete(std::make_shared<FiniteRows>(true)));
+    });
+    worker.join();
+    take(fixture.app->scheduler().dispatch());
+    fixture.settle();
+  };
+  fixture.settle();
+  deliver();
+  take(scrollVirtualRows(fixture.app->tree(), host.node(), 2));
+  fixture.settle();
+  REQUIRE(requests.size() == 2);
+  CHECK(requests.back().first == 2);
+  deliver();
+  REQUIRE(requests.size() == 3);
+  CHECK(requests.back().first == 0);
+  CHECK(requests.back().count == 1);
+  take(fixture.app->tree().read(host.node(), [](const auto &widget) {
+    CHECK(widget.position().firstIndex == 0);
+  }));
+  deliver();
+  CHECK(requests.size() == 3);
+  take(fixture.app->tree().read(host.node(), [](const auto &widget) {
+    CHECK_FALSE(widget.lastError());
+    CHECK(widget.position().firstIndex == 2);
+    CHECK(widget.position().currentIndex == 0);
+    CHECK(widget.position().current == RowId{1, 1});
+  }));
 }
 
 TEST_CASE("cold row-local declarations stay closed until publication without dereferencing a null scene") {
@@ -678,6 +1167,188 @@ template <class T> struct NativeFixture {
   }
 };
 
+TEST_CASE("native keyboard current is cursor qualified and forward-only boundaries retain host focus") {
+  NativeFixture<ArenaTask> fixture;
+  auto provider = std::make_shared<CursorTasks>();
+  provider->caps = {};
+  auto source = ui::model<ArenaTask>(provider);
+  ui::Ref<VirtualRows<ArenaTask>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source, [](auto row) {
+                                   return ui::label(row.value().caption);
+                                 }).reference(host)));
+  auto settle = [&] {
+    for (int step = 0; step != 4; ++step) {
+      fixture.cycle();
+    }
+  };
+  auto position = [&] {
+    VirtualRowsPosition value;
+    take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+      value = view.position();
+      CHECK_FALSE(view.lastError());
+      CHECK_FALSE(view.state()->scrollbarVisible);
+    }));
+    return value;
+  };
+  settle();
+  take(fixture.app->router().setFocus(host.node()));
+  CHECK(position().current == RowId{1, 1});
+  CHECK_FALSE(position().count);
+  CHECK_FALSE(position().firstIndex);
+  CHECK_FALSE(position().currentIndex);
+  CHECK(position().hasBefore == false);
+  CHECK(position().hasAfter == true);
+  for (const auto key : {InputKey::UP, InputKey::END}) {
+    take(fixture.app->router().dispatch(KeyEvent{key}));
+    settle();
+    CHECK(take(fixture.app->router().focused()) == host.node());
+    CHECK(position().current == RowId{1, 1});
+  }
+  for (int step = 0; step != 5; ++step) {
+    take(fixture.app->router().dispatch(KeyEvent{InputKey::DOWN}));
+    settle();
+    CHECK(take(fixture.app->router().focused()) == host.node());
+  }
+  CHECK(position().current == RowId{6, 1});
+  CHECK(provider->loads < 10);
+  CHECK_FALSE(position().count);
+}
+
+TEST_CASE("native current reveals by stable row after eviction and survives source round trip") {
+  NativeFixture<ArenaTask> fixture;
+  auto a = ui::model<ArenaTask>(std::make_shared<CursorTasks>());
+  auto b = ui::model<ArenaTask>(std::make_shared<CursorTasks>());
+  ui::Ref<VirtualRows<ArenaTask>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(a, [](auto row) {
+                                   return ui::label(row.value().caption);
+                                 }).reference(host)));
+  auto settle = [&] {
+    for (int step = 0; step != 6; ++step) {
+      fixture.cycle();
+    }
+  };
+  auto position = [&] {
+    VirtualRowsPosition value;
+    take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+      INFO("host failure=", view.lastError() ? static_cast<int>(*view.lastError()) : -1);
+      CHECK_FALSE(view.lastError());
+      value = view.position();
+    }));
+    return value;
+  };
+  auto key = [&](InputKey key) {
+    take(fixture.app->router().dispatch(KeyEvent{key}));
+    settle();
+    CHECK(take(fixture.app->router().focused()) == host.node());
+  };
+  settle();
+  take(fixture.app->router().setFocus(host.node()));
+  for (int step = 0; step != 3; ++step) {
+    key(InputKey::DOWN);
+  }
+  CHECK(position().current == RowId{4, 1});
+  take(scrollVirtualRows(fixture.app->tree(), host.node(), 6));
+  settle();
+  CHECK(position().current == RowId{4, 1});
+
+  struct PaintCommands final : PaintContext {
+    std::size_t count{};
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      count += commands.size();
+      return {};
+    }
+  };
+
+  auto markerCount = [&] {
+    PaintCommands sink;
+    take(fixture.app->tree().frame([&] {
+      take(fixture.app->tree().paint(host.node(), sink));
+    }));
+    return sink.count;
+  };
+  CHECK(markerCount() == 0);
+  key(InputKey::DOWN);
+  CHECK(position().current == RowId{5, 1});
+  CHECK(markerCount() == 1);
+  take(host.setModel(b));
+  settle();
+  CHECK(position().current == RowId{1, 1});
+  take(host.setModel(a));
+  settle();
+  CHECK(position().current == RowId{5, 1});
+  key(InputKey::END);
+  CHECK(position().current == RowId{1000000, 1});
+  CHECK(position().hasAfter == false);
+  key(InputKey::HOME);
+  CHECK(position().current == RowId{1, 1});
+  CHECK(position().hasBefore == false);
+  CHECK_FALSE(position().currentIndex);
+  CHECK_FALSE(position().count);
+}
+
+TEST_CASE("rejected native window preserves the entire committed orientation") {
+  NativeFixture<ArenaTask> fixture;
+  auto source = ui::model<ArenaTask>(std::make_shared<CursorTasks>());
+  ui::Ref<VirtualRows<ArenaTask>> host;
+  bool reject{};
+  take(ui::mount(*fixture.scene, ui::virtualRows(source, [&](auto row) {
+                                   if (reject) {
+                                     throw std::runtime_error("reject newly staged row");
+                                   }
+                                   return ui::label(row.value().caption);
+                                 }).reference(host)));
+  auto settle = [&] {
+    for (int step = 0; step != 4; ++step) {
+      fixture.cycle();
+    }
+  };
+  settle();
+  VirtualRowsPosition before;
+  take(fixture.app->tree().read(host.node(), [&](const auto &widget) {
+    before = widget.position();
+  }));
+  reject = true;
+  take(scrollVirtualRows(fixture.app->tree(), host.node(), 2));
+  settle();
+  take(fixture.app->tree().read(host.node(), [&](const auto &widget) {
+    CHECK(widget.position() == before);
+    CHECK(widget.lastError() == TreeError::CALLBACK_FAILED);
+    CHECK(widget.mountedRows() == before.visible);
+  }));
+}
+
+TEST_CASE("native Enter reveals the accepted current before entering its real control") {
+  NativeFixture<ArenaTask> fixture;
+  auto source = ui::model<ArenaTask>(std::make_shared<CursorTasks>());
+  ui::Ref<VirtualRows<ArenaTask>> host;
+  std::vector<std::pair<RowId, ui::Ref<Button>>> buttons;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source, [&](auto row) {
+                                   ui::Ref<Button> button;
+                                   buttons.emplace_back(row.id(), button);
+                                   return ui::button(row.value().caption)
+                                     .onClick([] {
+                                     })
+                                     .reference(button);
+                                 }).reference(host)));
+  auto settle = [&] {
+    for (int step = 0; step != 6; ++step) {
+      fixture.cycle();
+    }
+  };
+  settle();
+  take(fixture.app->router().setFocus(host.node()));
+  take(scrollVirtualRows(fixture.app->tree(), host.node(), 6));
+  settle();
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ENTER}));
+  settle();
+  auto current = std::ranges::find_if(buttons.rbegin(), buttons.rend(), [](const auto &entry) {
+    return entry.first == RowId{1, 1};
+  });
+  REQUIRE(current != buttons.rend());
+  CHECK(take(fixture.app->router().focused()) == current->second.node());
+}
+
 TEST_CASE("native conflicting persistent field keys fail checked row staging") {
   NativeFixture<ArenaTask> fixture;
   auto source = ui::model<ArenaTask>(std::make_shared<CursorTasks>());
@@ -704,6 +1375,45 @@ struct RetiredRowHook {
     }
   }
 };
+
+TEST_CASE("deferred Enter does not focus a superseded source accepted by a retired row callback") {
+  Fixture fixture;
+  auto a = ui::model(std::array{Task{false, "A0"}, Task{false, "A1"}, Task{false, "A2"}, Task{false, "A3"}});
+  auto b = ui::model(std::array{Task{false, "B0"}, Task{false, "B1"}, Task{false, "B2"}, Task{false, "B3"}});
+  ui::Ref<VirtualRows<Task>> host;
+  bool armed{};
+  bool switched{};
+  std::optional<ManagedError> failure;
+  take(ui::mount(*fixture.scene, ui::virtualRows(a, [&](auto row) {
+                                   auto hook = std::make_shared<RetiredRowHook>();
+                                   if (row.value().caption == "A2") {
+                                     hook->callback = [&] {
+                                       if (armed && !switched) {
+                                         switched = true;
+                                         auto changed = host.setModel(b);
+                                         if (!changed) {
+                                           failure = changed.error();
+                                         }
+                                       }
+                                     };
+                                   }
+                                   return ui::hbox(ui::lineEdit(row.field(&Task::caption)),
+                                                   ui::button("Keep").onClick([hook] {
+                                                   }));
+                                 }).reference(host)));
+  fixture.settle();
+  take(fixture.app->router().setFocus(host.node()));
+  take(scrollVirtualRows(fixture.app->tree(), host.node(), 2));
+  fixture.settle();
+  const auto generation = portals::detail::RowTreeAccess::focusGeneration(fixture.app->router());
+  armed = true;
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::ENTER}));
+  fixture.settle();
+  CHECK(switched);
+  CHECK_FALSE(failure);
+  CHECK(take(fixture.app->router().focused()) == host.node());
+  CHECK(portals::detail::RowTreeAccess::focusGeneration(fixture.app->router()) == generation);
+}
 
 TEST_CASE("native publication metadata precedes destructor source swaps and remembers the correct anchor") {
   NativeFixture<ArenaTask> fixture;
@@ -1238,6 +1948,151 @@ struct ReadyRowsCleanup {
     (void)scene.step();
   }
 };
+
+TEST_CASE("shared completion validation refuses row navigation through the production ready loop") {
+  ReadyRowsTerminal terminal;
+  auto app = take(Application::create({}, terminal.clock()));
+  auto scene = take(ManagedScene::create(*app));
+  auto model = ui::model(std::array{Task{false, "A"}, Task{false, "B"}, Task{false, "C"}});
+  auto navigation = ui::navigation(model);
+  auto edit = ui::edit(navigation, {.mode = EditMode::ON_COMPLETION});
+  auto field = edit.field(&Task::caption);
+  ui::Ref<LineEdit> editor;
+  ui::Ref<VirtualRows<Task>> host;
+  take(ui::mount(*scene, ui::vbox(ui::virtualRows(navigation,
+                                                  [](auto row) {
+                                                    return ui::label(row.value().caption);
+                                                  })
+                                    .reference(host),
+                                  ui::lineEdit(editor, field, {.validate = [](std::string_view value) {
+                                                 return !value.ends_with('x');
+                                               }}))));
+  take(scene->start(terminal));
+  ReadyRowsCleanup cleanup{*app, *scene};
+  auto steps = [&] {
+    for (int step = 0; step != 5; ++step) {
+      terminal.time += 20;
+      take(scene->step());
+    }
+  };
+  steps();
+  take(app->router().setFocus(editor.node()));
+  terminal.input = TextInputEvent{U'x'};
+  steps();
+  const auto original = take(field.snapshot());
+  REQUIRE(original.draft);
+  CHECK(original.draft->ends_with('x'));
+  take(app->router().setFocus(host.node()));
+  terminal.input = KeyEvent{InputKey::DOWN};
+  steps();
+  CHECK(take(navigation.currentRow()) == RowId{1, 1});
+  take(app->tree().read(host.node(), [](const auto &widget) {
+    CHECK(widget.position().current == RowId{1, 1});
+    CHECK(widget.position().currentIndex == 0);
+    CHECK(widget.position().firstIndex == 0);
+    CHECK(widget.lastError() == TreeError::WOULD_BLOCK);
+  }));
+  CHECK(take(app->router().focused()) == host.node());
+  const auto retained = take(field.snapshot());
+  REQUIRE(retained.draft);
+  CHECK(*retained.draft == *original.draft);
+  CHECK_FALSE(terminal.closed);
+}
+
+TEST_CASE("production row navigation retains focus through arrows wheel and refused Escape") {
+  ReadyRowsTerminal terminal;
+  auto app = take(Application::create({}, terminal.clock()));
+  auto scene = take(ManagedScene::create(*app));
+  auto model = ui::model(std::array{Task{false, "A"}, Task{false, "B"}, Task{false, "C"}, Task{false, "D"},
+                                    Task{false, "E"}, Task{false, "F"}, Task{false, "G"}, Task{false, "H"}});
+  ui::Ref<Button> before;
+  ui::Ref<Button> after;
+  ui::Ref<VirtualRows<Task>> host;
+  take(ui::mount(*scene, ui::vbox(ui::button("Before")
+                                    .onClick([] {
+                                    })
+                                    .reference(before),
+                                  ui::virtualRows(model,
+                                                  [](auto row) {
+                                                    return ui::hbox(ui::checkbox("", row.field(&Task::done)),
+                                                                    ui::lineEdit(row.field(&Task::caption)));
+                                                  },
+                                                  {.editing = {.mode = EditMode::ON_COMPLETION}})
+                                    .reference(host),
+                                  ui::button("After")
+                                    .onClick([] {
+                                    })
+                                    .reference(after))));
+  take(scene->start(terminal));
+  ReadyRowsCleanup cleanup{*app, *scene};
+  auto steps = [&] {
+    for (int step = 0; step != 5; ++step) {
+      terminal.time += 20;
+      take(scene->step());
+    }
+  };
+  auto key = [&](InputKey value, InputModifiers modifiers = {}) {
+    terminal.input = KeyEvent{.key = value, .modifiers = modifiers};
+    steps();
+  };
+  auto position = [&] {
+    VirtualRowsPosition value;
+    take(app->tree().read(host.node(), [&](const auto &view) {
+      value = view.position();
+    }));
+    return value;
+  };
+  steps();
+  CHECK(take(app->router().focused()) == before.node());
+  key(InputKey::TAB);
+  CHECK(take(app->router().focused()) == host.node());
+  for (int index = 0; index != 12; ++index) {
+    key(InputKey::DOWN);
+    CHECK(take(app->router().focused()) == host.node());
+  }
+  CHECK(position().currentIndex == 7);
+  CHECK(position().firstIndex == 6);
+  terminal.input = MouseInputEvent{8, 1, MouseButton::LEFT, MouseAction::PRESS};
+  steps();
+  CHECK(position().currentIndex == 6);
+  CHECK(position().editing);
+  key(InputKey::TAB);
+  key(InputKey::ESCAPE);
+  CHECK(take(app->router().focused()) == host.node());
+  key(InputKey::DOWN);
+  CHECK(position().currentIndex == 7);
+  key(InputKey::ENTER);
+  key(InputKey::TAB);
+  const auto editor = take(app->router().focused());
+  CHECK(editor != host.node());
+  terminal.input = TextInputEvent{U'x'};
+  steps();
+  key(InputKey::ESCAPE);
+  CHECK(take(app->router().focused()) == editor);
+  CHECK(position().editing);
+  take(app->tree().read(host.node(), [](const auto &view) {
+    CHECK(view.lastError() == TreeError::WOULD_BLOCK);
+  }));
+  key(InputKey::ENTER);
+  key(InputKey::ESCAPE);
+  CHECK(take(app->router().focused()) == host.node());
+  key(InputKey::TAB);
+  CHECK(take(app->router().focused()) == after.node());
+  key(InputKey::TAB, {.shift = true});
+  CHECK(take(app->router().focused()) == host.node());
+  key(InputKey::ENTER);
+  terminal.input = MouseInputEvent{2, 1, MouseButton::WHEEL_UP, MouseAction::SCROLL, {}, {}, 4.0};
+  steps();
+  CHECK(take(app->router().focused()) == host.node());
+  CHECK(position().currentIndex == 7);
+  CHECK(position().firstIndex == 2);
+  key(InputKey::DOWN);
+  CHECK(take(app->router().focused()) == host.node());
+  CHECK(position().firstIndex == 6);
+  const auto settled = terminal.submissions;
+  steps();
+  CHECK(terminal.submissions == settled);
+}
 
 TEST_CASE("production ready loop mounts rows and wakes for model changes without forced prepare") {
   ReadyRowsTerminal terminal;
