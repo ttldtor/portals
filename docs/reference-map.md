@@ -34,6 +34,8 @@ Use style layers when palette changes must preserve application and user overrid
 
 ## Controls and data
 
+- [Model workspaces](model-workflows.md): complete list/table/form, log and document applications.
+
 - [Basic controls](controls.md), [LineEdit](line-edit.md), [text history](text-history.md), [editor undo and redo](editor-history.md).
 - [Numeric editors](spin-boxes.md): numeric drafts, confirmation modes and step buttons.
 - [Layout](layout.md), [grid and overlay](grid.md), [scrolling](scroll.md), [charts](chart.md).

@@ -9,9 +9,12 @@ the list; application code does not copy values when current changes.
 
 ## A city form
 
-The example edits a required city name and a nonnegative order count. Region
-remains readable while user editing is blocked. F2 saves the current record,
-F3 cancels its drafts, F4 selects English, F5 selects Russian, and F10 exits.
+The workspace combines a city list, an accepted-values table and a draft form.
+The form edits a required name and a nonnegative order count; Country remains
+readable while user editing is blocked. Europe/Asia buttons or F6/F7 switch the
+shared source. F2 saves the current record, F3 cancels its drafts, F4 selects
+English, F5 selects Russian, and F10 exits.
+See [model workspaces](model-workflows.md) for the complete interaction sequence.
 In `EXPLICIT` mode, moving to another city retains the first city's draft and
 Undo/Redo history. A malformed count stays visible until corrected or canceled.
 
