@@ -6,7 +6,10 @@ Use one navigation context when a list and table should follow the same current
 record. Create separate contexts when each view needs an independent cursor.
 The scene owns the context; removing a view does not erase its position.
 
-This page describes the checked managed API in `<portals/managed.hpp>`.
+For ordinary declarative consumers, pass `ui::navigation(model)` directly to
+list and table factories. [Model workspaces](model-workflows.md) show complete
+programs. The advanced operations below use the checked managed API in
+`<portals/managed.hpp>`.
 The model, scene and view nodes in the fragment already exist on the UI thread.
 Both views use the same `ManagedModel<T>`:
 

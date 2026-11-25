@@ -15,6 +15,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Changed
 
+- Model-workspace guides connect shared selection, accepted values, per-record drafts,
+  source switching and reading-place recovery. The city example includes a list,
+  table and form; a read-only domain snapshot demonstrates a non-file LogView.
+  The reversed-navigation example uses cold descriptors for ordinary bindings and
+  retains one explicit checked projection binding.
+
 - Text bookmarks follow edits with insertion affinity and Unicode grapheme-boundary
   qualification. An optional finite document session retains selection, Undo/Redo,
   logical identity and savepoints independently of its views and physical save target.

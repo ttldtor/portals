@@ -117,6 +117,20 @@ Use ordinary input handlers for replacement. Like other scene mutations,
 `setModel` returns `WOULD_BLOCK` during an `onError` notification; the error
 callback observes the failure and cannot reenter scene mutation.
 
+### A read-only non-file model
+
+The following complete application formats finite immutable domain records on
+the application worker. F2/F3 replace the display source; the same LogView and
+Ref stay alive. This adapter knows its row count and provides positional reads.
+For an unknown extent, implement `WindowProvider<LogLine>` directly instead of
+inventing a total for `ModelSnapshot`.
+
+![One LogView displays application records or warnings from non-file snapshots](images/log-snapshot.gif)
+
+[Complete source](examples/guide_log_snapshot.cpp)
+
+\include docs/examples/guide_log_snapshot.cpp
+
 ## Rolling in-memory log
 
 The following append and retention contracts apply to the rolling journal.

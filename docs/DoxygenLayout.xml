@@ -91,6 +91,7 @@
         <tab type="user" title="Text anchors" url="@ref docs/text-anchors.md" />
         <tab type="user" title="Navigation checkpoints" url="@ref docs/navigation-checkpoint.md" />
         <tab type="user" title="Model bookmarks" url="@ref docs/model-positions.md" />
+        <tab type="user" title="Model workspaces" url="@ref docs/model-workflows.md" />
         <tab type="user" title="Shared model navigation" url="@ref docs/model-navigation.md" />
         <tab type="user" title="Switch models" url="@ref docs/view-models.md" />
         <tab type="user" title="Edit current record" url="@ref docs/record-edit.md" />
@@ -256,6 +257,7 @@
       <tab type="user" title="Текстовые якоря" url="@ref docs/ru/text-anchors.md" />
       <tab type="user" title="Сохранение навигации" url="@ref docs/ru/navigation-checkpoint.md" />
       <tab type="user" title="Закладки модели" url="@ref docs/ru/model-positions.md" />
+      <tab type="user" title="Модели в приложении" url="@ref docs/ru/model-workflows.md" />
       <tab type="user" title="Общая навигация модели" url="@ref docs/ru/model-navigation.md" />
       <tab type="user" title="Смена модели" url="@ref docs/ru/view-models.md" />
       <tab type="user" title="Редактирование записи" url="@ref docs/ru/record-edit.md" />

@@ -59,6 +59,8 @@ The [first application](first-application.md) develops a quick-note form in four
 
 ## Examples
 
+[Model workspaces](model-workflows.md) connect shared selection, forms, source switching and reading places.
+
 The [short guide](index.md) contains a complete small form.
 The [click-handler example](../examples/click_handlers/main.cpp) shows state
 changes and event handlers. The [gallery and dashboard](examples.md) combine
