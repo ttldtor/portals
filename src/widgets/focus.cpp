@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "action_state.hpp"
+#include <portals/detail/virtual_rows_tree.hpp>
 
 #include <algorithm>
 #include <tuple>
@@ -204,6 +205,10 @@ Node<Widget> EventRouter::scopeEntry(Node<Widget> root, const std::vector<Node<W
 
   if (!entry) {
     return {};
+  }
+
+  if (entry->composite && std::ranges::contains(order, root)) {
+    return root;
   }
 
   for (auto candidate : {entry->last, entry->defaultTarget}) {
@@ -895,10 +900,44 @@ std::expected<Node<Widget>, TreeError> EventRouter::traverse(bool reverse) {
       return std::unexpected(order.error());
     }
 
+    auto from = state_->focus;
+
+    // A composite contributes one outer stop. Its active row has a local Tab cycle;
+    // explicit/mouse focus still uses the complete ordinary focus order.
+    for (const auto &entry : state_->scopes) {
+      if (!entry.composite || !entry.cancellation->connected.load()) {
+        continue;
+      }
+
+      const bool inside = within(entry.root, state_->focus);
+      const bool local = state_->focus != entry.root && inside &&
+                         (entry.composite->chrome == Node<Widget>{} || !within(entry.composite->chrome, state_->focus));
+      if (inside && !local) {
+        from = entry.root;
+      }
+      auto localRoot = entry.composite->row;
+
+      if (local && (localRoot == Node<Widget>{} || !within(localRoot, state_->focus))) {
+        localRoot = state_->focus;
+
+        for (auto parent = tree().inputParent(localRoot); parent && *parent != entry.root;
+             parent = tree().inputParent(localRoot)) {
+          localRoot = *parent;
+        }
+      }
+      std::erase_if(*order, [&](auto candidate) {
+        return local ? !within(localRoot, candidate) : candidate != entry.root && within(entry.root, candidate);
+      });
+
+      if (local) {
+        break;
+      }
+    }
+
     Node<Widget> next;
 
     if (!order->empty()) {
-      auto position = std::ranges::find(*order, state_->focus);
+      auto position = std::ranges::find(*order, from);
 
       if (position == order->end()) {
         next = reverse ? order->back() : order->front();
@@ -920,6 +959,94 @@ std::expected<Node<Widget>, TreeError> EventRouter::traverse(bool reverse) {
   } catch (const std::bad_alloc &) {
     return std::unexpected(TreeError::NO_MEMORY);
   }
+}
+
+std::expected<void, TreeError> detail::RowTreeAccess::focusScope(EventRouter &router, Node<Widget> host,
+                                                                 Node<Widget> row, Node<Widget> chrome) try {
+  auto allowed = router.check();
+
+  if (!allowed) {
+    return allowed;
+  }
+
+  auto *scope = router.scope(host);
+
+  if (!scope || (row != Node<Widget>{} && !router.within(host, row)) ||
+      (chrome != Node<Widget>{} && !router.within(host, chrome))) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  if (!scope->composite) {
+    scope->composite = std::make_unique<CompositeFocusScope>();
+  }
+  scope->composite->row = row;
+  scope->last = host;
+  if (chrome != Node<Widget>{}) {
+    scope->composite->chrome = chrome;
+  }
+
+  return {};
+} catch (const std::bad_alloc &) {
+  return std::unexpected(TreeError::NO_MEMORY);
+}
+
+std::expected<Node<Widget>, TreeError> detail::RowTreeAccess::enterRow(EventRouter &router, Node<Widget> host,
+                                                                       Node<Widget> row, std::size_t column) try {
+  auto allowed = focusScope(router, host, row);
+
+  if (!allowed) {
+    return std::unexpected(allowed.error());
+  }
+
+  auto order = router.focusOrder();
+
+  if (!order) {
+    return std::unexpected(order.error());
+  }
+
+  std::erase_if(*order, [&](auto candidate) {
+    return !router.within(row, candidate);
+  });
+
+  if (order->empty()) {
+    (void)focusScope(router, host);
+
+    return router.setFocus(host).transform([&] {
+      return host;
+    });
+  }
+
+  const auto next = (*order)[std::min(column, order->size() - 1)];
+  auto changed = router.setFocus(next);
+
+  return changed ? std::expected<Node<Widget>, TreeError>(next) : std::unexpected(changed.error());
+} catch (const std::bad_alloc &) {
+  return std::unexpected(TreeError::NO_MEMORY);
+}
+
+std::expected<std::size_t, TreeError> detail::RowTreeAccess::column(EventRouter &router, Node<Widget> row,
+                                                                    Node<Widget> focused) try {
+  auto order = router.focusOrder();
+
+  if (!order) {
+    return std::unexpected(order.error());
+  }
+
+  std::size_t index{};
+
+  for (auto candidate : *order) {
+    if (router.within(row, candidate)) {
+      if (candidate == focused) {
+        return index;
+      }
+
+      ++index;
+    }
+  }
+
+  return std::size_t{};
+} catch (const std::bad_alloc &) {
+  return std::unexpected(TreeError::NO_MEMORY);
 }
 
 std::expected<Node<Widget>, TreeError> EventRouter::hitTest(CellPoint point) {

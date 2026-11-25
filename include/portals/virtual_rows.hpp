@@ -9,6 +9,8 @@
 #include <portals/model_edit.hpp>
 
 namespace portals {
+class ScrollBar;
+
 namespace ui {
 template <class> class Model;
 template <class> struct WindowRowsModel;
@@ -47,6 +49,22 @@ public:
   }
 };
 
+/** @brief Owning committed row-host orientation; native cursor sources never invent ordinals. */
+struct VirtualRowsPosition {
+  ModelResource resource;                    ///< Exact accepted source identity.
+  std::optional<RowId> current;              ///< Stable current record, independent of keyboard focus.
+  std::optional<std::uint64_t> currentIndex; ///< Zero-based finite ordinal, absent for native cursors.
+  std::optional<std::uint64_t> firstIndex;   ///< First visible finite ordinal, absent for native cursors.
+  std::size_t visible{};                     ///< Ready visible row assignments, excluding retained edit state.
+  std::optional<std::uint64_t> count;        ///< Exact finite extent; never an estimate.
+  std::optional<bool> hasBefore;             ///< Known backward availability, absent when unknown.
+  std::optional<bool> hasAfter;              ///< Known forward availability, absent when unknown.
+  std::optional<WindowStatus> windowStatus;  ///< Native delivery state, absent for finite sources.
+  bool editing{};                            ///< Focus is inside the current row's real controls.
+  /** @param other Owning orientation snapshot. @return Whether every published fact agrees. */
+  bool operator==(const VirtualRowsPosition &other) const = default;
+};
+
 /** @brief Fixed-height bounded real-child row host settings. */
 struct VirtualRowsOptions {
   ModelCheckpointOptions checkpoints{}; ///< Existing bounded source-position history budget.
@@ -55,10 +73,14 @@ struct VirtualRowsOptions {
   std::size_t maxRows{256};          ///< Positive maximum visible assignments; excessive viewport demand is rejected.
   std::size_t overscanRows{2};       ///< Additional native delivered rows for smooth bounded row-step overlap.
   std::int64_t maxPendingRows{4096}; ///< Positive cap on accepted native relative row intents awaiting delivery.
+  bool scrollbar{true};              ///< Show the existing styled vertical bar when a finite source can scroll.
+  bool currentIndicator{true};       ///< Reserve one leading cell for the current-row marker.
 };
 
 namespace ui::detail {
 /// @cond INTERNAL
+struct RowPositionState;
+
 struct RowPlacement {
   Node<Widget> node;
   std::int32_t y{};
@@ -75,6 +97,14 @@ struct VirtualRowsState {
   std::optional<SourceCapabilities> sourceCapabilities;
   std::optional<std::uint64_t> exactCount;
   std::uint64_t first{};
+  VirtualRowsPosition position;
+  std::shared_ptr<RowPositionState> positionState;
+  Node<ScrollBar> scrollbar;
+  bool scrollbarVisible{};
+  bool hasFocus{};
+  std::size_t currentSlot{};
+  std::optional<std::size_t> visibleCurrentSlot;
+  std::optional<GraphemeText> currentGlyph;
   virtual std::expected<void, TreeError> requestFirst(std::uint64_t) = 0;
   virtual std::expected<void, TreeError> requestMove(std::int64_t) = 0;
   virtual std::expected<void, TreeError> requestPage(bool) = 0;
@@ -97,6 +127,8 @@ struct VirtualRowsState {
  */
 template <class T> class VirtualRows final : public SizedWidget, public Layout {
 public:
+  using VirtualRow = T; ///< Domain row used by the host's typed observing facade.
+
   /// @cond INTERNAL
   explicit VirtualRows(std::shared_ptr<ui::detail::VirtualRowsState> state, SizePolicy policy = DEFAULT_VIEWPORT_POLICY)
       : SizedWidget(policy), state_(std::move(state)) {
@@ -147,9 +179,16 @@ public:
     return state_->placements.size();
   }
 
+  /** @return Owning last committed position; acquisition neither prepares nor reads source rows. */
+  VirtualRowsPosition position() const noexcept {
+    return state_->position;
+  }
+
   /** @param available Offered viewport cells. @return Fixed row-height child bounds. */
   std::expected<CellSize, TreeError> childAvailable(CellSize available) const override {
-    return CellSize{available.width, state_->options.rowHeight};
+    const auto gutters =
+      static_cast<std::int32_t>(state_->options.currentIndicator) + static_cast<std::int32_t>(state_->scrollbarVisible);
+    return CellSize{std::max(0, available.width - gutters), state_->options.rowHeight};
   }
 
   /** @brief Ignore child measurements. @return Empty intrinsic extent; size policy owns viewport sizing. */
@@ -165,6 +204,15 @@ public:
     std::vector<CellRect> result(0);
     result.reserve(children.size());
     for (const auto &child : children) {
+      if (child.node == state_->scrollbar.id()) {
+        auto rect =
+          CellRect::from({std::max(0, available.width - 1), 0}, {std::min(1, available.width), available.height});
+        if (!rect) {
+          return std::unexpected(TreeError::INVALID_GEOMETRY);
+        }
+        result.push_back(*rect);
+        continue;
+      }
       if (child.desired.height > state_->options.rowHeight) {
         return std::unexpected(TreeError::INVALID_GEOMETRY);
       }
@@ -174,7 +222,9 @@ public:
       if (found == state_->placements.end()) {
         return std::unexpected(TreeError::INVALID_ARGUMENT);
       }
-      auto rect = CellRect::from({0, found->y}, {available.width, state_->options.rowHeight});
+      const auto leading = std::min(available.width, static_cast<std::int32_t>(state_->options.currentIndicator));
+      const auto width = std::max(0, available.width - leading - static_cast<std::int32_t>(state_->scrollbarVisible));
+      auto rect = CellRect::from({leading, found->y}, {width, state_->options.rowHeight});
       if (!rect) {
         return std::unexpected(TreeError::INVALID_GEOMETRY);
       }
@@ -186,8 +236,37 @@ public:
     return std::unexpected(TreeError::NO_MEMORY);
   }
 
+  /** @param local Allocated host rectangle. @return Success after retaining zero-origin paint bounds. */
+  std::expected<void, TreeError> arrange(CellRect local) override {
+    auto bounds = CellRect::from({}, local.size());
+    if (!bounds) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+    bounds_ = *bounds;
+    return {};
+  }
+
+  /** @param context Synchronous frame sink. @return Marker submission or the original sink error. */
+  std::expected<void, TreeError> paint(PaintContext &context) override {
+    if (!state_->options.currentIndicator || !state_->currentGlyph || !state_->position.current ||
+        !state_->visibleCurrentSlot) {
+      return {};
+    }
+    const auto index = *state_->visibleCurrentSlot;
+    if (index >= state_->placements.size()) {
+      return {};
+    }
+    const std::array<RenderCommand, 1> commands{
+      TextCommand{{0, static_cast<std::int32_t>(index * state_->options.rowHeight)},
+                  *state_->currentGlyph,
+                  bounds_,
+                  CellStyle{.bold = state_->hasFocus, .underline = state_->hasFocus}}};
+    return context.submit(commands);
+  }
+
 private:
   std::shared_ptr<ui::detail::VirtualRowsState> state_;
+  CellRect bounds_;
 };
 
 /** @brief Request a finite ordinal; mounting occurs at the existing managed service boundary.

@@ -18,6 +18,7 @@
 namespace portals {
 class PopupMenu;
 template <class> class VirtualRows;
+struct VirtualRowsPosition;
 } // namespace portals
 
 namespace portals::ui {
@@ -2310,6 +2311,12 @@ public:
 
     return VisibleModelSource<Row>(target(), std::move(node));
   }
+
+  /** @return Deferred read-only committed row position. Mount its consumer after the referenced host.
+   * The source borrows the host's checked lifetime and creates no polling or second navigation context.
+   */
+  Model<VirtualRowsPosition> position() const
+    requires requires { typename T::VirtualRow; };
 
   /** @return Read-only visible draft source, including uncommitted or semantically rejected text. */
   TextSource draftText() const

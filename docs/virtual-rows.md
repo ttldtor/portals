@@ -14,10 +14,11 @@ For columns with headers, use [VirtualTable](virtual-table.md).
 
 The complete program has two task models. Work and Personal switch the model
 used by the same view. Each row contains a CheckBox, Label, LineEdit and Button.
-Space toggles a focused checkbox; edit a name in its field or use Remove to
-delete that record. F10 closes the application.
+The asterisk marks the active model, independently of keyboard focus on a button.
+The bounded panel shows the visible range, exact task count and current row.
+F10 closes the application.
 
-![Check a task, edit its name, switch task models and return to the saved reading position.](images/virtual-rows.gif)
+![Move between rows and list selectors, switch models and restore the current and reading positions.](images/virtual-rows.gif)
 
 [Complete source](examples/guide_virtual_rows.cpp).
 
@@ -30,6 +31,55 @@ delete that record. F10 closes the application.
 
 The [standalone guide project](examples.md) builds `guide_virtual_rows` and links
 `portals::core`. Include `<portals/ui_virtual_rows.hpp>` to opt into this API.
+
+## Move between lists, rows and fields {#virtual-rows-keyboard}
+
+The view has two keyboard modes. In row navigation, the whole view is one stop
+in the outer Tab order. You can return to the list selectors without visiting
+every checkbox, field and button in the model.
+
+| Key | Row navigation | Inside the current row's controls |
+|---|---|---|
+| Tab / Shift+Tab | Move to the next / previous outer control | Move between this row's controls |
+| Up / Down | Move the current row and reveal it | The focused control keeps its own input behavior |
+| Enter / F2 | Enter the current row's controls | The focused control keeps its own input behavior |
+| Escape | Keep row navigation | Return to row navigation after checked editing admission |
+
+At the first or last row, another arrow does not send focus to the list selectors.
+The current row follows stable record identity; scrolling the reading window and
+changing the current record remain separate operations. Mouse input can enter
+the ordinary controls. A rejected edit transition keeps its draft and validation
+state; Escape does not introduce a blanket commit or cancel policy.
+
+Enter or F2 opens the current row; Escape returns to row navigation. The next
+recording also shows field focus, editing and removal.
+
+![Enter row controls, change a checkbox and task name, then remove the current record.](images/virtual-rows-editing.gif)
+
+## Observe the current position {#virtual-rows-position}
+
+Keep a `ui::Ref<VirtualRows<T>>`; its `position()` method exposes a read-only
+model. Place labels bound to that model after the view in the scene description.
+The complete program uses ordinary labels for the position and keyboard mode.
+Updates follow accepted view changes; the application does not need a polling
+timer or a second mutable position variable.
+
+`VirtualRowsPosition` separates the current record from the reading window:
+
+| Member | Meaning |
+|---|---|
+| `resource`, `current` | Source-qualified current record identity, or no current record. |
+| `currentIndex`, `firstIndex` | Optional exact zero-based ordinals; unavailable for unknown-total cursor sources. |
+| `visible` | Ready records visible in the window, excluding retained offscreen editors. |
+| `count` | Optional exact source count; absence does not mean zero. |
+| `hasBefore`, `hasAfter` | Optional knowledge that more records exist in each direction. |
+| `windowStatus` | Optional native delivery state. |
+| `editing` | Whether focus is inside the current row's controls. |
+
+The task program displays one-based numbers for people. The file-backed program
+shows visible records and known traversal directions, without an invented count
+or percentage. `Navigation::current()` and `ui::bySource` provide accepted active
+source captions; merely focusing a selector does not switch its model.
 
 ## Records, fields and callbacks {#virtual-rows-data}
 
@@ -76,6 +126,11 @@ reports `CLOSED` until publication.
 
 ## Size and composition {#virtual-rows-size}
 
+The example limits its whole panel with `maxWidth(76)` and lets the name field
+shrink in a narrower terminal. This does not measure every record in the model.
+Choose viewport width limits for your composition; the host does not scan a
+potentially unbounded source to discover its longest row.
+
 `height(8)` sets the viewport height in terminal cells, including its frame.
 `VirtualRowsOptions::rowHeight` sets the common height of a record's child
 composition; its default is one cell. Use a larger value for a `ui::vbox` of
@@ -98,6 +153,8 @@ Pass a `VirtualRowsOptions` value as the third argument to `ui::virtualRows`.
 | `maxPendingRows` | `4096` | Positive cap on admitted native relative row movement awaiting delivery. |
 | `editing` | `EditOptions{}` | Common edit mode and retained field/byte limits. |
 | `checkpoints` | `ModelCheckpointOptions{}` | Existing bounded source-position history settings. |
+| `scrollbar` | `true` | Use the existing styled vertical scrollbar for an exact finite extent. |
+| `currentIndicator` | `true` | Reserve a left cell for the current-row marker. |
 
 During a replacement, staged and retiring child trees can coexist. `maxRows`
 does not mean that the process contains at most that many controls: a row may
@@ -115,7 +172,11 @@ using the ordinary description API. Apply themes to the scene in the usual way.
 
 Use `.framed("rounded", "Task lists")` for a titled boundary. Frame glyphs,
 title decoration and colors use the common [styling guide](styling-guide.md).
-Each child retains its own input, focus and presentation behavior.
+The current-row marker is separate from focus on an individual child. The
+vertical scrollbar uses the existing [scrollbar styles](scroll-controls.md) in a
+compact right gutter inside the frame. This is not ScrollArea's `ON_FRAME`
+placement. Unknown-total sources do not acquire a fabricated scrollbar scale.
+Each child retains its own input and presentation behavior when entered.
 
 ## Sources without a known count {#virtual-rows-window-source}
 

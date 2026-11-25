@@ -18,11 +18,17 @@ struct ActionCancellation {
   std::atomic<bool> connected{true};
 };
 
+struct CompositeFocusScope {
+  Node<Widget> row;
+  Node<Widget> chrome;
+};
+
 struct FocusScopeRegistration {
   Node<Widget> root;
   Node<Widget> defaultTarget;
   Node<Widget> last;
   std::shared_ptr<ActionCancellation> cancellation;
+  std::unique_ptr<CompositeFocusScope> composite;
 };
 
 struct FocusReturnRegistration {
