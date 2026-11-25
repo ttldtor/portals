@@ -540,6 +540,16 @@ std::expected<CheckStateBinding, TreeError> bindCheckbox(WidgetTree &tree, Event
                                                          std::function<void(CheckStateResult)> changed,
                                                          CheckBoxOptions options = {});
 
+namespace detail {
+/// @cond INTERNAL
+struct CheckBoxEndpoint {
+  std::function<std::expected<std::shared_ptr<const PropertyChange<bool>>, TreeError>()> read;
+  std::function<CheckBoxResult(bool)> write;
+};
+
+/// @endcond
+} // namespace detail
+
 /** @brief Own one checkbox's action, subscription and shared UI model owner.
  * Tree, router and scheduler must outlive this token; destroy/move on UI between frames,
  * including from its callback. Model changes never invoke the business callback.
@@ -583,6 +593,9 @@ public:
 private:
   struct State;
   friend std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &, EventRouter &, Node<CheckBox>,
+                                                                std::unique_ptr<detail::CheckBoxEndpoint>,
+                                                                std::function<void(CheckBoxResult)>);
+  friend std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &, EventRouter &, Node<CheckBox>,
                                                                 std::shared_ptr<Property<bool>>,
                                                                 std::function<void(CheckBoxResult)>);
   CheckBoxBinding(std::shared_ptr<State> state, ActionBinding action, Subscription subscription);
@@ -611,6 +624,11 @@ private:
  * Invocation exceptions follow EventRouter's CALLBACK_FAILED contract; a committed model is never rolled back.
  * Observer deliveries read the latest snapshot, so an old queued event cannot undo a toggle.
  */
+/// @cond INTERNAL
+std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &, EventRouter &, Node<CheckBox>,
+                                                       std::unique_ptr<detail::CheckBoxEndpoint>,
+                                                       std::function<void(CheckBoxResult)>);
+/// @endcond
 std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRouter &router, Node<CheckBox> node,
                                                        std::shared_ptr<Property<bool>> model,
                                                        std::function<void(CheckBoxResult)> changed);

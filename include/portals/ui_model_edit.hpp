@@ -8,6 +8,8 @@
 
 namespace portals::ui {
 template <class Row> class EditSession;
+template <class Row> class RowContext;
+template <class Row, class Value> class RowField;
 template <class Row, class Value> class EditField;
 
 /** @brief Owning scalar conversion used by the existing current-record text editor.
@@ -122,6 +124,8 @@ public:
 private:
   template <class> friend class EditSession;
   template <class, class> friend class EditField;
+  template <class> friend class RowContext;
+  template <class, class> friend class RowField;
   template <class T> friend EditSession<T> edit(Navigation<T>, EditOptions);
   std::expected<void, TreeError> commitChecked() const;
   std::expected<void, TreeError> cancelChecked() const;
@@ -134,7 +138,10 @@ private:
 /** @brief UI-thread-affine typed field capability with exact-target retained inspection and discard. */
 template <class Row, class Value> class EditField {
 public:
-  /** @return Current field snapshot; owning values do not borrow a provider page. */
+  /** @return Current field snapshot retaining the endpoint's declared value ownership.
+   * Native readonly row bindings may retain an accounted source-page lease; writable
+   * candidates still require independently owning values under the common edit contract.
+   */
   std::expected<EditFieldSnapshot<Value>, TreeError> snapshot() const {
     const auto state = state_;
     const auto definition = definition_;
@@ -592,7 +599,20 @@ template <class Row> std::expected<void, TreeError> EditSession<Row>::commitChec
     if (!alive) {
       return std::unexpected(alive.error());
     }
-    const auto plan = detail::editCommandPlan(state);
+    auto plan = detail::editCommandPlan(state);
+    if (state->fixed) {
+      auto eligible = state->fixed->origin->tree->inputEligible(state->fixed->origin->node);
+      if (!eligible) {
+        return std::unexpected(eligible.error());
+      }
+      if (!*eligible) {
+        // A retained offscreen row still uses the entry's validators, conditional endpoint
+        // and async approval barrier. It does not synthesize input into a hidden control.
+        for (auto &field : plan) {
+          field.binding.reset();
+        }
+      }
+    }
     auto result = std::make_shared<EditCommitResult>();
     result->fields.reserve(plan.size());
     state->last = result;
@@ -646,7 +666,18 @@ template <class Row> std::expected<void, TreeError> EditSession<Row>::cancelChec
     if (!alive) {
       return std::unexpected(alive.error());
     }
-    const auto plan = detail::editCommandPlan(state);
+    auto plan = detail::editCommandPlan(state);
+    if (state->fixed) {
+      auto eligible = state->fixed->origin->tree->inputEligible(state->fixed->origin->node);
+      if (!eligible) {
+        return std::unexpected(eligible.error());
+      }
+      if (!*eligible) {
+        for (auto &field : plan) {
+          field.binding.reset();
+        }
+      }
+    }
     for (const auto &field : plan) {
       if (field.binding && (field.binding->closed || field.binding->displayedEntry != field.entry.get())) {
         return std::unexpected(TreeError::WOULD_BLOCK);
@@ -1090,6 +1121,10 @@ std::shared_ptr<portals::detail::EditTextBinding> editTextBinding(EditField<Row,
   };
   binding->observe = [state = field.state_](Node<LineEdit> receiver,
                                             std::function<void()> callback) -> std::expected<Subscription, TreeError> {
+    if (state->fixed) {
+      auto live = state->current();
+      return live ? std::expected<Subscription, TreeError>(Subscription{}) : std::unexpected(live.error());
+    }
     auto channel = state->managed.current();
     if (!channel) {
       return std::unexpected(channel.error());

@@ -1,11 +1,16 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include "action_state.hpp"
+#include <portals/detail/virtual_rows_tree.hpp>
 #include <portals/menu.hpp>
 
 #include <optional>
 
 namespace portals {
+bool detail::RowTreeAccess::dispatching(const EventRouter &router) noexcept {
+  return router.state_->dispatching || router.state_->deliveringFocus;
+}
+
 namespace {
 std::optional<Action> keyAction(InputKey key) {
   switch (key) {

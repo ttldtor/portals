@@ -4,9 +4,9 @@
 #include <portals/detail/line_edit_text.hpp>
 #include <portals/detail/setup_failure.hpp>
 #include <portals/message_box.hpp>
+#include <portals/popup_menu.hpp>
 #include <portals/ui_controls.hpp>
 #include <portals/ui_ref.hpp>
-#include <portals/popup_menu.hpp>
 
 namespace portals::ui {
 namespace detail {
@@ -27,7 +27,7 @@ std::expected<ManagedScene *, ManagedError> eventScene(const std::shared_ptr<Ref
     return std::unexpected(*target->failure);
   }
 
-  if (!target || target->lifetime.expired()) {
+  if (!target || !target->scene || target->lifetime.expired()) {
     return std::unexpected(
       ManagedError{ManagedPhase::BIND, target ? target->node.id() : NodeId{}, TreeError::CLOSED, {}, {}});
   }
@@ -70,6 +70,7 @@ struct RefAccess {
   static WidgetTree &tree(ManagedScene &scene) {
     return scene.app_.tree();
   }
+
   static EditorCommandResult activate(const std::shared_ptr<RefTarget> &target, std::source_location origin) {
     auto scene = eventScene(target);
     std::optional<ManagedError> failure;
@@ -196,8 +197,8 @@ struct RefAccess {
     return scene.sliderValue(node);
   }
 
-  static std::expected<PropertyUpdate<NumericValue>, ManagedError>
-  numericValue(ManagedScene &scene, Node<Slider> node, double value) {
+  static std::expected<PropertyUpdate<NumericValue>, ManagedError> numericValue(ManagedScene &scene, Node<Slider> node,
+                                                                                double value) {
     return scene.setSliderValue(node, value);
   }
 
@@ -213,6 +214,7 @@ struct RefAccess {
   static std::expected<Node<LineEdit>, ManagedError> spinBoxEditor(ManagedScene &scene, Node<SpinBox> node) {
     return scene.spinBoxEditor(node);
   }
+
   static std::expected<void, TreeError> display(ManagedScene &scene, Node<Widget> target, DataPresentation value) {
     auto found = std::ranges::find_if(scene.dataStates_, [&](const auto &record) {
       return record->node == target;
@@ -955,8 +957,8 @@ std::expected<Node<Dialog>, ManagedError> popupRoot(const std::shared_ptr<RefTar
   });
 
   if (!read || layer == Node<Dialog>{}) {
-    return std::unexpected(ManagedError{ManagedPhase::INPUT, target->node.id(),
-      read ? TreeError::INVALID_ARGUMENT : read.error(), {}, {}});
+    return std::unexpected(
+      ManagedError{ManagedPhase::INPUT, target->node.id(), read ? TreeError::INVALID_ARGUMENT : read.error(), {}, {}});
   }
 
   return layer;
@@ -973,9 +975,8 @@ std::expected<bool, ManagedError> popupOpened(const std::shared_ptr<RefTarget> &
   return target->scene->dialogOpened(*layer);
 }
 
-DialogCommandResult popupCommand(const std::shared_ptr<RefTarget> &target,
-                                 const std::shared_ptr<RefTarget> &anchor, bool opening,
-                                 std::source_location origin) {
+DialogCommandResult popupCommand(const std::shared_ptr<RefTarget> &target, const std::shared_ptr<RefTarget> &anchor,
+                                 bool opening, std::source_location origin) {
   auto layer = popupRoot(target);
 
   if (!layer) {
@@ -998,8 +999,8 @@ DialogCommandResult popupCommand(const std::shared_ptr<RefTarget> &target,
     auto eligible = RefAccess::tree(scene).inspect(target->node);
 
     if (!eligible || !eligible->visible || !eligible->enabled || !eligible->regionalInputOpen) {
-      return std::unexpected(ManagedError{ManagedPhase::INPUT, target->node.id(),
-        eligible ? TreeError::INVALID_ARGUMENT : eligible.error(), {}, {}});
+      return std::unexpected(ManagedError{
+        ManagedPhase::INPUT, target->node.id(), eligible ? TreeError::INVALID_ARGUMENT : eligible.error(), {}, {}});
     }
 
     auto anchorOwner = eventScene(anchor);

@@ -7,6 +7,16 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Opt-in declarative virtual rows compose ordinary checkboxes, labels, editors and
+  buttons for visible model records. Fields and callbacks retain exact record
+  identity; row-owned bindings and activity are released on retirement. Finite
+  models and bounded background window providers share the composition API without
+  inventing totals for streaming sources. One unfinished edit can retain its row;
+  completed editor history lasts while the editor remains mounted. Source switching
+  remembers supported reading positions. Fixed row height and source capabilities
+  qualify layout, navigation and editing. Rebuild consumers with matching headers
+  and library for the changed managed-scene and edit-state layouts.
+
 - Optional bounded navigation checkpoints preserve location roles through explicit
   provider codecs and portable resource keys. Versioned envelopes validate structure
   and accidental corruption before restore; imported positions do not grant write

@@ -816,11 +816,14 @@ struct Application::State::Run {
     }
 
     if (!dispatched.stopped && !state.stop.stop_requested()) {
+      // Late declarative subtrees opt into the same session-owned service, never a row-owned worker.
+      app.prepareBackground(scene, state.ready != nullptr);
       if (auto *executor = app.background()) {
         executor->service();
       }
 
       require(scene.afterDispatch(app));
+      app.prepareBackground(scene, state.ready != nullptr);
     }
 
     return !dispatched.stopped && !state.stop.stop_requested();

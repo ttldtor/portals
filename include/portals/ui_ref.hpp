@@ -17,7 +17,8 @@
 
 namespace portals {
 class PopupMenu;
-}
+template <class> class VirtualRows;
+} // namespace portals
 
 namespace portals::ui {
 class LogSource;
@@ -26,6 +27,7 @@ class ValueText;
 template <class T> class Description;
 template <class T> class Ref;
 template <class T> class Model;
+template <class T> struct WindowRowsModel;
 class DynamicRef;
 class StyleStage;
 class DialogCommandResult;
@@ -1094,6 +1096,39 @@ public:
 
     return result.has_value();
   }
+
+  /** @brief Replace a delegated host's finite model while retaining its node.
+   * @tparam Row Immutable domain row matching the host. @param source Cold/same-scene model.
+   * @param origin Diagnostic call site. @param options Existing remember/reset policy.
+   * @return Checked admission; rejection preserves the previous source/window.
+   */
+  template <class Row>
+    requires std::same_as<T, VirtualRows<Row>>
+  std::expected<void, ManagedError> setModel(Model<Row> source, ModelRebindOptions options = {},
+                                             std::source_location origin = std::source_location::current()) const;
+  /** @tparam Row Immutable host row. @param source Finite replacement. @param origin Diagnostic call site.
+   * @param options Existing remember/reset policy. @return True on admission; false collects one checked failure.
+   */
+  template <class Row>
+    requires std::same_as<T, VirtualRows<Row>>
+  bool model(Model<Row> source, ModelRebindOptions options = {},
+             std::source_location origin = std::source_location::current()) const;
+  /** @brief Replace native window delivery without inventing extent or remounting the host.
+   * @tparam Row Immutable page row matching the host. @param source Owning native capability descriptor.
+   * @param origin Diagnostic call site. @param options Existing remember/reset policy.
+   * @return Checked admission; old work retires only after replacement admission succeeds.
+   */
+  template <class Row>
+    requires std::same_as<T, VirtualRows<Row>>
+  std::expected<void, ManagedError> setModel(const WindowRowsModel<Row> &source, ModelRebindOptions options = {},
+                                             std::source_location origin = std::source_location::current()) const;
+  /** @tparam Row Immutable page row. @param source Native replacement. @param origin Diagnostic call site.
+   * @param options Existing remember/reset policy. @return True on admission; false collects the checked failure.
+   */
+  template <class Row>
+    requires std::same_as<T, VirtualRows<Row>>
+  bool model(const WindowRowsModel<Row> &source, ModelRebindOptions options = {},
+             std::source_location origin = std::source_location::current()) const;
 
   /** @brief Replace a virtual list/table model with the same row type, retaining the node and presentation.
    * @tparam Row Immutable row type of this virtual list or table.

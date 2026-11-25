@@ -11,7 +11,8 @@
 namespace portals {
 namespace ui::detail {
 struct Access;
-}
+struct RowAccess;
+} // namespace ui::detail
 class ManagedScene;
 
 /** @brief Owning callback after each successful virtual-view preparation, including layout retries.
@@ -157,6 +158,7 @@ public:
 private:
   friend class ManagedScene;
   friend struct ui::detail::Access;
+  friend struct ui::detail::RowAccess;
   friend struct detail::ManagedModelAccess;
 
   std::expected<std::shared_ptr<detail::ManagedModelSourceOf<T>>, TreeError> lock() const {

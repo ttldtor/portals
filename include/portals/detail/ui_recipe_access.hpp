@@ -76,6 +76,23 @@ struct Access {
     (*source)->retire();
   }
 
+  static std::shared_ptr<portals::detail::ManagedOrigin>
+  exchangeModelOrigin(ManagedScene &scene, std::shared_ptr<portals::detail::ManagedOrigin> origin) {
+    return std::exchange(scene.rowOrigin_, std::move(origin));
+  }
+
+  static std::expected<void, TreeError>
+  validateModelOrigin(ManagedScene &scene, const std::shared_ptr<portals::detail::ManagedOrigin> &origin) {
+    auto live = origin->check();
+    if (!live) {
+      return live;
+    }
+    if (origin->tree != &scene.app_.tree() || !scene.app_.tree().contains(scene.root_, origin->node).value_or(false)) {
+      return std::unexpected(TreeError::WRONG_SESSION);
+    }
+    return {};
+  }
+
   static bool modelSceneClosed(const ManagedScene &scene) noexcept {
     return scene.closed_;
   }
@@ -180,7 +197,7 @@ struct Access {
     failure.operation = operation;
     failure.operationOrigin = origin;
 
-    if (target && target->owner == std::this_thread::get_id() && !target->lifetime.expired()) {
+    if (target && target->owner == std::this_thread::get_id() && target->scene && !target->lifetime.expired()) {
       target->scene->reportShortError(failure, operation, {}, control, origin);
     } else {
       const auto ticket = SetupFailureScope::latch(failure);

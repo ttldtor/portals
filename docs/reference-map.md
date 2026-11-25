@@ -44,7 +44,7 @@ Use style layers when palette changes must preserve application and user overrid
 - [Indexed live suggestions](live-search.md), [field validation](form-fields.md), [current-record forms](model-forms.md).
 - [Model-backed choices](choices.md): ComboBox and DropDown.
 - [Menus](menus.md): shared commands with keyboard and mouse selection.
-- [Virtual lists](virtual-list.md), [virtual tables](virtual-table.md).
+- [Virtual lists](virtual-list.md), [virtual tables](virtual-table.md), [interactive virtual rows](virtual-rows.md).
 - [Retained-content scrolling](scroll-controls.md), [virtual-data scrolling](scroll.md).
 - [Dialogs](dialogs.md), [notifications](notifications.md), [keyboard help](key-help.md).
 - [Theme preview](theme-selection.md), [theme selector](theme-selector.md).

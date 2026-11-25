@@ -57,15 +57,20 @@ std::expected<std::shared_ptr<ModelViewHistory>, TreeError> ModelViewHistory::cr
 
 ModelViewHistoryEntry *ModelViewHistory::find(const std::shared_ptr<ManagedModelSource> &model, std::uint64_t role,
                                               bool lineageFallback) const noexcept {
+  return find(model->navigationResource, role, lineageFallback);
+}
+
+ModelViewHistoryEntry *ModelViewHistory::find(ModelResource resource, std::uint64_t role,
+                                              bool lineageFallback) const noexcept {
   ModelViewHistoryEntry *fallback{};
   for (auto *entry = entries_.get(); entry; entry = entry->next.get()) {
     if (entry->role != role) {
       continue;
     }
-    if (entry->resource == model->navigationResource) {
+    if (entry->resource == resource) {
       return entry;
     }
-    if (lineageFallback && entry->resource.identity == model->navigationResource.identity) {
+    if (lineageFallback && entry->resource.identity == resource.identity) {
       fallback = entry;
     }
   }
@@ -101,6 +106,26 @@ std::expected<ModelViewHistoryChange, TreeError> ModelViewHistory::stage(std::sh
     return std::unexpected(resource.error());
   }
 
+  return stageCommon(model, *resource, model->navigationExplicit, false, role, std::move(value),
+                     std::move(participant));
+}
+
+std::expected<ModelViewHistoryChange, TreeError>
+ModelViewHistory::stageResource(ModelResource resource, std::weak_ptr<const void> logicalLifetime, std::uint64_t role,
+                                ModelViewCheckpoint value) {
+  if (lifetime_.expired() || logicalLifetime.expired()) {
+    return std::unexpected(TreeError::CLOSED);
+  }
+  if (!resource.identity.instance || !resource.identity.epoch || !resource.lineage || !role) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  return stageCommon({}, resource, true, true, role, std::move(value), std::move(logicalLifetime));
+}
+
+std::expected<ModelViewHistoryChange, TreeError>
+ModelViewHistory::stageCommon(std::shared_ptr<ManagedModelSource> model, ModelResource resource, bool explicitResource,
+                              bool resourceOnly, std::uint64_t role, ModelViewCheckpoint value,
+                              std::weak_ptr<const void> participant) {
   std::size_t metadata{};
 
   for (const auto *bookmark : {&value.current, &value.reading}) {
@@ -132,10 +157,11 @@ std::expected<ModelViewHistoryChange, TreeError> ModelViewHistory::stage(std::sh
   prune();
   ModelViewHistoryChange change;
 
-  change.existing = find(model, role, false);
+  change.existing = find(resource, role, false);
   change.model = model;
-  change.resource = *resource;
-  change.explicitResource = model->navigationExplicit || (change.existing && change.existing->explicitResource);
+  change.resource = resource;
+  change.explicitResource = explicitResource || (change.existing && change.existing->explicitResource);
+  change.resourceOnly = resourceOnly;
   change.role = role;
   change.participant = participant;
   change.value = std::move(value);
@@ -194,17 +220,21 @@ std::expected<ModelViewHistoryChange, TreeError> ModelViewHistory::stage(std::sh
 }
 
 bool ModelViewHistory::valid(const ModelViewHistoryChange &change) const noexcept {
-  auto model = change.model.lock();
-
-  if (lifetime_.expired() || !model || model->retired) {
+  if (lifetime_.expired()) {
     return false;
   }
-
-  if (model->navigationResource != change.resource) {
-    return false;
+  if (change.resourceOnly) {
+    if (change.participant.expired() || !change.resource.identity.instance || !change.resource.identity.epoch ||
+        !change.resource.lineage || !change.role) {
+      return false;
+    }
+  } else {
+    auto model = change.model.lock();
+    if (!model || model->retired || model->navigationResource != change.resource) {
+      return false;
+    }
   }
-  const auto *entry = find(model, change.role, false);
-
+  const auto *entry = find(change.resource, change.role, false);
   return change.existing ? entry == change.existing && entry->revision == change.revision : entry == nullptr;
 }
 
@@ -1164,6 +1194,35 @@ void ManagedScene::pruneNavigation() {
 
     return !live && (live.error() == TreeError::STALE_NODE || live.error() == TreeError::CLOSED);
   });
+  // Row-owned channels retire independently of their source model. Remove each
+  // registry owner before releasing the final record/captures, then reacquire UI.
+  const auto lifetime = std::weak_ptr(lifetime_);
+  const auto rowScanLimit = navigation_->contexts.size();
+  std::size_t rowIndex{};
+  for (std::size_t inspected = 0; inspected < rowScanLimit && rowIndex < navigation_->contexts.size(); ++inspected) {
+    auto record = navigation_->contexts[rowIndex];
+    const auto origin = record->current.origin_;
+    auto live = origin ? origin->check() : std::expected<void, TreeError>{};
+    if (live || !origin || (!origin->retired && !origin->closed && live.error() != TreeError::CLOSED)) {
+      ++rowIndex;
+      continue;
+    }
+    record->close();
+    if (lifetime.expired() || closed_) {
+      return;
+    }
+    const auto found = std::ranges::find(navigation_->contexts, record);
+    if (found != navigation_->contexts.end()) {
+      rowIndex = std::min(rowIndex, static_cast<std::size_t>(found - navigation_->contexts.begin()));
+      auto retired = std::move(*found);
+      navigation_->contexts.erase(found);
+    }
+    record.reset();
+    if (lifetime.expired() || closed_) {
+      return;
+    }
+  }
+
   const auto initialCount = navigation_->contexts.size();
 
   for (std::size_t index = 0; index < initialCount; ++index) {
