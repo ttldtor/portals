@@ -379,6 +379,9 @@ struct CheckBoxBinding::State {
   WidgetTree &tree;
   Node<CheckBox> node;
   std::shared_ptr<Property<bool>> model;
+  struct Endpoint;
+  std::expected<std::shared_ptr<const PropertyChange<bool>>, TreeError> snapshot() const;
+  CheckBoxResult set(bool value);
 
   std::expected<void, TreeError> apply(bool value) {
     std::expected<void, TreeError> result;
@@ -398,7 +401,7 @@ struct CheckBoxBinding::State {
   }
 
   std::expected<void, TreeError> sync() {
-    auto snapshot = model->snapshot();
+    auto snapshot = this->snapshot();
 
     if (!snapshot) {
       return std::unexpected(snapshot.error());
@@ -407,6 +410,25 @@ struct CheckBoxBinding::State {
     return apply((*snapshot)->value);
   }
 };
+
+// Ordinary bindings retain precisely the original State storage. A null model is
+// admitted only by this private derived construction path; its shared_ptr owns the
+// derived control block/deleter even when observed through shared_ptr<State>.
+struct CheckBoxBinding::State::Endpoint final : CheckBoxBinding::State {
+  Endpoint(WidgetTree &tree, Node<CheckBox> node, std::unique_ptr<detail::CheckBoxEndpoint> value)
+      : State{tree, node, {}}, endpoint(std::move(value)) {
+  }
+
+  std::unique_ptr<detail::CheckBoxEndpoint> endpoint;
+};
+
+std::expected<std::shared_ptr<const PropertyChange<bool>>, TreeError> CheckBoxBinding::State::snapshot() const {
+  return model ? model->snapshot() : static_cast<const Endpoint *>(this)->endpoint->read();
+}
+
+CheckBoxResult CheckBoxBinding::State::set(bool value) {
+  return model ? model->set(value) : static_cast<Endpoint *>(this)->endpoint->write(value);
+}
 
 CheckBoxBinding::CheckBoxBinding(std::shared_ptr<State> state, ActionBinding action, Subscription subscription)
     : state_(std::move(state)), action_(std::move(action)), subscription_(std::move(subscription)) {
@@ -448,7 +470,7 @@ std::expected<bool, TreeError> CheckBoxBinding::value() const {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
-  auto snapshot = state->model->snapshot();
+  auto snapshot = state->snapshot();
 
   return snapshot ? std::expected<bool, TreeError>((*snapshot)->value) : std::unexpected(snapshot.error());
 }
@@ -460,7 +482,7 @@ std::expected<PropertyUpdate<bool>, TreeError> CheckBoxBinding::set(bool value) 
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
   // Presentation follows ordinary model synchronization before the next frame.
-  return state->model->set(value);
+  return state->set(value);
 }
 
 std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRouter &router, Node<CheckBox> node,
@@ -497,8 +519,66 @@ std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRo
 
       // Read the authoritative value once and perform one toggle. Retain this exact set
       // receipt, including rejected/cancelled notifications, for the business callback.
-      auto current = state->model->snapshot();
-      CheckBoxResult result = current ? state->model->set(!(*current)->value) : std::unexpected(current.error());
+      auto current = state->snapshot();
+      CheckBoxResult result = current ? state->set(!(*current)->value) : std::unexpected(current.error());
+
+      if (result) {
+        auto synced = state->apply(result->snapshot->value);
+
+        // A property observer capture can remove the target while set prunes observers.
+        // Removal ends presentation, but must not conceal a successful model commit.
+        if (!synced && synced.error() != TreeError::STALE_NODE && synced.error() != TreeError::CLOSED) {
+          throw synced.error();
+        }
+      }
+
+      // A callback exception cannot undo the model commit or replace its receipt.
+      changed(std::move(result));
+
+      return EventReply::HANDLED;
+    });
+
+    if (!action) {
+      return std::unexpected(action.error());
+    }
+
+    auto synced = state->sync();
+
+    if (!synced) {
+      return std::unexpected(synced.error());
+    }
+
+    return CheckBoxBinding(std::move(state), std::move(*action), std::move(*subscription));
+  } catch (const std::bad_alloc &) {
+    return std::unexpected(TreeError::NO_MEMORY);
+  }
+}
+
+std::expected<CheckBoxBinding, TreeError> bindCheckbox(WidgetTree &tree, EventRouter &router, Node<CheckBox> node,
+                                                       std::unique_ptr<detail::CheckBoxEndpoint> endpoint,
+                                                       std::function<void(CheckBoxResult)> changed) {
+  if (!endpoint || !endpoint->read || !endpoint->write || !changed) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
+  try {
+    auto state = std::make_shared<CheckBoxBinding::State::Endpoint>(tree, node, std::move(endpoint));
+
+    std::expected<Subscription, TreeError> subscription{Subscription{}};
+
+    auto action = router.bind(node, [state, changed = std::move(changed)](CheckBox &control, const RoutedEvent &event) {
+      if (!activates(event)) {
+        return EventReply::IGNORED;
+      }
+
+      if (const auto *toggle = dynamic_cast<const Switch *>(&control); toggle && toggle->readOnly()) {
+        return EventReply::HANDLED;
+      }
+
+      // Read the authoritative value once and perform one toggle. Retain this exact set
+      // receipt, including rejected/cancelled notifications, for the business callback.
+      auto current = state->snapshot();
+      CheckBoxResult result = current ? state->set(!(*current)->value) : std::unexpected(current.error());
 
       if (result) {
         auto synced = state->apply(result->snapshot->value);

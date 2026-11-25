@@ -21,6 +21,15 @@ struct ModelAccess;
 struct ValueModelAccess;
 struct EditAccess;
 
+inline void captureRowDeclarationOrigin(RefTarget &observation) {
+  const auto *scope = RowDeclarationOriginScope::current;
+  if (scope && scope->origin) {
+    // Prepublication observation fields carry only a weak construction owner.
+    observation.node = scope->origin->node;
+    observation.lifetime = scope->origin;
+  }
+}
+
 struct ModelDeclarationBase {
   enum class Kind {
     COLLECTION,
@@ -31,6 +40,7 @@ struct ModelDeclarationBase {
   };
 
   explicit ModelDeclarationBase(Kind value) : observation(std::make_shared<RefTarget>()), kind(value) {
+    captureRowDeclarationOrigin(*observation);
   }
 
   std::shared_ptr<RefTarget> observation;
@@ -39,6 +49,42 @@ struct ModelDeclarationBase {
   bool published{};
   bool resolving{};
   const Kind kind;
+};
+
+struct ModelDeclarationOriginScope {
+  ModelDeclarationOriginScope(ManagedScene &owner, const RefTarget &observation)
+      : scene(owner), lifetime(Access::lifetime(owner)) {
+    if (observation.node != Node<Widget>{}) {
+      auto retained = observation.lifetime.lock();
+      if (!retained) {
+        failure = TreeError::CLOSED;
+        return;
+      }
+      auto origin = std::const_pointer_cast<portals::detail::ManagedOrigin>(
+        std::static_pointer_cast<const portals::detail::ManagedOrigin>(retained));
+      auto valid = Access::validateModelOrigin(scene, origin);
+      if (!valid) {
+        failure = valid.error();
+        return;
+      }
+      declarations.origin = std::move(origin);
+    }
+    previous = Access::exchangeModelOrigin(scene, declarations.origin);
+    shifted = true;
+  }
+
+  ~ModelDeclarationOriginScope() {
+    if (shifted && !lifetime.expired()) {
+      (void)Access::exchangeModelOrigin(scene, std::move(previous));
+    }
+  }
+
+  ManagedScene &scene;
+  std::weak_ptr<const void> lifetime;
+  RowDeclarationOriginScope declarations;
+  std::shared_ptr<portals::detail::ManagedOrigin> previous;
+  std::optional<TreeError> failure;
+  bool shifted{};
 };
 
 template <class T> struct ModelDeclaration : ModelDeclarationBase {
@@ -57,6 +103,7 @@ template <class T> struct ModelDeclaration : ModelDeclarationBase {
 template <class T> struct NavigationDeclaration {
   explicit NavigationDeclaration(Model<T> value)
       : initial(std::move(value)), observation(std::make_shared<RefTarget>()) {
+    captureRowDeclarationOrigin(*observation);
   }
 
   Model<T> initial;
@@ -91,6 +138,12 @@ public:
   std::expected<ManagedModel<T>, ManagedError> managed() const {
     if (!data_ || data_->kind != detail::ModelDeclarationBase::Kind::COLLECTION) {
       return std::unexpected(ManagedError{ManagedPhase::STATE, {}, failure_, {}, {}});
+    }
+    if (data_->observation->owner != std::this_thread::get_id()) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::WRONG_THREAD, {}, {}});
+    }
+    if (!data_->published) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::CLOSED, {}, {}});
     }
     auto owner = detail::eventScene(data_->observation);
     if (!owner) {
@@ -284,6 +337,10 @@ private:
 namespace detail {
 /// @cond INTERNAL
 struct ModelAccess {
+  template <class T> static NavigationBindingOptions bindings(const Navigation<T> &value) {
+    return value.data_ ? value.data_->binding : NavigationBindingOptions{};
+  }
+
   struct RegisteredSource {
     NodeId scene;
     ModelResource resource;
@@ -432,6 +489,11 @@ struct ModelAccess {
                                        : std::expected<ManagedModel<T>, ManagedError>(fail(TreeError::WOULD_BLOCK));
     }
 
+    ModelDeclarationOriginScope ownership(scene, *data->observation);
+    if (ownership.failure) {
+      return fail(*ownership.failure);
+    }
+
     struct Resolving {
       bool &active;
 
@@ -533,6 +595,11 @@ struct ModelAccess {
       }
       return data->attempt == &context ? std::expected<ManagedNavigation, ManagedError>(data->handle)
                                        : std::expected<ManagedNavigation, ManagedError>(fail(TreeError::WOULD_BLOCK));
+    }
+
+    ModelDeclarationOriginScope ownership(scene, *data->observation);
+    if (ownership.failure) {
+      return fail(*ownership.failure);
     }
 
     struct Resolving {

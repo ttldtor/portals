@@ -71,6 +71,7 @@ struct ModelViewHistoryChange {
   std::weak_ptr<ManagedModelSource> model;
   ModelResource resource;
   bool explicitResource{};
+  bool resourceOnly{};
   std::weak_ptr<const void> participant;
   std::uint64_t role{};
   std::uint64_t revision{};
@@ -84,6 +85,10 @@ public:
                                                                             ModelCheckpointOptions options);
   ModelViewHistoryEntry *find(const std::shared_ptr<ManagedModelSource> &model, std::uint64_t role,
                               bool lineageFallback = true) const noexcept;
+  ModelViewHistoryEntry *find(ModelResource resource, std::uint64_t role, bool lineageFallback = true) const noexcept;
+  std::expected<ModelViewHistoryChange, TreeError> stageResource(ModelResource resource,
+                                                                 std::weak_ptr<const void> logicalLifetime,
+                                                                 std::uint64_t role, ModelViewCheckpoint value);
   std::expected<ModelViewHistoryChange, TreeError> stage(std::shared_ptr<ManagedModelSource> model, std::uint64_t role,
                                                          ModelViewCheckpoint value,
                                                          std::weak_ptr<const void> participant = {});
@@ -99,6 +104,9 @@ public:
   std::shared_ptr<ModelCanonicalRestore> pending;
 
 private:
+  std::expected<ModelViewHistoryChange, TreeError>
+  stageCommon(std::shared_ptr<ManagedModelSource> model, ModelResource resource, bool explicitResource,
+              bool resourceOnly, std::uint64_t role, ModelViewCheckpoint value, std::weak_ptr<const void> participant);
   SourceCredit credit_;
   std::shared_ptr<SourceBudget> budget_;
   std::weak_ptr<const void> lifetime_;

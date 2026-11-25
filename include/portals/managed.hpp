@@ -66,6 +66,31 @@ struct AsyncAccess;
 struct MountContext;
 
 /// @cond INTERNAL
+inline constexpr char PREPARED_CAPTION_TYPE{};
+
+// A linked construction scope classifies cold declarations by where they are
+// created, rather than by whichever row happens to resolve them first.
+struct RowDeclarationOriginScope {
+  explicit RowDeclarationOriginScope(std::shared_ptr<portals::detail::ManagedOrigin> value = {})
+      : origin(std::move(value)), previous(current) {
+    current = this;
+  }
+
+  ~RowDeclarationOriginScope() {
+    current = previous;
+  }
+
+  RowDeclarationOriginScope(const RowDeclarationOriginScope &) = delete;
+  std::shared_ptr<portals::detail::ManagedOrigin> origin;
+  RowDeclarationOriginScope *previous{};
+  static inline thread_local RowDeclarationOriginScope *current{};
+};
+
+struct PreparedCaptionSource {
+  virtual ~PreparedCaptionSource() = default;
+  virtual std::expected<std::shared_ptr<const PropertyChange<std::string>>, TreeError> snapshot() = 0;
+};
+
 struct ValueCaptionBinding {
   using Bind = std::function<std::expected<void, ManagedError>(ManagedScene &, std::shared_ptr<void>, MountContext &,
                                                                const void *)>;
@@ -79,6 +104,8 @@ struct ValueCaptionBinding {
 /// @endcond
 
 /// @cond INTERNAL
+struct RowAccess;
+
 struct SceneActivity {
   virtual ~SceneActivity() = default;
   virtual bool active() const noexcept = 0;
@@ -113,6 +140,9 @@ struct SceneActivity {
   virtual void cancel() noexcept = 0;
 
   virtual void layoutPrepared(const LayoutSnapshot &) noexcept {
+  }
+
+  virtual void layoutCompleted() noexcept {
   }
 };
 /// @endcond
@@ -303,8 +333,9 @@ template <class T> using ManagedPrepareHandler = std::function<std::expected<voi
 /** @brief Finite managed bookkeeping budgets, independent of the existing tree/queue limits. */
 struct ManagedOptions {
   std::size_t maxNodes{4096}; ///< Maximum retained entries, including removals pending next preparation.
-  std::size_t maxStates{256}; ///< Maximum scene-owned properties; retired private text adapters release their slots.
-  std::size_t maxModels{64};  ///< Maximum scene-owned models; they live until close().
+  std::size_t maxStates{
+    256}; ///< Maximum scene-owned properties; retired row scopes and private text adapters release their slots.
+  std::size_t maxModels{64};               ///< Maximum scene-owned models; retired row scopes release their slots.
   ManagedDiagnosticOptions diagnostics{};  ///< Positive limits for error history and owning causal traces.
   std::size_t maxKeyHandlers{64};          ///< Positive maximum owning onKey registrations; onInput resets the count.
   std::size_t maxClickHandlers{256};       ///< Positive maximum retained pipe click callbacks across the scene.
@@ -375,6 +406,7 @@ private:
   friend class ManagedScene;
   friend class NumericState;
   friend struct ui::detail::Access;
+  friend struct ui::detail::RowAccess;
   friend struct detail::ManagedNavigationRecord;
 
   std::expected<std::shared_ptr<Property<T>>, TreeError> lock() const {
@@ -1996,7 +2028,8 @@ private:
       return std::unexpected(error(ManagedPhase::STATE, root_, TreeError::NODE_LIMIT));
     }
 
-    auto created = Property<T>::create(app_.tree(), root_, std::forward<Value>(initial), kind, options);
+    auto created = Property<T>::create(app_.tree(), rowOrigin_ ? rowOrigin_->node : root_, std::forward<Value>(initial),
+                                       kind, options);
 
     if (!created) {
       return std::unexpected(error(ManagedPhase::STATE, root_, created.error()));
@@ -2011,6 +2044,8 @@ private:
       handle.lifetime_ = lifetime_;
       handle.owner_ = owner_;
       handle.scene_ = root_.id();
+      handle.origin_ = rowOrigin_;
+      ownRowProperty(model);
       properties_.push_back(std::move(model));
 
       return handle;
@@ -2024,6 +2059,12 @@ private:
     std::weak_ptr<void> property;
     Node<Widget> receiver;
   };
+
+  void ownRowProperty(const std::shared_ptr<void> &property) {
+    if (rowOrigin_) {
+      originProperties_.push_back({rowOrigin_, property, rowOrigin_->node});
+    }
+  }
 
   struct LiveTextRecord {
     std::shared_ptr<detail::ManagedOrigin> origin;
@@ -2229,6 +2270,7 @@ private:
 
   friend struct style::ct::detail::Access;
   friend struct ui::detail::Access;
+  friend struct ui::detail::RowAccess;
   friend struct ui::detail::RefAccess;
   friend struct ui::detail::SceneAccess;
   friend struct ui::detail::ClickAccess;
@@ -2876,7 +2918,8 @@ private:
   ManagedOptions options_;
   std::shared_ptr<const void> lifetime_;
   std::expected<void, ManagedError> admitActivity(std::shared_ptr<ui::detail::SceneActivity> activity);
-  std::expected<void, TreeError> visitActivities(bool prepared, const LayoutSnapshot *layout = nullptr);
+  std::expected<void, TreeError> visitActivities(bool prepared, const LayoutSnapshot *layout = nullptr,
+                                                 bool completed = false);
   bool choiceWithin(Node<Widget> root, Node<Widget> node) const;
   std::weak_ptr<ui::detail::SceneActivity> choiceIntent_;
   std::uint64_t activityRevision_{};
@@ -2894,6 +2937,8 @@ private:
   bool installingThemeSelection_{};
   std::vector<std::shared_ptr<Entry>> entries_;
   std::shared_ptr<detail::ManagedScrollState> scroll_;
+  std::weak_ptr<const void> rowLayoutLease_;
+  std::shared_ptr<detail::ManagedOrigin> rowOrigin_;
   std::vector<std::shared_ptr<void>> properties_;
   std::vector<std::shared_ptr<ObserverRecord>> observers_ = std::vector<std::shared_ptr<ObserverRecord>>(0);
   std::vector<OriginProperty> originProperties_ = std::vector<OriginProperty>(0);

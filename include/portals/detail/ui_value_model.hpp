@@ -158,6 +158,12 @@ struct ValueModelAccess {
       return std::unexpected(ManagedError{ManagedPhase::STATE, {}, failure, {}, {}});
     }
 
+    if (base->observation->owner != std::this_thread::get_id()) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::WRONG_THREAD, {}, {}});
+    }
+    if (!base->published) {
+      return std::unexpected(ManagedError{ManagedPhase::STATE, {}, TreeError::CLOSED, {}, {}});
+    }
     auto owner = eventScene(base->observation);
     if (!owner) {
       return std::unexpected(owner.error());
@@ -219,6 +225,11 @@ struct ValueModelAccess {
 
       return qualified ? std::expected<ManagedState<T>, ManagedError>(data->handle)
                        : std::expected<ManagedState<T>, ManagedError>(fail(qualified.error()));
+    }
+
+    ModelDeclarationOriginScope ownership(scene, *data->observation);
+    if (ownership.failure) {
+      return fail(*ownership.failure);
     }
 
     struct Resolving {

@@ -86,6 +86,10 @@ std::expected<ManagedModel<T>, ManagedError> ManagedScene::model(std::shared_ptr
 
     source->model = std::move(*created);
     source->scene = root_.id();
+    if (rowOrigin_) {
+      source->origin = rowOrigin_;
+      source->receiver = rowOrigin_->node;
+    }
     if (prepared) {
       source->preparation = std::make_shared<ManagedViewHandler<T>>(std::move(prepared));
     }

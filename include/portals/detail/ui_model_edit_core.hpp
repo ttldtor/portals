@@ -728,12 +728,22 @@ template <class Row, class Value> struct EditEntry final : EditEntryBase {
   }
 };
 
+template <class Row> struct FixedEditContext {
+  NavigationPosition position;
+  std::shared_ptr<portals::detail::ManagedModelSource> source;
+  SourceStamp sourceSession;
+  std::shared_ptr<portals::detail::ManagedOrigin> origin;
+  std::function<std::expected<void, TreeError>()> admitDraft;
+};
+
 template <class Row>
 struct EditState final : portals::detail::EditNavigationParticipant, std::enable_shared_from_this<EditState<Row>> {
   explicit EditState(Navigation<Row> value, EditOptions config) : navigation(std::move(value)), options(config) {
   }
 
   Navigation<Row> navigation;
+  // Only fixed-record delegates allocate this extension; ordinary sessions retain one optional pointer.
+  std::unique_ptr<FixedEditContext<Row>> fixed;
   EditOptions options;
   ManagedNavigation managed;
   std::vector<std::shared_ptr<EditDefinitionBase>> definitions = std::vector<std::shared_ptr<EditDefinitionBase>>(0);
@@ -753,6 +763,10 @@ struct EditState final : portals::detail::EditNavigationParticipant, std::enable
   bool endpointClosed{};
 
   std::expected<void, TreeError> resolve(ManagedScene &scene, MountContext &context) {
+    if (fixed) {
+      return current().transform([](const auto &) {
+      });
+    }
     auto nav = ModelAccess::resolve(scene, navigation, context);
     if (!nav) {
       return std::unexpected(EditAccess::cause(nav.error()));
@@ -789,6 +803,22 @@ struct EditState final : portals::detail::EditNavigationParticipant, std::enable
   }
 
   std::expected<void, TreeError> registerParticipant() {
+    if (fixed) {
+      if (fixed->origin) {
+        auto live = fixed->origin->check();
+        if (!live) {
+          return std::unexpected(live.error());
+        }
+      }
+      if (!writeSession.instance) {
+        auto stamp = portals::detail::windowSourceStamp();
+        if (!stamp) {
+          return std::unexpected(TreeError::IDENTITY_EXHAUSTED);
+        }
+        writeSession = *stamp;
+      }
+      return {};
+    }
     if (registered) {
       return {};
     }
@@ -831,6 +861,9 @@ struct EditState final : portals::detail::EditNavigationParticipant, std::enable
     auto admitted = registerParticipant();
     if (!admitted) {
       return std::unexpected(admitted.error());
+    }
+    if (fixed) {
+      return fixed->position;
     }
     auto channel = managed.current();
     if (!channel) {
@@ -876,6 +909,12 @@ struct EditState final : portals::detail::EditNavigationParticipant, std::enable
   }
 
   std::expected<void, TreeError> checkCredit(const EditEntryBase &entry, std::size_t charge, bool retain = true) const {
+    if (retain && fixed && fixed->admitDraft) {
+      auto admitted = fixed->admitDraft();
+      if (!admitted) {
+        return admitted;
+      }
+    }
     if (retain && entry.pristine()) {
       const auto retained = std::ranges::count_if(entries, [](const auto &value) {
         return !value->discarded && !value->pristine();
@@ -909,12 +948,16 @@ struct EditState final : portals::detail::EditNavigationParticipant, std::enable
     if (!position.row || position.kind != PositionKind::ITEM || position.resolution != PositionResolution::EXACT) {
       return std::unexpected(TreeError::WOULD_BLOCK);
     }
-    auto record = EditAccess::context(managed);
-    if (!record) {
-      return std::unexpected(record.error());
+    auto actualSource = nextSource ? nextSource : fixed ? fixed->source : nullptr;
+    if (!actualSource && !fixed) {
+      auto record = EditAccess::context(managed);
+      if (!record) {
+        return std::unexpected(record.error());
+      }
+      actualSource = (*record)->model.lock();
     }
-    const auto actualSource = nextSource ? nextSource : (*record)->model.lock();
-    auto incarnation = EditAccess::sourceSession<Row>(actualSource);
+    auto incarnation = fixed ? std::expected<SourceStamp, TreeError>(fixed->sourceSession)
+                             : EditAccess::sourceSession<Row>(actualSource);
     if (!incarnation) {
       return std::unexpected(incarnation.error());
     }

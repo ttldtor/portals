@@ -391,6 +391,7 @@ public:
 
 private:
   friend class ManagedScene;
+  friend struct detail::RowTreeAccess;
   friend struct detail::EventRouterAccess;
   std::uint64_t focusGeneration() const noexcept;
   struct State;

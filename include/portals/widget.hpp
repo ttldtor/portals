@@ -20,7 +20,8 @@ struct NamedAccess;
 
 namespace detail {
 struct LayoutTraversalAccess;
-}
+struct RowTreeAccess;
+} // namespace detail
 class WidgetTree;
 class StyleEngine;
 
@@ -559,6 +560,7 @@ public:
 
 private:
   friend struct detail::LayoutTraversalAccess;
+  friend struct detail::RowTreeAccess;
   friend class EventRouter;
   friend class RadioGroup;
   friend class LayoutSnapshot;

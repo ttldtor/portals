@@ -109,7 +109,7 @@ ManagedScene::derive(ManagedState<In> input, Transform &&transform, Invalidation
     record->inputOrigin = input.origin_;
     record->recoveryOrigin = input.origin_ ? input.origin_ : input.recoveryOrigin_;
     record->scene = this;
-    record->node = root_;
+    record->node = rowOrigin_ ? rowOrigin_->node : root_;
     record->runtime = false;
     record->operation = "derive.compute";
     record->origin = origin;
@@ -251,11 +251,13 @@ ManagedScene::derive(ManagedState<In> input, Transform &&transform, Invalidation
     handle.lifetime_ = lifetime_;
     handle.owner_ = owner_;
     handle.scene_ = root_.id();
+    handle.origin_ = rowOrigin_;
     handle.recoveryOrigin_ = record->recoveryOrigin;
     record->subscription = std::move(*token);
     record->successful = (*initial)->revision;
     record->initialPending = false;
     record->runtime = true;
+    ownRowProperty(output);
     properties_.push_back(std::move(output));
     observers_.push_back(std::move(record));
     return ManagedSource<Out>(std::move(handle));

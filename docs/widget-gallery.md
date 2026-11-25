@@ -68,6 +68,7 @@ The linked guides include recordings where available and instructions for runnin
   <article class="widget-gallery-card"><h3><a href="find-bar.html">FindBar</a></h3><a href="find-bar.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/find-bar-guide.png" alt="FindBar"></a></article>
   <article class="widget-gallery-card"><h3><a href="md_docs_2virtual-list.html">VirtualList</a></h3><a href="md_docs_2virtual-list.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/virtual-list-guide.png" alt="VirtualList"></a></article>
   <article class="widget-gallery-card"><h3><a href="md_docs_2virtual-table.html">VirtualTable</a></h3><a href="md_docs_2virtual-table.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/virtual-table-guide.png" alt="VirtualTable"></a></article>
+  <article class="widget-gallery-card"><h3><a href="virtual-rows.html">Interactive virtual rows</a></h3><a href="virtual-rows.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/virtual-rows.png" alt="Interactive virtual rows"></a><p>Check, edit and remove model records with ordinary controls.</p></article>
   <article class="widget-gallery-card"><h3><a href="md_docs_2chart.html">Chart</a></h3><a href="md_docs_2chart.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/chart-guide.png" alt="Chart"></a></article>
   <article class="widget-gallery-card"><h3><a href="log-view.html">LogView</a></h3><a href="log-view.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/log-view-guide.png" alt="LogView"></a></article>
   <article class="widget-gallery-card"><h3><a href="document-view.html">DocumentView</a></h3><a href="document-view.html" tabindex="-1"><img loading="lazy" decoding="async" src="images/document-view.png" alt="DocumentView"></a><p>Read large text sources through bounded background windows.</p></article>
@@ -104,6 +105,7 @@ Each group documents its supported parts, values and limits. The common PSS tabl
 | FindBar | [Customize](find-bar.md#find-bar-styling-reference) |
 | VirtualList / List | [Customize](virtual-list.md#virtual-list-styling-reference) |
 | VirtualTable / Table | [Customize](virtual-table.md#virtual-table-styling-reference) |
+| VirtualRows | [Customize](virtual-rows.md#virtual-rows-styling-reference) |
 | LogView | [Customize](log-view.md#log-view-styling-reference) |
 | DocumentView | [Customize](document-view.md#document-view-styling-reference) |
 | Chart | [Customize](chart.md#chart-styling-reference) |

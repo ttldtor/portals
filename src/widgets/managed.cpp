@@ -1196,7 +1196,7 @@ std::expected<void, ManagedError> ManagedScene::admitActivity(std::shared_ptr<ui
     return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::INVALID_ARGUMENT));
   }
 
-  if (servicingActivities_) {
+  if (servicingActivities_ && !rowOrigin_) {
     return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::WOULD_BLOCK));
   }
 
@@ -1207,9 +1207,11 @@ std::expected<void, ManagedError> ManagedScene::admitActivity(std::shared_ptr<ui
 
   // Retire popup leases before dropping their only registry observation. Retirement may
   // release arbitrary captures, so use the existing service guard across callbacks and compaction.
-  servicingActivities_ = true;
-  retireInactiveActivities(asyncActivities_, closed_);
-  servicingActivities_ = false;
+  if (!servicingActivities_) {
+    servicingActivities_ = true;
+    retireInactiveActivities(asyncActivities_, closed_);
+    servicingActivities_ = false;
+  }
 
   if (closed_) {
     return std::unexpected(error(ManagedPhase::BIND, root_, TreeError::CLOSED));
@@ -1228,7 +1230,8 @@ std::expected<void, ManagedError> ManagedScene::admitActivity(std::shared_ptr<ui
   }
 }
 
-std::expected<void, TreeError> ManagedScene::visitActivities(bool prepared, const LayoutSnapshot *layout) {
+std::expected<void, TreeError> ManagedScene::visitActivities(bool prepared, const LayoutSnapshot *layout,
+                                                             bool completed) {
   if (closed_) {
     return {};
   }
@@ -1237,18 +1240,24 @@ std::expected<void, TreeError> ManagedScene::visitActivities(bool prepared, cons
   }
   // Only admitted active invocations are visited; idle bindings and controls add no cycle scan.
   const auto activeCount = asyncActivities_.size();
+  const auto lifetime = std::weak_ptr(lifetime_);
   servicingActivities_ = true;
 
   for (std::size_t index = 0; index < activeCount && index < asyncActivities_.size() && !closed_; ++index) {
     auto activity = asyncActivities_[index].lock();
 
     if (activity && activity->active()) {
-      if (layout) {
+      if (completed) {
+        activity->layoutCompleted();
+      } else if (layout) {
         activity->layoutPrepared(*layout);
       } else if (prepared) {
         activity->prepared();
       } else {
         activity->service();
+      }
+      if (lifetime.expired()) {
+        return {};
       }
     }
   }
@@ -1381,7 +1390,7 @@ std::expected<void, TreeError> ManagedScene::completedLayout(Application &app) {
       navigation_->refreshAfterLayout = false;
       return app_.tree().invalidate(root_, Invalidation::PAINT);
     }
-    return {};
+    return visitActivities(false, nullptr, true);
   } catch (const std::bad_alloc &) {
     return std::unexpected(TreeError::NO_MEMORY);
   } catch (...) {
@@ -1759,7 +1768,9 @@ std::expected<void, ManagedError> ManagedScene::syncCaption(Node<Widget> node, C
       return {};
     }
   }
-  auto snapshot = binding.model.snapshot();
+  auto snapshot = binding.source && binding.source->type == &ui::detail::PREPARED_CAPTION_TYPE
+                    ? std::static_pointer_cast<ui::detail::PreparedCaptionSource>(binding.source->source)->snapshot()
+                    : binding.model.snapshot();
 
   if (!snapshot) {
     return std::unexpected(error(phase, node, snapshot.error()));
@@ -2909,8 +2920,9 @@ std::expected<void, TreeError> ManagedScene::prepare(Application &app, CellSize)
 }
 
 bool ManagedScene::usesPreparedLayout() const noexcept {
-  return usesGeometrySnapshot() || !spinners_.empty() || !dataStates_.empty() || static_cast<bool>(dialogs_) ||
-         static_cast<bool>(notifications_) || std::ranges::any_of(entries_, [](const auto &entry) {
+  return !rowLayoutLease_.expired() || usesGeometrySnapshot() || !spinners_.empty() || !dataStates_.empty() ||
+         static_cast<bool>(dialogs_) || static_cast<bool>(notifications_) ||
+         std::ranges::any_of(entries_, [](const auto &entry) {
            return static_cast<bool>(entry->viewPrepare);
          });
 }

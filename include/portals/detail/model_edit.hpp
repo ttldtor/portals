@@ -62,6 +62,7 @@ struct EditTextFailure {
 
 /** Optional bridge; its owning closures retain the field session, never a scene. */
 struct EditTextBinding {
+  Node<LineEdit> receiver;
   EditTextDraft *displayed{};
   EditTextDraft *prepared{};
   void *displayedEntry{};

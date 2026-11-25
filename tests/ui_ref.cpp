@@ -2399,3 +2399,24 @@ TEST_CASE("input replacement publishes callback and key budget before retiring o
   REQUIRE_FALSE(full);
   CHECK(hasCause(full.error(), TreeError::NODE_LIMIT));
 }
+
+TEST_CASE("unpublished observations retain CLOSED and owner-first errors with a live metadata lease") {
+  auto target = std::make_shared<portals::ui::detail::RefTarget>();
+  auto lease = std::make_shared<const int>(1);
+  target->lifetime = lease;
+  auto cold = portals::ui::detail::eventScene(target);
+  REQUIRE_FALSE(cold);
+  CHECK(hasCause(cold.error(), portals::TreeError::CLOSED));
+  portals::ManagedError failure{portals::ManagedPhase::STATE, {}, portals::TreeError::CLOSED, {}, {}};
+  portals::ui::detail::Access::reportValueError(target, failure, std::source_location::current());
+  std::optional<portals::ManagedError> foreign;
+  std::jthread worker([&] {
+    auto result = portals::ui::detail::eventScene(target);
+    if (!result) {
+      foreign = result.error();
+    }
+  });
+  worker.join();
+  REQUIRE(foreign);
+  CHECK(hasCause(*foreign, portals::TreeError::WRONG_THREAD));
+}

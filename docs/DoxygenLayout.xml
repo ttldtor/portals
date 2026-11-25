@@ -26,6 +26,7 @@
         <tab type="usergroup" title="Data views">
           <tab type="user" title="VirtualList" url="@ref docs/virtual-list.md" />
           <tab type="user" title="VirtualTable" url="@ref docs/virtual-table.md" />
+          <tab type="user" title="VirtualRows" url="@ref docs/virtual-rows.md" />
           <tab type="user" title="Chart" url="@ref docs/chart.md" />
           <tab type="user" title="LogView" url="@ref docs/log-view.md" />
           <tab type="user" title="DocumentView" url="@ref docs/document-view.md" />
@@ -189,6 +190,7 @@
         <tab type="usergroup" title="Представление данных">
           <tab type="user" title="VirtualList" url="@ref docs/ru/virtual-list.md" />
           <tab type="user" title="VirtualTable" url="@ref docs/ru/virtual-table.md" />
+          <tab type="user" title="VirtualRows" url="@ref docs/ru/virtual-rows.md" />
           <tab type="user" title="Chart" url="@ref docs/ru/chart.md" />
           <tab type="user" title="LogView" url="@ref docs/ru/log-view.md" />
           <tab type="user" title="DocumentView" url="@ref docs/ru/document-view.md" />

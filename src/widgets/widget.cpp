@@ -1,6 +1,7 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/detail/layout_traversal.hpp>
+#include <portals/detail/virtual_rows_tree.hpp>
 #include <portals/layout_snapshot.hpp>
 #include <portals/widget.hpp>
 
@@ -802,6 +803,56 @@ const UiScope &WidgetTree::scope(NodeId id) const {
 
 Scheduler &WidgetTree::scheduler() const {
   return state_->scheduler;
+}
+
+std::expected<void, TreeError> detail::RowTreeAccess::publish(WidgetTree &tree, Node<Widget> host,
+                                                              std::span<const Node<Widget>> visible) {
+  auto parent = tree.access(host.id(), true);
+  if (!parent) {
+    return std::unexpected(parent.error());
+  }
+  auto &state = *tree.state_;
+  auto &record = *state.slots[host.id().slot].record;
+  for (std::size_t index = 0; index < visible.size(); ++index) {
+    auto child = tree.access(visible[index].id(), true);
+    if (!child) {
+      return std::unexpected(child.error());
+    }
+    auto *entry = state.slots[visible[index].id().slot].record;
+    if (entry->parent != &record ||
+        std::ranges::find(visible.first(index), visible[index]) != visible.first(index).end()) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+  }
+  bool changed{};
+  for (std::size_t index = 0; index < visible.size(); ++index) {
+    auto first = record.children.begin() + static_cast<std::ptrdiff_t>(index);
+    auto found = std::find_if(first, record.children.end(), [&](const auto &child) {
+      return child->id == visible[index].id();
+    });
+    if (found != first) {
+      std::rotate(first, found, found + 1);
+      changed = true;
+    }
+  }
+  for (const auto &child : record.children) {
+    const bool shown = child->live && std::ranges::any_of(visible, [&](const auto &node) {
+                         return node.id() == child->id;
+                       });
+    if (child->visible != shown) {
+      state.changeInputEligibility(*child);
+      child->visible = shown;
+      changed = true;
+    }
+  }
+  if (changed) {
+    state.changeInputEligibility(record);
+    if (state.inputGeneration) {
+      ++state.inputGeneration;
+    }
+    state.invalidate(Invalidation::LAYOUT, &record);
+  }
+  return {};
 }
 
 std::expected<void, TreeError> WidgetTree::setVisible(Node<Widget> node, bool visible) {

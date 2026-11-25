@@ -84,6 +84,10 @@ ManagedScene::collectionModel(ManagedState<Collection> input, CollectionModelOpt
     auto source = std::make_shared<detail::ManagedModelSourceOf<T>>();
     source->model = std::move(*created);
     source->scene = root_.id();
+    if (rowOrigin_) {
+      source->origin = rowOrigin_;
+      source->receiver = rowOrigin_->node;
+    }
     source->sinkOnly = true;
     source->origin = input.origin_;
     source->sync = [weak = std::weak_ptr(source), property = std::weak_ptr(*property), origin = input.origin_,

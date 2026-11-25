@@ -209,6 +209,7 @@ std::expected<void, ManagedError> Access::bindEditText(ManagedScene &scene, Node
     return std::unexpected(entry.error());
   }
   try {
+    source->receiver = node;
     LineEditOptions options;
     auto read = scene.app_.tree().read(node, [&](const LineEdit &edit) {
       options = portals::detail::LineEditSourceAccess::options(edit);

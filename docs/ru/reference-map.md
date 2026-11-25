@@ -44,7 +44,7 @@
 - [Индексированные подсказки](live-search.md), [валидация полей](form-fields.md), [формы текущей записи](model-forms.md).
 - [Выбор из модели](choices.md): ComboBox и DropDown.
 - [Меню](menus.md): общие команды с выбором клавиатурой и мышью.
-- [Виртуальные списки](virtual-list.md), [виртуальные таблицы](virtual-table.md).
+- [Виртуальные списки](virtual-list.md), [виртуальные таблицы](virtual-table.md), [интерактивные виртуальные строки](virtual-rows.md).
 - [Прокрутка обычного содержимого](scroll-controls.md), [виртуальных данных](scroll.md).
 - [Диалоги](dialogs.md), [уведомления](notifications.md), [подсказки клавиш](key-help.md).
 - [Предпросмотр темы](theme-selection.md), [каталог тем](theme-selector.md).
