@@ -10,6 +10,16 @@
 #include <portals/ui_mount.hpp>
 #include <portals/virtual_rows.hpp>
 
+namespace portals {
+/** @brief Checked managed facade for natural row sizing.
+ * @tparam T Domain row. @param scene UI owner. @param node Mounted host.
+ * @param enabled Opt into natural height. @return Managed error or admitted settings.
+ */
+template <class T>
+std::expected<void, ManagedError> setVirtualRowsAutoRowHeight(ManagedScene &scene, Node<VirtualRows<T>> node,
+                                                              bool enabled);
+} // namespace portals
+
 namespace portals::ui::detail {
 /// @cond INTERNAL
 struct RowPositionState {
@@ -59,6 +69,26 @@ struct RowAccess {
       scene.rowLayoutLease_ = lease;
     }
     return lease;
+  }
+
+  template <class T>
+  static std::expected<void, ManagedError> autoHeight(ManagedScene &scene, Node<VirtualRows<T>> node, bool enabled) {
+    auto allowed = scene.boundary(ManagedPhase::BIND, node);
+    if (!allowed) {
+      return allowed;
+    }
+    auto changed = setVirtualRowsAutoRowHeight(tree(scene), node, enabled);
+    if (!changed) {
+      auto failure = error(node, changed.error());
+      failure.phase = ManagedPhase::BIND;
+      return std::unexpected(failure);
+    }
+    return {};
+  }
+
+  static std::expected<void, TreeError> flushStyles(ManagedScene &scene) {
+    auto flushed = scene.flushStyles();
+    return flushed ? std::expected<void, TreeError>{} : std::unexpected(EditAccess::cause(flushed.error()));
   }
 
   static WidgetTree &tree(ManagedScene &scene) {
@@ -907,3 +937,11 @@ bool Ref<T>::model(const WindowRowsModel<Row> &source, ModelRebindOptions option
   return result.has_value();
 }
 } // namespace portals::ui
+
+namespace portals {
+template <class T>
+std::expected<void, ManagedError> setVirtualRowsAutoRowHeight(ManagedScene &scene, Node<VirtualRows<T>> node,
+                                                              bool enabled) {
+  return ui::detail::RowAccess::autoHeight(scene, node, enabled);
+}
+} // namespace portals

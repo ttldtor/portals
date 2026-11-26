@@ -426,6 +426,10 @@ std::expected<bool, TreeError> WidgetTree::revealVisible(Node<Widget> node) cons
   return State::shown(**record, false);
 }
 
+std::expected<std::uint64_t, TreeError> detail::RowTreeAccess::geometryRevision(const WidgetTree &tree) {
+  return tree.geometryRevision();
+}
+
 std::expected<std::uint64_t, TreeError> WidgetTree::geometryRevision() const {
   if (state_->owner != std::this_thread::get_id()) {
     return std::unexpected(TreeError::WRONG_THREAD);
@@ -1198,6 +1202,16 @@ std::expected<void, TreeError> WidgetTree::beginFrame() const {
 }
 
 std::expected<CellSize, TreeError> WidgetTree::measure(Node<Widget> node, CellSize available) {
+  return measureImpl(node, available);
+}
+
+std::expected<CellSize, TreeError> detail::RowTreeAccess::measureWidget(WidgetTree &tree, Node<Widget> node,
+                                                                        Node<Widget> row, CellSize available) {
+  return tree.measureImpl(node, available, row);
+}
+
+std::expected<CellSize, TreeError> WidgetTree::measureImpl(Node<Widget> node, CellSize available,
+                                                           Node<Widget> measurementRoot) {
   auto record = state_->find(node.id());
 
   if (!record) {
@@ -1208,8 +1222,22 @@ std::expected<CellSize, TreeError> WidgetTree::measure(Node<Widget> node, CellSi
     return std::unexpected(TreeError::WOULD_BLOCK);
   }
 
-  if (!State::shown(**record, false)) {
-    return CellSize{};
+  if (measurementRoot == Node<Widget>{}) {
+    if (!State::shown(**record, false)) {
+      return CellSize{};
+    }
+  } else {
+    // Only the staged root is allowed to be hidden; descendant flags still apply.
+    auto ancestor = *record;
+    while (ancestor && ancestor->id != measurementRoot.id()) {
+      if (!ancestor->visible) {
+        return CellSize{};
+      }
+      ancestor = ancestor->parent;
+    }
+    if (!ancestor) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
   }
 
   Borrow guard(*this, true);

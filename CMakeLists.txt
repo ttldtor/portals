@@ -1731,7 +1731,7 @@ if(PORTALS_BUILD_TESTS)
   target_link_libraries(portals_docs_view_models PRIVATE portals_core)
   set_target_properties(portals_docs_view_models PROPERTIES CXX_EXTENSIONS OFF)
 
-  foreach(guide IN ITEMS value_models value_captions owned_rows record_edit record_form city_form log_snapshot virtual_rows)
+  foreach(guide IN ITEMS value_models value_captions owned_rows record_edit record_form city_form log_snapshot virtual_rows virtual_row_cards)
     add_executable(portals_docs_${guide} docs/examples/guide_${guide}.cpp)
     target_link_libraries(portals_docs_${guide} PRIVATE portals::core)
     set_target_properties(portals_docs_${guide} PROPERTIES CXX_EXTENSIONS OFF)

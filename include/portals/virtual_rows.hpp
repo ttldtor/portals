@@ -65,16 +65,17 @@ struct VirtualRowsPosition {
   bool operator==(const VirtualRowsPosition &other) const = default;
 };
 
-/** @brief Fixed-height bounded real-child row host settings. */
+/** @brief Bounded real-child row host settings; fixed-height defaults with opt-in natural sizing. */
 struct VirtualRowsOptions {
   ModelCheckpointOptions checkpoints{}; ///< Existing bounded source-position history budget.
   EditOptions editing{};                ///< Existing common field editing mode and retained field/byte limits.
   std::int32_t rowHeight{1};            ///< Positive terminal cell rows per domain row.
   std::size_t maxRows{256};          ///< Positive maximum visible assignments; excessive viewport demand is rejected.
   std::size_t overscanRows{2};       ///< Additional native delivered rows for smooth bounded row-step overlap.
-  std::int64_t maxPendingRows{4096}; ///< Positive cap on accepted native relative row intents awaiting delivery.
+  std::int64_t maxPendingRows{4096}; ///< Positive cap on queued native row moves or natural-mode cell intents.
   bool scrollbar{true};              ///< Show the existing styled vertical bar when a finite source can scroll.
   bool currentIndicator{true};       ///< Reserve one leading cell for the current-row marker.
+  bool autoRowHeight{};              ///< Measure bounded real row compositions at their actual offered width.
 };
 
 namespace ui::detail {
@@ -84,6 +85,7 @@ struct RowPositionState;
 struct RowPlacement {
   Node<Widget> node;
   std::int32_t y{};
+  std::int32_t height{1};
 };
 
 struct VirtualRowsState {
@@ -97,6 +99,7 @@ struct VirtualRowsState {
   std::optional<SourceCapabilities> sourceCapabilities;
   std::optional<std::uint64_t> exactCount;
   std::uint64_t first{};
+  std::int32_t firstCellOffset{};
   VirtualRowsPosition position;
   std::shared_ptr<RowPositionState> positionState;
   Node<ScrollBar> scrollbar;
@@ -105,6 +108,11 @@ struct VirtualRowsState {
   std::size_t currentSlot{};
   std::optional<std::size_t> visibleCurrentSlot;
   std::optional<GraphemeText> currentGlyph;
+
+  virtual std::expected<void, TreeError> autoHeight(bool) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+
   virtual std::expected<void, TreeError> requestFirst(std::uint64_t) = 0;
   virtual std::expected<void, TreeError> requestMove(std::int64_t) = 0;
   virtual std::expected<void, TreeError> requestPage(bool) = 0;
@@ -184,11 +192,12 @@ public:
     return state_->position;
   }
 
-  /** @param available Offered viewport cells. @return Fixed row-height child bounds. */
+  /** @param available Offered viewport cells. @return Width after gutters and fixed or natural measurement bounds. */
   std::expected<CellSize, TreeError> childAvailable(CellSize available) const override {
     const auto gutters =
       static_cast<std::int32_t>(state_->options.currentIndicator) + static_cast<std::int32_t>(state_->scrollbarVisible);
-    return CellSize{std::max(0, available.width - gutters), state_->options.rowHeight};
+    return CellSize{std::max(0, available.width - gutters),
+                    state_->options.autoRowHeight ? available.height : state_->options.rowHeight};
   }
 
   /** @brief Ignore child measurements. @return Empty intrinsic extent; size policy owns viewport sizing. */
@@ -213,7 +222,7 @@ public:
         result.push_back(*rect);
         continue;
       }
-      if (child.desired.height > state_->options.rowHeight) {
+      if (!state_->options.autoRowHeight && child.desired.height > state_->options.rowHeight) {
         return std::unexpected(TreeError::INVALID_GEOMETRY);
       }
       const auto found = std::ranges::find(state_->placements, child.node, [](const auto &entry) {
@@ -224,7 +233,7 @@ public:
       }
       const auto leading = std::min(available.width, static_cast<std::int32_t>(state_->options.currentIndicator));
       const auto width = std::max(0, available.width - leading - static_cast<std::int32_t>(state_->scrollbarVisible));
-      auto rect = CellRect::from({leading, found->y}, {width, state_->options.rowHeight});
+      auto rect = CellRect::from({leading, found->y}, {width, found->height});
       if (!rect) {
         return std::unexpected(TreeError::INVALID_GEOMETRY);
       }
@@ -257,7 +266,7 @@ public:
       return {};
     }
     const std::array<RenderCommand, 1> commands{
-      TextCommand{{0, static_cast<std::int32_t>(index * state_->options.rowHeight)},
+      TextCommand{{0, std::max(0, state_->placements[index].y)},
                   *state_->currentGlyph,
                   bounds_,
                   CellStyle{.bold = state_->hasFocus, .underline = state_->hasFocus}}};
@@ -268,6 +277,20 @@ private:
   std::shared_ptr<ui::detail::VirtualRowsState> state_;
   CellRect bounds_;
 };
+
+/** @brief Select bounded natural row sizing without changing fixed-height defaults.
+ * @tparam T Domain row. @param tree UI owner. @param node Live row host.
+ * @param enabled True for measured compositions, false for configured rowHeight.
+ * @return Checked admission; failure retains the previous sizing mode and window.
+ */
+template <class T>
+std::expected<void, TreeError> setVirtualRowsAutoRowHeight(WidgetTree &tree, Node<VirtualRows<T>> node, bool enabled) {
+  std::expected<void, TreeError> result;
+  auto changed = tree.edit(node, [&](auto &host) {
+    result = host.state()->autoHeight(enabled);
+  });
+  return changed ? result : changed;
+}
 
 /** @brief Request a finite ordinal; mounting occurs at the existing managed service boundary.
  * @tparam T Domain row type. @param tree UI owner. @param node Live row host.
