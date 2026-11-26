@@ -648,6 +648,17 @@ public:
     return std::move(*this).scalarSettings({.rowHeight = value});
   }
 
+  /** @param enabled Measure each bounded mounted row from its composed content.
+   * @return Consuming virtual-row recipe; false retains the configured fixed row height.
+   */
+  Description &&autoRowHeight(bool enabled = true) &&
+    requires requires { typename T::VirtualRow; }
+  {
+    return std::move(*this).setup([enabled](ManagedScene &scene, Node<T> node) {
+      return setVirtualRowsAutoRowHeight(scene, node, enabled);
+    });
+  }
+
   /** @param value Extra requested rows per side, including explicit zero.
    * @return This consuming exact native data-view recipe.
    */

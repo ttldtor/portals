@@ -188,6 +188,7 @@ struct Fixture {
   explicit Fixture(ManagedOptions options = {}) : scene(take(ManagedScene::create(*app, options))) {
   }
 
+  // This fixture forces layout; idle-work assertions must use the real application runner.
   void prepare() {
     take(scene->afterDispatch(*app));
     take(scene->prepare(*app, available));
@@ -2391,4 +2392,589 @@ TEST_CASE("unqualified ordinary editors require explicit row edit participation"
     CHECK(view.lastError() == TreeError::INVALID_ARGUMENT);
   }));
 }
+
+struct NaturalProbeState {
+  std::size_t measurements{};
+  std::vector<std::int32_t> widths;
+  bool reject{};
+};
+
+class NaturalProbe final : public SizedWidget {
+public:
+  NaturalProbe(std::int32_t height, std::shared_ptr<NaturalProbeState> state, bool wrap = false,
+               bool rejectOnState = true)
+      : SizedWidget(DEFAULT_CONTENT_POLICY), height_(height), state_(std::move(state)), wrap_(wrap),
+        rejectOnState_(rejectOnState) {
+  }
+
+  std::expected<CellSize, TreeError> measure(CellSize available) override {
+    ++state_->measurements;
+    state_->widths.push_back(available.width);
+    if (state_->reject && rejectOnState_) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+    return CellSize{1, wrap_ && available.width < 20 ? height_ * 2 : height_};
+  }
+
+private:
+  std::int32_t height_;
+  std::shared_ptr<NaturalProbeState> state_;
+  bool wrap_;
+  bool rejectOnState_;
+};
+
+TEST_CASE("natural rows measure hidden staged compositions and preserve explicit hidden descendants") {
+  Fixture fixture;
+  fixture.available = {40, 5};
+  auto source = ui::model(std::array{1, 2, 3});
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source,
+                                                 [](auto row) {
+                                                   return ui::vbox(ui::label("Top"),
+                                                                   ui::label("Detail").height(row.value()),
+                                                                   ui::label("Hidden").height(7).visible(false));
+                                                 })
+                                   .autoRowHeight()
+                                   .reference(host)));
+  fixture.settle();
+  take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+    CHECK_FALSE(view.lastError());
+    REQUIRE(view.state()->placements.size() == 2);
+    CHECK(view.state()->placements[0].height == 2);
+    CHECK(view.state()->placements[1].height == 3);
+    CHECK(view.state()->placements[1].y == 2);
+    CHECK(view.position().visible == 2);
+  }));
+}
+
+TEST_CASE("natural row measurement follows width and sizing changes without model revision") {
+  Fixture fixture;
+  fixture.available = {40, 6};
+  auto source = ui::model(std::array{0, 1, 2, 3});
+  auto observed = std::make_shared<NaturalProbeState>();
+  ui::Ref<VirtualRows<int>> host;
+  std::vector<Node<NaturalProbe>> probes;
+  take(ui::mount(*fixture.scene,
+                 ui::virtualRows(source,
+                                 [observed, &probes](auto) {
+                                   return ui::custom<NaturalProbe>(2, observed, true)
+                                     .setup([&probes](ManagedScene &,
+                                                      Node<NaturalProbe> node) -> std::expected<void, ManagedError> {
+                                       probes.push_back(node);
+                                       return {};
+                                     });
+                                 })
+                   .autoRowHeight()
+                   .reference(host)));
+  fixture.settle();
+  std::shared_ptr<ui::detail::VirtualRowsState> state;
+  take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+    state = view.state();
+  }));
+  REQUIRE(state->placements.size() == 3);
+  const auto anchor = state->position.current;
+  fixture.available.width = 12;
+  fixture.settle();
+  REQUIRE(state->placements.size() == 2);
+  CHECK(state->placements[0].height == 4);
+  CHECK(state->position.current == anchor);
+  CHECK(state->first == 0);
+  CHECK(std::ranges::find(observed->widths, 10) != observed->widths.end());
+  auto policy = DEFAULT_FLEX_WIDTH_POLICY;
+  policy.height.minimum = 5;
+  take(setSizePolicy(fixture.app->tree(), Node<SizedWidget>(probes.front()), policy));
+  fixture.settle();
+  CHECK(state->placements.front().height == 5);
+}
+
+TEST_CASE("natural rows install staged styles and remeasure existing roots after theme changes") {
+  Fixture fixture;
+  fixture.available = {40, 6};
+  auto source = ui::model(std::array{0, 1, 2, 3});
+  ui::Ref<VirtualRows<int>> host;
+  take(fixture.scene->theme(take(parsePss("Label { height: 2; }"))));
+  take(ui::mount(*fixture.scene, ui::virtualRows(source,
+                                                 [](auto) {
+                                                   return ui::label("Caption");
+                                                 })
+                                   .autoRowHeight()
+                                   .reference(host)));
+  fixture.settle();
+  std::shared_ptr<ui::detail::VirtualRowsState> state;
+  take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+    state = view.state();
+  }));
+  REQUIRE(state->placements.size() == 3);
+  CHECK(state->placements.front().height == 2);
+  const auto first = state->placements.front().node;
+  take(fixture.scene->theme(take(parsePss("Label { height: 3; }"))));
+  fixture.settle();
+  REQUIRE(state->placements.size() == 2);
+  CHECK(state->placements.front().height == 3);
+  CHECK(state->placements.front().node == first);
+}
+
+TEST_CASE("natural tall row wheel page and source history retain a bounded within-row offset") {
+  Fixture fixture;
+  fixture.available = {40, 2};
+  auto first = ui::model(std::array{8});
+  auto second = ui::model(std::array{4});
+  auto navigation = ui::navigation(first);
+  ui::Ref<VirtualRows<int>> host;
+  auto observed = std::make_shared<NaturalProbeState>();
+  take(ui::mount(*fixture.scene, ui::virtualRows(navigation,
+                                                 [observed](auto row) {
+                                                   return ui::custom<NaturalProbe>(row.value(), observed);
+                                                 })
+                                   .autoRowHeight()
+                                   .reference(host)));
+  fixture.settle();
+  std::shared_ptr<ui::detail::VirtualRowsState> state;
+  take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+    state = view.state();
+  }));
+  REQUIRE(state->placements.size() == 1);
+  CHECK(state->position.hasAfter == true);
+  take(fixture.app->router().dispatch(MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL}));
+  fixture.settle();
+  CHECK(state->firstCellOffset == 1);
+  CHECK(state->placements.front().y == -1);
+  take(pageVirtualRows(fixture.app->tree(), host.node()));
+  fixture.settle();
+  CHECK(state->firstCellOffset == 3);
+  take(navigation.setModel(second));
+  fixture.settle();
+  CHECK(state->firstCellOffset == 0);
+  take(navigation.setModel(first));
+  fixture.settle();
+  CHECK(state->firstCellOffset == 3);
+  for (int step = 0; step < 8; ++step) {
+    take(pageVirtualRows(fixture.app->tree(), host.node()));
+    fixture.settle();
+  }
+  CHECK(state->firstCellOffset == 6);
+  CHECK(state->position.hasAfter == false);
+  CHECK(state->placements.front().y + state->placements.front().height == fixture.available.height);
+  fixture.available.width = 30;
+  fixture.settle();
+  CHECK(state->firstCellOffset == 6);
+}
+
+TEST_CASE("natural row measurement failure and incompatible fixed sizing retain the committed window") {
+  Fixture fixture;
+  fixture.available = {40, 2};
+  auto source = ui::model(std::array{0, 1, 2, 3});
+  auto observed = std::make_shared<NaturalProbeState>();
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source,
+                                                 [observed](auto row) {
+                                                   return ui::custom<NaturalProbe>(3, observed, false,
+                                                                                   row.value() >= 2);
+                                                 })
+                                   .autoRowHeight()
+                                   .reference(host)));
+  fixture.settle();
+  std::shared_ptr<ui::detail::VirtualRowsState> state;
+  take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+    state = view.state();
+  }));
+  REQUIRE(state->placements.size() == 1);
+  const auto root = state->placements.front().node;
+  auto changed = setVirtualRowsAutoRowHeight(fixture.app->tree(), host.node(), false);
+  REQUIRE_FALSE(changed);
+  CHECK(changed.error() == TreeError::INVALID_GEOMETRY);
+  CHECK(state->options.autoRowHeight);
+  fixture.settle();
+  CHECK(state->placements.front().node == root);
+  observed->reject = true;
+  take(setVirtualRowsFirst(fixture.app->tree(), host.node(), 2));
+  fixture.settle();
+  CHECK(state->failure == TreeError::INVALID_GEOMETRY);
+  CHECK(state->placements.front().node == root);
+  CHECK(state->first == 0);
+  CHECK(state->options.autoRowHeight);
+}
+
+TEST_CASE("native natural rows keep unknown extent while a tall record remains clipped") {
+  NativeFixture<ArenaTask> fixture;
+  auto provider = std::make_shared<CursorTasks>();
+  auto source = ui::model<ArenaTask>(provider);
+  ui::Ref<VirtualRows<ArenaTask>> host;
+  auto observed = std::make_shared<NaturalProbeState>();
+  take(ui::mount(*fixture.scene, ui::virtualRows(source,
+                                                 [observed](auto) {
+                                                   return ui::custom<NaturalProbe>(6, observed);
+                                                 })
+                                   .autoRowHeight()
+                                   .reference(host)));
+  fixture.cycle();
+  take(pageVirtualRows(fixture.app->tree(), host.node()));
+  take(fixture.scene->afterDispatch(*fixture.app));
+  take(fixture.scene->prepare(*fixture.app, {40, 2}));
+  CHECK(provider->loads == 0);
+  for (int i = 0; i < 8; ++i) {
+    fixture.cycle();
+  }
+  std::shared_ptr<ui::detail::VirtualRowsState> state;
+  take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+    state = view.state();
+  }));
+  REQUIRE(state->placements.size() == 1);
+  CHECK(state->firstCellOffset == 2);
+  take(pageVirtualRows(fixture.app->tree(), host.node(), true));
+  for (int i = 0; i < 4; ++i) {
+    fixture.cycle();
+  }
+  CHECK(state->firstCellOffset == 0);
+  CHECK_FALSE(state->position.count);
+  CHECK_FALSE(state->position.firstIndex);
+  CHECK(state->position.hasAfter == true);
+  take(fixture.app->router().dispatch(MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL}));
+  for (int i = 0; i < 4; ++i) {
+    fixture.cycle();
+  }
+  CHECK(state->firstCellOffset == 1);
+  CHECK(state->position.hasAfter == true);
+  CHECK(provider->loads <= 3);
+  auto other = ui::model<ArenaTask>(std::make_shared<CursorTasks>());
+  take(host.setModel(other));
+  for (int i = 0; i < 6; ++i) {
+    fixture.cycle();
+  }
+  CHECK(state->firstCellOffset == 0);
+  take(host.setModel(source));
+  for (int i = 0; i < 6; ++i) {
+    fixture.cycle();
+  }
+  CHECK(state->firstCellOffset == 1);
+  take(fixture.app->router().setFocus(host.node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::END}));
+  for (int i = 0; i < 8; ++i) {
+    fixture.cycle();
+  }
+  CHECK(state->position.current == RowId{1000000, 1});
+  CHECK(state->firstCellOffset == 4);
+  CHECK(state->placements.front().y + state->placements.front().height == 2);
+  CHECK(state->position.hasAfter == false);
+}
+
+TEST_CASE("natural row budgets cap actual required records instead of viewport height") {
+  Fixture fixture;
+  fixture.available = {40, 10};
+  auto source = ui::model(std::array{6, 6, 6, 6});
+  auto observed = std::make_shared<NaturalProbeState>();
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source,
+                                                 [observed](auto row) {
+                                                   return ui::custom<NaturalProbe>(row.value(), observed);
+                                                 },
+                                                 {.maxRows = 2})
+                                   .autoRowHeight()
+                                   .reference(host)));
+  fixture.settle();
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    CHECK_FALSE(view.lastError());
+    CHECK(view.position().visible == 2);
+    CHECK(view.state()->placements.back().y + view.state()->placements.back().height == 12);
+  }));
+  take(source.update({1, 1}, 1));
+  take(source.update({2, 1}, 1));
+  fixture.settle();
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    CHECK(view.lastError() == TreeError::NODE_LIMIT);
+    CHECK(view.position().visible == 2);
+    CHECK(view.state()->placements.front().height == 6);
+  }));
+}
+
+TEST_CASE("natural End and forward scrolling retain a last full viewport without indexing all rows") {
+  Fixture fixture;
+  fixture.available = {40, 11};
+  auto source = ui::model(std::array{3, 4, 5, 3, 4, 5});
+  auto observed = std::make_shared<NaturalProbeState>();
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source,
+                                                 [observed](auto row) {
+                                                   return ui::custom<NaturalProbe>(row.value(), observed);
+                                                 })
+                                   .autoRowHeight()
+                                   .reference(host)));
+  fixture.settle();
+  std::shared_ptr<ui::detail::VirtualRowsState> state;
+  take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+    state = view.state();
+  }));
+  take(fixture.app->router().setFocus(host.node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::END}));
+  fixture.settle();
+  CHECK(state->position.currentIndex == 5);
+  CHECK(state->first == 3);
+  CHECK(state->firstCellOffset == 1);
+  CHECK(state->placements.back().y + state->placements.back().height == 11);
+  CHECK(state->position.hasAfter == false);
+  take(
+    fixture.app->router().dispatch(MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL, {}, {}, 4.0}));
+  fixture.settle();
+  CHECK(state->first == 3);
+  CHECK(state->firstCellOffset == 1);
+}
+
+TEST_CASE("natural tall row reveals trailing controls and retains a visible current marker") {
+  Fixture fixture;
+  fixture.available = {40, 3};
+  auto source = ui::model(std::array{0});
+  ui::Ref<VirtualRows<int>> host;
+  ui::Ref<Button> top;
+  ui::Ref<Button> bottom;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source,
+                                                 [top, bottom](auto) {
+                                                   return ui::vbox(ui::button("Top").reference(top).onClick([] {
+                                                   }),
+                                                                   ui::label("Space").height(8),
+                                                                   ui::button("Bottom").reference(bottom).onClick([] {
+                                                                   }));
+                                                 })
+                                   .autoRowHeight()
+                                   .reference(host)));
+  fixture.settle();
+  take(fixture.app->router().setFocus(host.node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::F2}));
+  fixture.settle();
+  CHECK(take(fixture.app->router().focused()) == top.node());
+  CHECK(take(fixture.app->router().traverse()) == bottom.node());
+  fixture.settle();
+  const auto geometry = take(fixture.app->tree().inspect(bottom.node())).geometry;
+  CHECK(geometry.valid);
+  CHECK_FALSE(geometry.clip.empty());
+  CHECK(geometry.surface.origin().y >= 0);
+  CHECK(geometry.surface.bottom() <= fixture.available.height);
+
+  struct MarkerSink final : PaintContext {
+    std::vector<CellPoint> origins;
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      for (const auto &command : commands) {
+        if (const auto *text = std::get_if<TextCommand>(&command)) {
+          origins.push_back(text->origin);
+        }
+      }
+      return {};
+    }
+  } sink;
+
+  take(fixture.app->tree().frame([&] {
+    take(fixture.app->tree().paint(host.node(), sink));
+  }));
+  REQUIRE(sink.origins.size() == 1);
+  CHECK(sink.origins.front().y == 0);
+}
+
+TEST_CASE("natural runtime idle performs no measurement or output polling") {
+  ReadyRowsTerminal terminal;
+  auto app = take(Application::create({}, terminal.clock()));
+  auto scene = take(ManagedScene::create(*app));
+  auto source = ui::model(std::array{2, 3, 4, 5});
+  auto observed = std::make_shared<NaturalProbeState>();
+  take(ui::mount(*scene, ui::virtualRows(source, [observed](auto row) {
+                           return ui::custom<NaturalProbe>(row.value(), observed);
+                         }).autoRowHeight()));
+  take(scene->start(terminal));
+  ReadyRowsCleanup cleanup{*app, *scene};
+  auto steps = [&] {
+    for (int index = 0; index < 5; ++index) {
+      terminal.time += 20;
+      take(scene->step());
+    }
+  };
+  steps();
+  const auto measurements = observed->measurements;
+  const auto output = terminal.submissions;
+  steps();
+  CHECK(observed->measurements == measurements);
+  CHECK(terminal.submissions == output);
+}
+
+TEST_CASE("staged natural measurement respects hidden descendants and frame reentry guards") {
+  Fixture fixture;
+  auto state = std::make_shared<NaturalProbeState>();
+  const auto root = take(fixture.scene->emplace<SizedWidget>(fixture.scene->root(), DEFAULT_CONTENT_POLICY));
+  const auto child = take(fixture.scene->emplace<NaturalProbe>(root, 6, state));
+  take(fixture.app->tree().setVisible(root, false));
+  const auto measured = take(portals::detail::RowTreeAccess::measure(fixture.app->tree(), root, {20, 3}));
+  CHECK(measured.height == 6);
+  CHECK(take(fixture.app->tree().measure(child, {20, 3})).height == 0);
+  const auto calls = state->measurements;
+  take(fixture.app->tree().setVisible(child, false));
+  CHECK(take(portals::detail::RowTreeAccess::measure(fixture.app->tree(), root, {20, 3})).height == 0);
+  CHECK(state->measurements == calls);
+  std::expected<CellSize, TreeError> nested;
+  take(fixture.app->tree().frame([&] {
+    nested = portals::detail::RowTreeAccess::measure(fixture.app->tree(), root, {20, 3});
+  }));
+  REQUIRE_FALSE(nested);
+  CHECK(nested.error() == TreeError::WOULD_BLOCK);
+}
+
+TEST_CASE("natural runtime commits empty wheels and clears queued cell movement without busy frames") {
+  bool clearWithQueuedMovement{};
+  SUBCASE("wheel over an empty source") {
+    clearWithQueuedMovement = false;
+  }
+  SUBCASE("source cleared with queued multi-page movement") {
+    clearWithQueuedMovement = true;
+  }
+  ReadyRowsTerminal terminal;
+  auto app = take(Application::create({}, terminal.clock()));
+  auto scene = take(ManagedScene::create(*app));
+  auto source = clearWithQueuedMovement ? ui::model(std::array{6, 6, 6, 6, 6, 6}) : ui::model(std::array<int, 0>{});
+  auto observed = std::make_shared<NaturalProbeState>();
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*scene, ui::virtualRows(source,
+                                         [observed](auto row) {
+                                           return ui::custom<NaturalProbe>(row.value(), observed);
+                                         })
+                           .autoRowHeight()
+                           .reference(host)));
+  take(scene->start(terminal));
+  ReadyRowsCleanup cleanup{*app, *scene};
+  auto steps = [&] {
+    for (int index = 0; index < 5; ++index) {
+      terminal.time += 20;
+      take(scene->step());
+    }
+  };
+  steps();
+  if (clearWithQueuedMovement) {
+    for (int index = 0; index < 6; ++index) {
+      take(pageVirtualRows(app->tree(), host.node()));
+    }
+    take(source.clear());
+  } else {
+    terminal.input = MouseInputEvent{0, 0, MouseButton::WHEEL_DOWN, MouseAction::SCROLL};
+  }
+  steps();
+  take(app->tree().read(host.node(), [](const auto &view) {
+    CHECK(view.mountedRows() == 0);
+    CHECK(view.position().visible == 0);
+    CHECK(view.state()->firstCellOffset == 0);
+  }));
+  const auto geometry = take(portals::detail::RowTreeAccess::geometryRevision(app->tree()));
+  const auto measurements = observed->measurements;
+  const auto output = terminal.submissions;
+  steps();
+  CHECK(take(portals::detail::RowTreeAccess::geometryRevision(app->tree())) == geometry);
+  CHECK(observed->measurements == measurements);
+  CHECK(terminal.submissions == output);
+}
+
+class RetryingNaturalRows final : public WindowProvider<int> {
+public:
+  enum class Phase {
+    EMPTY_TAIL,
+    FAILED,
+    READY
+  };
+
+  SourceCapabilities capabilities() const noexcept override {
+    return {};
+  }
+
+  std::expected<SourceReadReply<int>, SourceError> load(const SourceReadCommand &command, PageBuilder<int> &out,
+                                                        std::stop_token) override {
+    CHECK(std::this_thread::get_id() != uiThread);
+    if (phase == Phase::FAILED) {
+      failedRevision = command.dataRevision;
+      return std::unexpected(SourceError::CONTINUATION_LIMIT);
+    }
+    const auto count = phase == Phase::READY ? std::min<std::size_t>(2, command.maxRows) : 0;
+    for (std::size_t index = 0; index < count; ++index) {
+      auto added = out.emplace({index + 1, 1}, command.dataRevision, 6);
+      if (!added) {
+        return std::unexpected(added.error());
+      }
+    }
+    return out.ready({command.source, {0, 0}}, {command.source, {count, 0}},
+                     phase == Phase::EMPTY_TAIL ? SourceEdge::TEMPORARY_TAIL : SourceEdge::FINAL_END);
+  }
+
+  Phase phase{Phase::EMPTY_TAIL};
+  std::uint64_t failedRevision{};
+  std::thread::id uiThread = std::this_thread::get_id();
+};
+
+TEST_CASE("native natural failure before delivery retains queued cells for readiness retry") {
+  NativeFixture<int> fixture;
+  auto provider = std::make_shared<RetryingNaturalRows>();
+  auto source = ui::model<int>(provider);
+  auto observed = std::make_shared<NaturalProbeState>();
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*fixture.scene, ui::virtualRows(source,
+                                                 [observed](auto row) {
+                                                   return ui::custom<NaturalProbe>(row.value(), observed);
+                                                 })
+                                   .autoRowHeight()
+                                   .reference(host)));
+  auto cycles = [&] {
+    for (int i = 0; i < 8; ++i) {
+      fixture.cycle();
+    }
+  };
+  cycles();
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    CHECK(view.mountedRows() == 0);
+    CHECK(view.windowStatus() == WindowStatus::TEMPORARY_TAIL);
+  }));
+  provider->phase = RetryingNaturalRows::Phase::FAILED;
+  take(notifyVirtualRowsReady(fixture.app->tree(), host.node(), 2));
+  cycles();
+  REQUIRE(provider->failedRevision == 2);
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    REQUIRE(view.windowStatus() == WindowStatus::FAILED);
+    REQUIRE(view.sourceError() == SourceError::CONTINUATION_LIMIT);
+    CHECK(view.mountedRows() == 0);
+  }));
+  auto admitted = pageVirtualRows(fixture.app->tree(), host.node());
+  REQUIRE(admitted.has_value());
+  cycles();
+  provider->phase = RetryingNaturalRows::Phase::READY;
+  take(notifyVirtualRowsReady(fixture.app->tree(), host.node(), 3));
+  cycles();
+  take(fixture.app->tree().read(host.node(), [](const auto &view) {
+    REQUIRE(view.mountedRows() == 1);
+    CHECK_FALSE(view.rowCount());
+    CHECK(view.state()->firstCellOffset == 2);
+  }));
+}
+
+TEST_CASE("natural End reaches bottom when the last framed card is already partially visible") {
+  Fixture fixture;
+  fixture.available = {40, 11};
+  auto source = ui::model(std::array{5, 3, 4});
+  ui::Ref<VirtualRows<int>> host;
+  take(ui::mount(*fixture.scene,
+                 ui::virtualRows(source,
+                                 [](auto row) {
+                                   return ui::vbox(ui::label("Body").height(row.value() - 2)).framed("rounded", "Card");
+                                 })
+                   .autoRowHeight()
+                   .reference(host)));
+  fixture.settle();
+  std::shared_ptr<ui::detail::VirtualRowsState> state;
+  take(fixture.app->tree().read(host.node(), [&](const auto &view) {
+    state = view.state();
+  }));
+  REQUIRE(state->placements.size() == 3);
+  CHECK(state->placements.back().y + state->placements.back().height == 12);
+  take(fixture.app->router().setFocus(host.node()));
+  take(fixture.app->router().dispatch(KeyEvent{InputKey::END}));
+  fixture.settle();
+  CHECK(state->position.currentIndex == 2);
+  CHECK(state->first == 0);
+  CHECK(state->firstCellOffset == 1);
+  CHECK(state->placements.back().y + state->placements.back().height == fixture.available.height);
+  const auto last = take(fixture.app->tree().inspect(state->placements.back().node)).geometry;
+  CHECK(last.valid);
+  CHECK(last.surface.bottom() == fixture.available.height);
+}
+
 } // namespace

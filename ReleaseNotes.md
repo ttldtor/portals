@@ -7,6 +7,14 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Virtual-row recipes can opt into natural composed record heights with
+  `.autoRowHeight()`. Measurement, mounted rows and source history remain bounded;
+  tall records support cell-level reading offsets, and finite sources retain a
+  full final page when content permits. Fixed-height defaults are preserved.
+  A complete task-card guide demonstrates different compositions, source switching
+  and existing row-editing controls. Portable checkpoints retain their existing
+  format; the additional within-record cell offset is kept in view-local memory.
+
 - Opt-in declarative virtual rows compose ordinary checkboxes, labels, editors and
   buttons for visible model records. Fields and callbacks retain exact record
   identity; row-owned bindings and activity are released on retirement. Finite

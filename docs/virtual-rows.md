@@ -139,7 +139,67 @@ fields. A child requiring more height than its slot reports `INVALID_GEOMETRY`.
 `maxRows` bounds the number of visible assignments; its default is 256. This is
 a view resource limit, independent of the number of records in the model.
 An oversized viewport is rejected rather than silently hiding required rows.
-Automatic measurement of varying record heights is a separate planned feature.
+
+### Natural record height {#virtual-rows-natural-height}
+
+Use `.autoRowHeight()` when records contain different compositions of fields.
+The task-card example puts the editable title in one row and optional notes below
+it. Each card has its own frame, so shorter records occupy less vertical space.
+`height(13)` still controls the viewport; it does not set each card's height.
+
+![Task cards with different composed heights, a current marker and a visible reading range.](./images/virtual-row-cards.png)
+
+![Navigating, switching sources and restoring a task-card reading position.](./images/virtual-row-cards.gif)
+
+\include guide_virtual_row_cards.cpp
+
+Build `portals_docs_virtual_row_cards` with `PORTALS_BUILD_TESTS=ON`. The complete
+source uses the same ordinary checkbox, label, editor and button factories as the
+fixed-height example. The active source is marked with `*`; keyboard focus is
+shown independently. Up/Down select records; Enter/F2 enters their controls and
+Escape returns to record navigation. In natural-height mode, wheel and page
+movement can pass through the inside of a record taller than the viewport.
+
+The wheel reads through individual terminal rows while the current record stays
+selected. This also exposes the inside of a card taller than the viewport.
+
+![Cell-by-cell reading through composed task cards.](./images/virtual-row-cards-wheel.gif)
+
+Enter/F2 opens the current card's existing controls; Tab moves between its fields.
+
+![Editing the current task card and returning to record navigation.](./images/virtual-row-cards-editing.gif)
+
+Resizing the terminal retains the current record and reading place. Ordinary
+one-line labels clip to the available width.
+
+![The same task remains current as the real terminal viewport narrows and widens.](./images/virtual-row-cards-resize.gif)
+
+The host measures a bounded set of real row compositions at their available
+content width. It does not read every record to build a global height index.
+Resize and changes to the measured composition preserve the first stable record
+and its cell offset, clamping that offset when a record becomes shorter. Source
+switching retains this reading position through the existing bounded history.
+Unknown-total sources keep their cursor capabilities and do not acquire an
+invented count or global pixel extent. A multi-record finite scrollbar uses record positions,
+not a fully indexed sum of all record heights. A single measured finite record
+can use its known cell height as an exact local extent.
+Natural-height finite views keep a stable scrollbar column while their source is
+nonempty, including when every record fits. This keeps the measurement width
+constant. The default fixed-height mode continues to hide an unnecessary bar.
+Set `scrollbar = false` in `VirtualRowsOptions` to omit that column.
+
+Natural sizing does not change the text behavior of a child. Ordinary `Label`
+remains one-line; its visibility in this example is chosen when the row recipe is
+created. A child that already supports width-dependent wrapping may change its
+measured height when the available width changes. `.autoRowHeight(false)` selects
+the configured common `rowHeight` again. Advanced limits remain optional through
+`VirtualRowsOptions`; the ordinary example needs no explicit measurement options.
+
+A viewport child without a natural content height still needs an explicit finite
+height. A completely empty composition occupies at least one cell, keeping the
+number of required records bounded. Cell offsets are retained in the host's
+in-memory source history; portable checkpoint codecs do not serialize this
+additional offset.
 
 ### Host options
 
@@ -147,14 +207,15 @@ Pass a `VirtualRowsOptions` value as the third argument to `ui::virtualRows`.
 
 | Member | Default | Meaning |
 |---|---|---|
-| `rowHeight` | `1` | Positive height of each record composition, in terminal cells. |
+| `rowHeight` | `1` | Positive common height in fixed mode, in terminal cells. |
 | `maxRows` | `256` | Positive limit on assignments required by the visible viewport. |
 | `overscanRows` | `2` | Additional native records requested for bounded row-step overlap. |
-| `maxPendingRows` | `4096` | Positive cap on admitted native relative row movement awaiting delivery. |
+| `maxPendingRows` | `4096` | Positive cap on queued relative movement: records in fixed mode, cells in natural-height mode. |
 | `editing` | `EditOptions{}` | Common edit mode and retained field/byte limits. |
 | `checkpoints` | `ModelCheckpointOptions{}` | Existing bounded source-position history settings. |
-| `scrollbar` | `true` | Use the existing styled vertical scrollbar for an exact finite extent. |
+| `scrollbar` | `true` | Use the styled finite-source scrollbar; natural-height mode retains its column for nonempty data. |
 | `currentIndicator` | `true` | Reserve a left cell for the current-row marker. |
+| `autoRowHeight` | `false` | Measure positive record heights from bounded composed content; `.autoRowHeight()` is the ordinary fluent form. |
 
 During a replacement, staged and retiring child trees can coexist. `maxRows`
 does not mean that the process contains at most that many controls: a row may

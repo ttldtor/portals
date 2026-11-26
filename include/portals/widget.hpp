@@ -632,6 +632,8 @@ private:
     }
   }
 
+  std::expected<CellSize, TreeError> measureImpl(Node<Widget> node, CellSize available,
+                                                 Node<Widget> measurementRoot = {});
   std::expected<void, TreeError> arrangeImpl(Node<Widget> node, CellRect local, CellRect viewport,
                                              std::optional<CellRect> contentClip,
                                              const ParentLayoutEdge *parentEdge = nullptr);

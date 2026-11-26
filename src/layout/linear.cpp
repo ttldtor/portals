@@ -4,6 +4,7 @@
 #include <new>
 #include <numeric>
 #include <portals/detail/layout_traversal.hpp>
+#include <portals/detail/virtual_rows_tree.hpp>
 #include <portals/layout.hpp>
 #include <typeinfo>
 
@@ -211,7 +212,8 @@ struct Entry {
 // graph. No widget pointer or borrowed child span survives an individual tree callback.
 class Traversal {
 public:
-  explicit Traversal(WidgetTree &tree) : tree_(tree) {
+  explicit Traversal(WidgetTree &tree, Node<Widget> measurementRoot = {})
+      : tree_(tree), measurementRoot_(measurementRoot) {
   }
 
   std::expected<std::size_t, TreeError> measure(Node<Widget> node, CellSize available) {
@@ -294,7 +296,9 @@ public:
       entries_[index].children.push_back(*result);
     }
 
-    auto intrinsic = tree_.measure(node, available);
+    auto intrinsic = measurementRoot_ == Node<Widget>{}
+                       ? tree_.measure(node, available)
+                       : detail::RowTreeAccess::measureWidget(tree_, node, measurementRoot_, available);
 
     if (!intrinsic) {
       return std::unexpected(intrinsic.error());
@@ -316,6 +320,14 @@ public:
         status = std::unexpected(TreeError::INVALID_ARGUMENT);
       } else if (children.size() == 1) {
         entries_[index].measured.desired = children.front().desired;
+        if (measurementRoot_ != Node<Widget>{}) {
+          const auto height = requested(children.front().policy.height, children.front().desired.height);
+          if (height < 0 || height > CELL_LIMIT) {
+            status = std::unexpected(TreeError::INVALID_GEOMETRY);
+          } else {
+            entries_[index].measured.desired.height = static_cast<std::int32_t>(height);
+          }
+        }
       }
     });
 
@@ -324,6 +336,10 @@ public:
     }
 
     return index;
+  }
+
+  MeasuredChild measurement(std::size_t index) const {
+    return entries_[index].measured;
   }
 
   std::expected<void, TreeError> arrange(std::size_t index, CellRect local, CellRect viewport,
@@ -486,6 +502,7 @@ private:
   }
 
   WidgetTree &tree_;
+  Node<Widget> measurementRoot_;
   std::vector<Entry> entries_ = std::vector<Entry>(0);
 };
 } // namespace
@@ -711,6 +728,42 @@ std::expected<void, TreeError> setLinearOptions(WidgetTree &tree, Node<LinearLay
   }
 
   return tree.invalidate(node, Invalidation::LAYOUT);
+}
+
+std::expected<CellSize, TreeError> detail::RowTreeAccess::measure(WidgetTree &tree, Node<Widget> row,
+                                                                  CellSize available) {
+  if (layout_active) {
+    return std::unexpected(TreeError::WOULD_BLOCK);
+  }
+  std::expected<CellSize, TreeError> result;
+  auto borrowed = tree.frame([&] {
+    struct Guard {
+      Guard() {
+        layout_active = true;
+      }
+      ~Guard() {
+        layout_active = false;
+      }
+    } guard;
+    try {
+      Traversal traversal(tree, row);
+      auto measured = traversal.measure(row, available);
+      if (!measured) {
+        result = std::unexpected(measured.error());
+        return;
+      }
+      const auto value = traversal.measurement(*measured);
+      const auto height = static_cast<Wide>(value.desired.height);
+      if (height < 0 || height > CELL_LIMIT) {
+        result = std::unexpected(TreeError::INVALID_GEOMETRY);
+        return;
+      }
+      result = CellSize{value.desired.width, static_cast<std::int32_t>(height)};
+    } catch (const std::bad_alloc &) {
+      result = std::unexpected(TreeError::NO_MEMORY);
+    }
+  });
+  return borrowed ? result : std::unexpected(borrowed.error());
 }
 
 std::expected<void, TreeError> layoutTree(WidgetTree &tree, Node<Widget> node, CellRect local, CellRect viewport) {

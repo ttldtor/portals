@@ -16,6 +16,7 @@ struct ModelViewCheckpoint {
   std::optional<ModelBookmark> current;
   NavigationSelection selection;
   std::optional<ModelBookmark> reading;
+  std::optional<std::int32_t> readingCellOffset;
   std::uint64_t first{};
   PositionResolution currentResolution{PositionResolution::EMPTY};
   PositionResolution readingResolution{PositionResolution::EMPTY};

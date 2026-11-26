@@ -53,6 +53,17 @@ struct RowsController : VirtualRowsState,
   std::uint64_t desiredFirst{};
   CellSize viewport;
   bool dirty{true};
+  std::optional<bool> desiredAutoHeight;
+  std::uint64_t measuredGeometryRevision{};
+  std::uint64_t blockedGeometryRevision{};
+  bool recordHasBefore{};
+  bool recordHasAfter{};
+  bool allowEndBackfill{};
+  bool lastPage{};
+  std::int32_t desiredCellOffset{};
+  std::int64_t pendingCells{};
+  bool offsetFromEnd{};
+  bool awaitingCellMove{};
   bool retiredHost{};
   std::uint64_t intentGeneration{};
   std::uint64_t committedIntent{};
@@ -239,9 +250,9 @@ struct RowsController : VirtualRowsState,
         return EventReply::IGNORED;
       }
       const auto step = static_cast<std::int64_t>(std::max<std::size_t>(1, this->rows.size()));
-      auto changed =
-        page ? (this->position.editing ? this->requestPage(backwards) : this->moveCurrent(backwards ? -step : step))
-             : this->requestWheel(mouse->wheelDelta, backwards);
+      auto changed = page ? (this->natural() || this->position.editing ? this->requestPage(backwards)
+                                                                       : this->moveCurrent(backwards ? -step : step))
+                          : this->requestWheel(mouse->wheelDelta, backwards);
       if (!changed) {
         this->failure = changed.error();
       }
@@ -266,7 +277,7 @@ struct RowsController : VirtualRowsState,
     } else if (action->action == portals::Action::MOVE_HOME) {
       changed = this->sourceCapabilities ? this->selectAnchor({}, SourceDirection::FORWARD) : this->selectCurrent(0);
     } else if (this->exactCount) {
-      changed = this->selectCurrent(*this->exactCount ? *this->exactCount - 1 : 0);
+      changed = this->selectCurrent(*this->exactCount ? *this->exactCount - 1 : 0, true);
     } else {
       if (this->sourceCapabilities && (!this->sourceCapabilities->tail || !this->sourceCapabilities->backward)) {
         return EventReply::HANDLED;
@@ -387,23 +398,27 @@ struct RowsController : VirtualRowsState,
     return publishPosition();
   }
 
-  std::expected<void, TreeError> selectCurrent(std::uint64_t target) {
+  std::expected<void, TreeError> selectCurrent(std::uint64_t target, bool endPage = false) {
     if (!this->exactCount) {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
     target = *this->exactCount ? std::min(target, *this->exactCount - 1) : 0;
-    const auto visible = std::max<std::uint64_t>(1, viewport.height / options.rowHeight);
+    const auto visible = std::max<std::uint64_t>(1, natural() ? rows.size() : viewport.height / options.rowHeight);
     auto nextFirst = desiredFirst;
     if (target < nextFirst) {
       nextFirst = target;
     } else if (target - nextFirst >= visible) {
-      nextFirst = target - visible + 1;
+      nextFirst = natural() ? target : target - visible + 1;
     }
     auto allowed = requestFirst(nextFirst);
     if (!allowed) {
       return allowed;
     }
     desiredCurrent = target;
+    lastPage = natural() && endPage;
+    desiredCellOffset = 0;
+    pendingCells = 0;
+    offsetFromEnd = false;
     selecting = true;
     return {};
   }
@@ -434,6 +449,16 @@ struct RowsController : VirtualRowsState,
     auto snapshot = scrollController->snapshot();
     if (!snapshot) {
       return std::unexpected(snapshot.error());
+    }
+    if (natural() && this->exactCount == std::optional<std::uint64_t>{1} && placements.size() == 1) {
+      if (scrollRevision && snapshot->revision != scrollRevision) {
+        auto changed = requestCells(static_cast<std::int64_t>(snapshot->vertical.offset.raster) - desiredCellOffset);
+        if (!changed) {
+          return changed;
+        }
+      }
+      scrollRevision = snapshot->revision;
+      return {};
     }
     if (scrollRevision && snapshot->revision != scrollRevision && this->exactCount &&
         snapshot->vertical.offset.raster != desiredFirst) {
@@ -478,8 +503,12 @@ struct RowsController : VirtualRowsState,
         next.current.reset();
         next.currentIndex.reset();
       }
-      next.hasBefore = first > 0;
-      next.hasAfter = first + rows.size() < *this->exactCount;
+      recordHasBefore = first > 0;
+      recordHasAfter = first + rows.size() < *this->exactCount;
+      next.hasBefore = recordHasBefore || firstCellOffset > 0;
+      next.hasAfter =
+        recordHasAfter || (!placements.empty() &&
+                           static_cast<std::int64_t>(placements.back().y) + placements.back().height > viewport.height);
     } else {
       next.currentIndex.reset();
       if (!same) {
@@ -559,6 +588,25 @@ struct RowsController : VirtualRowsState,
 
   std::expected<void, TreeError> publishScrollBar() {
     if (scrollController && this->exactCount) {
+      if (natural() && *this->exactCount == 1 && placements.size() == 1) {
+        auto metrics = setScrollMetrics(
+          RowAccess::tree(scene), this->scrollbar,
+          {static_cast<std::uint64_t>(placements.front().height), static_cast<std::uint64_t>(viewport.height)});
+        if (!metrics) {
+          return metrics;
+        }
+        auto moved = setScrollOffset(RowAccess::tree(scene), this->scrollbar, ScrollAxis::VERTICAL,
+                                     {static_cast<std::uint64_t>(firstCellOffset)});
+        if (!moved) {
+          return moved;
+        }
+        auto snapshot = scrollController->snapshot();
+        if (!snapshot) {
+          return std::unexpected(snapshot.error());
+        }
+        scrollRevision = snapshot->revision;
+        return {};
+      }
       auto metrics = setScrollMetrics(RowAccess::tree(scene), this->scrollbar,
                                       {*this->exactCount, static_cast<std::uint64_t>(rows.size())});
       if (!metrics) {
@@ -626,6 +674,87 @@ struct RowsController : VirtualRowsState,
     }
   }
 
+  bool natural() const noexcept {
+    return desiredAutoHeight.value_or(options.autoRowHeight);
+  }
+
+  std::expected<void, TreeError> autoHeight(bool enabled) override {
+    if (!active()) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+    if (natural() == enabled) {
+      return {};
+    }
+    if (!enabled && std::ranges::any_of(placements, [&](const auto &value) {
+          return value.height > options.rowHeight;
+        })) {
+      return std::unexpected(TreeError::INVALID_GEOMETRY);
+    }
+    auto invalidated = RowAccess::tree(scene).invalidate(node, Invalidation::LAYOUT);
+    if (!invalidated) {
+      return invalidated;
+    }
+    desiredAutoHeight = enabled;
+    desiredCellOffset = 0;
+    pendingCells = 0;
+    offsetFromEnd = false;
+    ++intentGeneration;
+    dirty = true;
+    blockedAttempt = false;
+    return {};
+  }
+
+  std::size_t rowDemand() const noexcept {
+    if (viewport.width <= 0 || viewport.height <= 0) {
+      return 0;
+    }
+    return natural() ? std::min(options.maxRows, static_cast<std::size_t>(viewport.height))
+                     : static_cast<std::size_t>(viewport.height / options.rowHeight +
+                                                (viewport.height % options.rowHeight != 0));
+  }
+
+  std::int32_t contentWidth(bool bar) const noexcept {
+    return std::max(0, viewport.width - static_cast<std::int32_t>(options.currentIndicator) -
+                         static_cast<std::int32_t>(bar));
+  }
+
+  std::expected<void, TreeError> refreshNaturalLayout() {
+    if (!natural() || dirty || rows.empty() || !rowDemand()) {
+      return {};
+    }
+    auto styled = RowAccess::flushStyles(scene);
+    if (!styled) {
+      return styled;
+    }
+    auto geometry = portals::detail::RowTreeAccess::geometryRevision(RowAccess::tree(scene));
+    if (!geometry) {
+      return std::unexpected(geometry.error());
+    }
+    if (*geometry == measuredGeometryRevision) {
+      return {};
+    }
+    std::int64_t y = -firstCellOffset;
+    for (std::size_t index = 0; index < rows.size(); ++index) {
+      auto size = portals::detail::RowTreeAccess::measure(RowAccess::tree(scene), rows[index]->root,
+                                                          {contentWidth(scrollbarVisible), viewport.height});
+      if (!size) {
+        return std::unexpected(size.error());
+      }
+      const auto height = std::max(1, size->height);
+      if (placements[index].height != height || placements[index].y != y) {
+        auto invalidated = RowAccess::tree(scene).invalidate(node, Invalidation::LAYOUT);
+        if (!invalidated) {
+          return invalidated;
+        }
+        dirty = true;
+        return {};
+      }
+      y += height;
+    }
+    measuredGeometryRevision = *geometry;
+    return {};
+  }
+
   std::expected<void, TreeError> admitDraft(const RowAssignment<T> *candidate) {
     if (!active()) {
       return std::unexpected(TreeError::CLOSED);
@@ -665,8 +794,7 @@ struct RowsController : VirtualRowsState,
     if (!active()) {
       return std::unexpected(TreeError::CLOSED);
     }
-    const auto visible =
-      static_cast<std::size_t>(viewport.height / options.rowHeight + (viewport.height % options.rowHeight != 0));
+    const auto visible = rowDemand();
     auto allowed = preflight(target, visible);
     if (!allowed) {
       return allowed;
@@ -675,8 +803,97 @@ struct RowsController : VirtualRowsState,
     if (!invalidated) {
       return invalidated;
     }
+    if (desiredFirst != target) {
+      desiredCellOffset = 0;
+      offsetFromEnd = false;
+    }
     desiredFirst = target;
+    lastPage = false;
+    allowEndBackfill = true;
     ++intentGeneration;
+    dirty = true;
+    return {};
+  }
+
+  virtual bool rowMovePending() const noexcept {
+    return desiredFirst != first;
+  }
+
+  std::expected<void, TreeError> requestCells(std::int64_t delta) {
+    if (!active()) {
+      return std::unexpected(TreeError::CLOSED);
+    }
+    const auto limit = options.maxPendingRows;
+    const auto carried = offsetFromEnd ? desiredCellOffset : 0;
+    if (delta < -limit - pendingCells - carried || delta > limit - pendingCells - carried) {
+      return std::unexpected(TreeError::WOULD_BLOCK);
+    }
+    auto invalidated = RowAccess::tree(scene).invalidate(node, Invalidation::LAYOUT);
+    if (!invalidated) {
+      return invalidated;
+    }
+    pendingCells += delta;
+    allowEndBackfill = true;
+    dirty = true;
+    blockedAttempt = false;
+    ++intentGeneration;
+    return {};
+  }
+
+  std::expected<void, TreeError> applyCellIntent() {
+    if (!natural() || !pendingCells || rows.empty() || rowMovePending() || awaitingCellMove || lastPage) {
+      return {};
+    }
+    auto remaining = pendingCells;
+    auto offset = static_cast<std::int64_t>(desiredCellOffset);
+    std::int64_t movement{};
+    bool fromEnd{};
+    if (remaining < 0) {
+      const auto consumed = std::min(-remaining, offset);
+      offset -= consumed;
+      remaining += consumed;
+      if (remaining && recordHasBefore) {
+        movement = -1;
+        offset = remaining;
+        remaining = 0;
+        fromEnd = true;
+      } else if (remaining) {
+        remaining = 0;
+      }
+    } else {
+      if (!recordHasAfter && !placements.empty()) {
+        const auto bottom = static_cast<std::int64_t>(placements.back().y) + placements.back().height;
+        remaining = std::min(remaining, std::max<std::int64_t>(0, bottom - viewport.height));
+      }
+      std::size_t index{};
+      while (remaining && index < placements.size()) {
+        const auto available = static_cast<std::int64_t>(placements[index].height) - offset;
+        if (remaining < available) {
+          offset += remaining;
+          remaining = 0;
+          break;
+        }
+        if (index + 1 == placements.size() && !recordHasAfter) {
+          offset = placements[index].height - 1;
+          remaining = 0;
+          break;
+        }
+        remaining -= available;
+        offset = 0;
+        ++movement;
+        ++index;
+      }
+    }
+    if (movement) {
+      auto moved = requestMove(movement);
+      if (!moved) {
+        return moved;
+      }
+      awaitingCellMove = rowMovePending();
+    }
+    pendingCells = remaining;
+    desiredCellOffset = static_cast<std::int32_t>(offset);
+    offsetFromEnd = fromEnd;
     dirty = true;
     return {};
   }
@@ -694,7 +911,8 @@ struct RowsController : VirtualRowsState,
       wheelFraction = accumulated;
       return {};
     }
-    auto moved = requestMove(static_cast<std::int64_t>(whole));
+    auto moved =
+      natural() ? requestCells(static_cast<std::int64_t>(whole)) : requestMove(static_cast<std::int64_t>(whole));
     if (moved) {
       wheelFraction = accumulated - whole;
     }
@@ -714,8 +932,10 @@ struct RowsController : VirtualRowsState,
   }
 
   std::expected<void, TreeError> requestPage(bool backwards) override {
-    const auto step =
-      std::max<std::uint64_t>(1, viewport.height / options.rowHeight + (viewport.height % options.rowHeight != 0));
+    if (natural()) {
+      return requestCells(backwards ? -viewport.height : viewport.height);
+    }
+    const auto step = std::max<std::uint64_t>(1, rowDemand());
     if (!backwards && desiredFirst > std::numeric_limits<std::uint64_t>::max() - step) {
       return std::unexpected(TreeError::INVALID_ARGUMENT);
     }
@@ -733,6 +953,36 @@ struct RowsController : VirtualRowsState,
   }
 
   void layoutPrepared(const LayoutSnapshot &layout) noexcept override {
+    if (natural() && this->position.editing && !rowMovePending() && !pendingCells && !rows.empty()) {
+      try {
+        auto focused = RowAccess::app(scene).router().focused();
+        auto hostGeometry = RowAccess::tree(scene).inspect(node);
+        if (focused && *focused != node && hostGeometry && hostGeometry->geometry.valid) {
+          auto child = RowAccess::tree(scene).inspect(*focused);
+          if (child && child->geometry.valid) {
+            const auto &host = hostGeometry->geometry.surface;
+            const auto &bounds = child->geometry.surface;
+            const auto hostTop = host.origin().y;
+            const auto hostBottom = static_cast<std::int64_t>(hostTop) + host.size().height;
+            const auto childTop = bounds.origin().y;
+            const auto childBottom = static_cast<std::int64_t>(childTop) + bounds.size().height;
+            const auto delta = childTop < hostTop         ? static_cast<std::int64_t>(childTop) - hostTop
+                               : childBottom > hostBottom ? childBottom - hostBottom
+                                                          : 0;
+            if (delta && bounds.size().height <= host.size().height) {
+              auto admitted = requestCells(delta);
+              if (!admitted) {
+                failure = admitted.error();
+              }
+            }
+          }
+        }
+      } catch (const std::bad_alloc &) {
+        failure = TreeError::NO_MEMORY;
+      } catch (...) {
+        failure = TreeError::CALLBACK_FAILED;
+      }
+    }
     auto next = layout.viewport(node);
     if (next && *next != viewport) {
       viewport = *next;
@@ -773,7 +1023,7 @@ struct RowsController : VirtualRowsState,
             const std::shared_ptr<const void> &pin, const DeliveredRow<T> &value, ModelResource resource,
             SourceStamp incarnation) {
     auto row = std::make_shared<RowAssignment<T>>();
-    auto root = scene.emplace<SizedWidget>(node, DEFAULT_VIEWPORT_POLICY);
+    auto root = scene.emplace<SizedWidget>(node, natural() ? DEFAULT_FLEX_WIDTH_POLICY : DEFAULT_VIEWPORT_POLICY);
     if (!root) {
       return std::unexpected(EditAccess::cause(root.error()));
     }
@@ -952,6 +1202,9 @@ struct RowsController : VirtualRowsState,
     }
     portals::detail::ModelViewCheckpoint checkpoint;
     checkpoint.first = first;
+    if (natural()) {
+      checkpoint.readingCellOffset = firstCellOffset;
+    }
     if (this->position.current && this->position.currentIndex) {
       auto bookmark = ModelBookmark::create(previous->navigationResource,
                                             {PositionKind::ITEM, *this->position.current, *this->position.currentIndex,
@@ -985,6 +1238,10 @@ struct RowsController : VirtualRowsState,
     desiredCurrentRow.reset();
     auto target = switched ? std::uint64_t{} : desiredFirst;
     if (switched) {
+      desiredCellOffset = 0;
+      pendingCells = 0;
+      lastPage = false;
+      allowEndBackfill = false;
       desiredCurrent = 0;
     } else if (!selecting && this->position.current) {
       auto located = frame.locateRow(*this->position.current);
@@ -1002,6 +1259,7 @@ struct RowsController : VirtualRowsState,
       auto saved = history->find(actual, historyRole);
       if (saved) {
         target = saved->value.first;
+        desiredCellOffset = natural() ? saved->value.readingCellOffset.value_or(0) : 0;
         if (saved->value.current) {
           auto resolver = FinitePositionResolver<T>::create(actual->navigationResource, incarnation, frame.snapshot(),
                                                             actual->navigationChanges);
@@ -1072,8 +1330,7 @@ struct RowsController : VirtualRowsState,
             desiredCurrent = found->index;
             desiredCurrentRow = position.row;
           }
-          const auto visible = static_cast<std::uint64_t>(viewport.height / options.rowHeight +
-                                                          (viewport.height % options.rowHeight != 0));
+          const auto visible = static_cast<std::uint64_t>(rowDemand());
           if (found->state == RowLookupState::FOUND &&
               (reading || found->index < target || found->index - target >= visible)) {
             target = found->index;
@@ -1199,7 +1456,9 @@ struct RowsController : VirtualRowsState,
     const auto count = frame->rowCount();
     exactCount = count;
     if (blockedAttempt && !dirty && attempt.source.lock() == *actual && attempt.revision == frame->revision() &&
-        attempt.intent == intentGeneration && attempt.viewport == viewport) {
+        attempt.intent == intentGeneration && attempt.viewport == viewport &&
+        (!natural() || blockedGeometryRevision ==
+                         portals::detail::RowTreeAccess::geometryRevision(RowAccess::tree(scene)).value_or(0))) {
       return {};
     }
     auto incarnation = EditAccess::sourceSession<T>(*actual);
@@ -1214,14 +1473,23 @@ struct RowsController : VirtualRowsState,
     if (!restored) {
       return std::unexpected(restored.error());
     }
-    const auto target = *restored;
-    const auto visible =
-      viewport.width && viewport.height
-        ? static_cast<std::size_t>(std::min<std::uint64_t>(
-            count - target, viewport.height / options.rowHeight + (viewport.height % options.rowHeight != 0)))
-        : 0;
+    const auto requestedFirst = *restored;
+    auto target = requestedFirst;
+    if (natural() && allowEndBackfill && count - target < rowDemand()) {
+      target = count - std::min<std::uint64_t>(count, rowDemand());
+    }
+    const auto leadingRows = static_cast<std::size_t>(requestedFirst - target);
+    const auto visible = viewport.width && viewport.height
+                           ? static_cast<std::size_t>(std::min<std::uint64_t>(count - target, rowDemand()))
+                           : 0;
     if (visible > options.maxRows) {
       return std::unexpected(TreeError::NODE_LIMIT);
+    }
+    if (!dirty && previousSource.lock() == *actual && revision == frame->revision() && target == first) {
+      auto measured = refreshNaturalLayout();
+      if (!measured) {
+        return measured;
+      }
     }
     if (!dirty && previousSource.lock() == *actual && revision == frame->revision() && target == first &&
         desiredCurrent == this->position.currentIndex) {
@@ -1270,7 +1538,68 @@ struct RowsController : VirtualRowsState,
     }
     pendingViewport.reset();
     return commitRows(*actual, pin, values, frame->revision(), target, (*actual)->navigationResource, *incarnation,
-                      std::move(*saved));
+                      std::move(*saved), {}, leadingRows, target + values.size() == count, target > 0);
+  }
+
+  struct NaturalGeometry {
+    std::vector<RowPlacement> placements = std::vector<RowPlacement>(0);
+    std::size_t first{};
+    std::int32_t offset{};
+  };
+
+  std::expected<NaturalGeometry, TreeError>
+  measureNaturalRows(std::span<const std::shared_ptr<RowAssignment<T>>> staging, std::size_t leadingRows,
+                     bool finalWindow, bool reserveBar, bool beforeWindow) {
+    NaturalGeometry result;
+    result.placements.reserve(staging.size());
+    for (const auto &row : staging) {
+      auto measured = portals::detail::RowTreeAccess::measure(RowAccess::tree(scene), row->root,
+                                                              {contentWidth(reserveBar), viewport.height});
+      if (!measured || !active()) {
+        return std::unexpected(measured ? TreeError::CLOSED : measured.error());
+      }
+      const auto height = std::max(1, measured->height);
+      result.placements.push_back({row->root, 0, height});
+    }
+    if (result.placements.empty()) {
+      return std::expected<NaturalGeometry, TreeError>(std::in_place, result);
+    }
+    result.first = std::min(leadingRows, result.placements.size() - 1);
+    const auto firstHeight = result.placements[result.first].height;
+    const auto requested = offsetFromEnd ? static_cast<std::int64_t>(firstHeight) + desiredCellOffset
+                                         : static_cast<std::int64_t>(desiredCellOffset);
+    result.offset = static_cast<std::int32_t>(std::clamp<std::int64_t>(requested, 0, firstHeight - 1));
+    std::int64_t remaining = -result.offset;
+    for (std::size_t index = result.first; index < result.placements.size(); ++index) {
+      remaining += result.placements[index].height;
+    }
+    if (finalWindow && (lastPage || (allowEndBackfill && remaining < viewport.height))) {
+      result.first = result.placements.size();
+      remaining = 0;
+      while (result.first && remaining < viewport.height) {
+        remaining += result.placements[--result.first].height;
+      }
+      result.offset = static_cast<std::int32_t>(std::max<std::int64_t>(0, remaining - viewport.height));
+    }
+    if (remaining < viewport.height && staging.size() == options.maxRows &&
+        (!finalWindow || beforeWindow || result.first > 0)) {
+      return std::unexpected(TreeError::NODE_LIMIT);
+    }
+    std::int64_t y = -result.offset;
+    std::size_t retained{};
+    for (std::size_t index = result.first; index < result.placements.size() && y < viewport.height; ++index) {
+      auto &placement = result.placements[index];
+      if (y > std::numeric_limits<std::int32_t>::max() - placement.height) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+      placement.y = static_cast<std::int32_t>(y);
+      y += placement.height;
+      ++retained;
+    }
+    result.placements.erase(result.placements.begin(),
+                            result.placements.begin() + static_cast<std::ptrdiff_t>(result.first));
+    result.placements.resize(retained);
+    return std::expected<NaturalGeometry, TreeError>(std::in_place, result);
   }
 
   std::expected<void, TreeError> commitRows(const std::shared_ptr<portals::detail::ManagedModelSourceOf<T>> &actual,
@@ -1278,7 +1607,8 @@ struct RowsController : VirtualRowsState,
                                             std::span<const DeliveredRow<T>> values, std::uint64_t publication,
                                             std::uint64_t target, ModelResource resource, SourceStamp incarnation,
                                             std::optional<portals::detail::ModelViewHistoryChange> saved = {},
-                                            RowsCommitPublication metadata = {}) {
+                                            RowsCommitPublication metadata = {}, std::size_t leadingRows = 0,
+                                            bool finalWindow = false, bool beforeWindow = false) {
     const auto visible = values.size();
     const auto stagedIntent = intentGeneration;
     std::vector<std::shared_ptr<RowAssignment<T>>> staging(0);
@@ -1331,8 +1661,54 @@ struct RowsController : VirtualRowsState,
           refresh.push_back({row, value.value, value.valueRevision, value.pin ? value.pin : pin, {}});
         }
         deferred = deferred || row->snapshotRevision != value.valueRevision;
-        placement.push_back({row->root, static_cast<std::int32_t>(staging.size() * options.rowHeight)});
+        placement.push_back(
+          {row->root, static_cast<std::int32_t>(staging.size() * options.rowHeight), options.rowHeight});
         staging.push_back(std::move(row));
+      }
+      if (desiredAutoHeight && !*desiredAutoHeight && options.autoRowHeight) {
+        auto styled = RowAccess::flushStyles(scene);
+        if (!styled) {
+          rollback();
+          return styled;
+        }
+        for (const auto &row : staging) {
+          auto measured = portals::detail::RowTreeAccess::measure(RowAccess::tree(scene), row->root,
+                                                                  {contentWidth(scrollbarVisible), viewport.height});
+          if (!measured || measured->height > options.rowHeight) {
+            rollback();
+            return std::unexpected(measured ? TreeError::INVALID_GEOMETRY : measured.error());
+          }
+        }
+      }
+      std::int32_t nextCellOffset{};
+      if (natural() && !staging.empty()) {
+        auto styled = RowAccess::flushStyles(scene);
+        if (!styled) {
+          rollback();
+          return styled;
+        }
+        const bool reserveBar = this->scrollbar != Node<ScrollBar>{} && this->exactCount && viewport.width > 1;
+        auto measured = measureNaturalRows(staging, leadingRows, finalWindow, reserveBar, beforeWindow);
+        if (!measured) {
+          rollback();
+          return std::unexpected(measured.error());
+        }
+        const auto retained = measured->placements.size();
+        const auto skip = measured->first;
+        for (std::size_t index = 0; index < staging.size(); ++index) {
+          if ((index < skip || index - skip >= retained) && std::ranges::find(rows, staging[index]) == rows.end() &&
+              staging[index] != editPin) {
+            dispose(staging[index]);
+          }
+        }
+        staging.erase(staging.begin(), staging.begin() + static_cast<std::ptrdiff_t>(skip));
+        staging.resize(retained);
+        placement.swap(measured->placements);
+        nextCellOffset = measured->offset;
+        target += skip;
+        std::erase_if(refresh, [&](const auto &value) {
+          return std::ranges::find(staging, value.row) == staging.end();
+        });
       }
       for (const auto &row : rows) {
         if (std::ranges::find(staging, row) != staging.end()) {
@@ -1434,7 +1810,8 @@ struct RowsController : VirtualRowsState,
         visibleNodes.push_back(row->root);
       }
       const bool showBar = this->scrollbar != Node<ScrollBar>{} && this->exactCount &&
-                           *this->exactCount > staging.size() && viewport.width > 1 && viewport.height > 0;
+                           ((natural() && *this->exactCount > 0) || *this->exactCount > staging.size()) &&
+                           viewport.width > 1 && viewport.height > 0;
       if (showBar) {
         visibleNodes.push_back(this->scrollbar);
       }
@@ -1455,6 +1832,29 @@ struct RowsController : VirtualRowsState,
       }
       rows.swap(staging);
       placements.swap(placement);
+      if (desiredAutoHeight) {
+        options.autoRowHeight = *desiredAutoHeight;
+        desiredAutoHeight.reset();
+      }
+      if (natural() && offsetFromEnd && !placements.empty()) {
+        const auto remainder = static_cast<std::int64_t>(placements.front().height) + desiredCellOffset;
+        if (remainder < 0) {
+          pendingCells += remainder;
+        }
+      }
+      this->firstCellOffset = desiredCellOffset = nextCellOffset;
+      offsetFromEnd = false;
+      awaitingCellMove = false;
+      // Empty committed data consumes queued movement; a zero-sized hidden viewport
+      // retains it for later, and loading pages never reach this publication path.
+      if (rows.empty() &&
+          ((actual && this->exactCount == std::optional<std::uint64_t>{0}) ||
+           (!actual && finalWindow &&
+            (this->sourceStatus == WindowStatus::FINAL_END || this->sourceStatus == WindowStatus::TEMPORARY_TAIL)))) {
+        pendingCells = 0;
+      }
+      allowEndBackfill = false;
+      lastPage = false;
       this->scrollbarVisible = showBar;
       editPin.swap(nextPin);
       first = desiredFirst = target;
@@ -1526,6 +1926,14 @@ struct RowsController : VirtualRowsState,
           }
         }
       }
+      measuredGeometryRevision = portals::detail::RowTreeAccess::geometryRevision(RowAccess::tree(scene)).value_or(0);
+      if (natural() && pendingCells && !rows.empty()) {
+        dirty = true;
+        auto invalidated = RowAccess::tree(scene).invalidate(node, Invalidation::LAYOUT);
+        if (!invalidated) {
+          return invalidated;
+        }
+      }
       if (pendingEnter) {
         const auto requested = *std::exchange(pendingEnter, {});
         auto focused = RowAccess::app(scene).router().focused();
@@ -1546,6 +1954,21 @@ struct RowsController : VirtualRowsState,
     }
   }
 
+  void recordFailure(TreeError error) noexcept {
+    failure = error;
+    blockedAttempt = true;
+    blockedGeometryRevision =
+      lifetime.expired() ? 0 : portals::detail::RowTreeAccess::geometryRevision(RowAccess::tree(scene)).value_or(0);
+    if (desiredAutoHeight) {
+      desiredCellOffset = firstCellOffset;
+      pendingCells = 0;
+      offsetFromEnd = false;
+      awaitingCellMove = false;
+      desiredAutoHeight.reset();
+    }
+    dirty = false;
+  }
+
   void service() noexcept override {
     if (!active()) {
       retire();
@@ -1555,20 +1978,17 @@ struct RowsController : VirtualRowsState,
       return;
     }
     try {
-      auto result = update();
+      auto result = applyCellIntent();
+      if (result) {
+        result = update();
+      }
       if (!result) {
-        failure = result.error();
-        blockedAttempt = true;
-        dirty = false;
+        recordFailure(result.error());
       }
     } catch (const std::bad_alloc &) {
-      failure = TreeError::NO_MEMORY;
-      blockedAttempt = true;
-      dirty = false;
+      recordFailure(TreeError::NO_MEMORY);
     } catch (...) {
-      failure = TreeError::CALLBACK_FAILED;
-      blockedAttempt = true;
-      dirty = false;
+      recordFailure(TreeError::CALLBACK_FAILED);
     }
   }
 };
@@ -1840,13 +2260,24 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
       return invalidated;
     }
     wanted = target;
+    this->lastPage = false;
+    this->allowEndBackfill = true;
+    this->desiredCellOffset = 0;
+    this->offsetFromEnd = false;
     ++this->intentGeneration;
     this->dirty = true;
     this->blockedAttempt = false;
     return {};
   }
 
+  bool rowMovePending() const noexcept override {
+    return wanted != offset;
+  }
+
   std::expected<void, TreeError> requestPage(bool backwards) override {
+    if (this->natural()) {
+      return this->requestCells(backwards ? -this->viewport.height : this->viewport.height);
+    }
     const auto page = static_cast<std::int64_t>(std::max<std::size_t>(1, visibleRows));
     return requestMove(backwards ? -page : page);
   }
@@ -1890,8 +2321,11 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     if (entryKnown) {
       target = std::max(std::int64_t{}, target);
     }
-    const auto visible = static_cast<std::int64_t>(std::max<std::size_t>(1, visibleRows));
-    const auto nextFirst = target < wanted ? target : target - wanted >= visible ? target - visible + 1 : wanted;
+    const auto visible =
+      static_cast<std::int64_t>(std::max<std::size_t>(1, this->natural() ? this->rows.size() : visibleRows));
+    const auto nextFirst = target < wanted              ? target
+                           : target - wanted >= visible ? (this->natural() ? target : target - visible + 1)
+                                                        : wanted;
     const auto movement = nextFirst - wanted;
     if (movement < 0 && !window->capabilities().backward && wanted == 0) {
       return {};
@@ -1901,6 +2335,9 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     if (!moved) {
       return moved;
     }
+    this->desiredCellOffset = 0;
+    this->pendingCells = 0;
+    this->offsetFromEnd = false;
     this->currentSlot = static_cast<std::size_t>(target - nextFirst);
     this->selecting = true;
     this->dirty = true;
@@ -1930,6 +2367,10 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
       return requested;
     }
     wanted = 0;
+    this->lastPage = this->natural() && target.kind == SourceAnchorKind::TAIL;
+    this->allowEndBackfill = this->lastPage;
+    this->desiredCellOffset = 0;
+    this->pendingCells = 0;
     deferredCurrentDelta.reset();
     initialLoad = false;
     entryKnown = target.kind == SourceAnchorKind::ENTRY && traversal == SourceDirection::FORWARD;
@@ -1970,6 +2411,9 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     }
     portals::detail::ModelViewCheckpoint checkpoint;
     checkpoint.reading = *bookmark;
+    if (this->natural()) {
+      checkpoint.readingCellOffset = this->firstCellOffset;
+    }
     if (this->position.current) {
       auto current = ModelBookmark::create(
         preparedResource, {PositionKind::ITEM, *this->position.current, 0, preparedRevision, PositionAffinity::FORWARD},
@@ -2009,10 +2453,12 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     }
     SourceAnchor restore;
     std::optional<RowId> restoreCurrent;
+    std::int32_t restoreCellOffset{};
     if (rebind.restore == ModelRestorePolicy::REMEMBER && this->history) {
       auto checkpoint = this->history->find(target.resource, this->historyRole, false);
       if (checkpoint && checkpoint->value.reading) {
         restore = {SourceAnchorKind::ROW, {}, checkpoint->value.reading->position().row};
+        restoreCellOffset = this->natural() ? checkpoint->value.readingCellOffset.value_or(0) : 0;
         if (checkpoint->value.current) {
           restoreCurrent = checkpoint->value.current->position().row;
         }
@@ -2050,6 +2496,11 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     consumer.emplace(std::move(*opened));
     declaration = std::move(nextDeclaration);
     this->restoredCurrent = restoreCurrent;
+    this->desiredCellOffset = restoreCellOffset;
+    this->pendingCells = 0;
+    this->lastPage = false;
+    this->allowEndBackfill = false;
+    this->offsetFromEnd = false;
     deferredCurrentDelta.reset();
     pending.reset();
     this->sourceCapabilities = window->capabilities();
@@ -2256,15 +2707,29 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
       return {};
     }
     if (!this->dirty && renderedSerial == bufferSerial && offset == wanted) {
-      return {};
+      auto measured = this->refreshNaturalLayout();
+      if (!measured || !this->dirty) {
+        return measured;
+      }
     }
     if (this->blockedAttempt && failedSerial == bufferSerial && failedIntent == this->intentGeneration &&
-        failedOffset == wanted) {
+        failedOffset == wanted &&
+        (!this->natural() ||
+         this->blockedGeometryRevision ==
+           portals::detail::RowTreeAccess::geometryRevision(RowAccess::tree(this->scene)).value_or(0))) {
       return {};
     }
+    const auto total = static_cast<std::int64_t>(storedRows());
+    const bool atEnd =
+      segmentCount && (segments[segmentCount - 1].afterEnd || segments[segmentCount - 1].temporaryAfter);
+    const auto readFirst =
+      this->natural() && this->allowEndBackfill && atEnd && total - wanted < static_cast<std::int64_t>(visibleRows)
+        ? std::max<std::int64_t>(0, total - static_cast<std::int64_t>(visibleRows))
+        : wanted;
+    const auto leadingRows = static_cast<std::size_t>(wanted - readFirst);
     std::vector<DeliveredRow<T>> values(0);
     values.reserve(visibleRows);
-    auto skip = static_cast<std::size_t>(wanted);
+    auto skip = static_cast<std::size_t>(readFirst);
     for (std::size_t segment = 0; segment < segmentCount && values.size() < visibleRows; ++segment) {
       for (std::size_t page = 0; page < segments[segment].pin.pageCount() && values.size() < visibleRows; ++page) {
         auto data = segments[segment].pin.page(page);
@@ -2285,9 +2750,9 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     failedSerial = bufferSerial;
     failedIntent = this->intentGeneration;
     failedOffset = wanted;
-    const bool hasBefore = wanted > 0 || (window->capabilities().backward && segmentCount && !segments[0].beforeEnd);
+    const bool hasBefore = readFirst > 0 || (window->capabilities().backward && segmentCount && !segments[0].beforeEnd);
     const bool hasAfter =
-      wanted + static_cast<std::int64_t>(values.size()) < static_cast<std::int64_t>(storedRows()) ||
+      readFirst + static_cast<std::int64_t>(values.size()) < static_cast<std::int64_t>(storedRows()) ||
       (segmentCount && !segments[segmentCount - 1].afterEnd && !segments[segmentCount - 1].temporaryAfter);
 
     struct Metadata {
@@ -2299,20 +2764,31 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
       std::uint64_t serial;
       bool before;
       bool after;
-    } metadata{*this,   declaration.provider, declaration.resource, bufferRevision, wanted, bufferSerial, hasBefore,
-               hasAfter};
+      std::size_t delivered;
+    } metadata{*this,    declaration.provider, declaration.resource, bufferRevision, readFirst, bufferSerial, hasBefore,
+               hasAfter, values.size()};
 
-    auto committed = this->commitRows({}, {}, values, ++publication, 0, declaration.resource, window->stamp(), {},
-                                      {&metadata, [](void *context) noexcept {
-                                         auto &next = *static_cast<Metadata *>(context);
-                                         next.host.preparedProvider.swap(next.provider);
-                                         next.host.preparedResource = next.resource;
-                                         next.host.preparedRevision = next.revision;
-                                         next.host.offset = next.offset;
-                                         next.host.renderedSerial = next.serial;
-                                         next.host.position.hasBefore = next.before;
-                                         next.host.position.hasAfter = next.after;
-                                       }});
+    auto committed = this->commitRows(
+      {}, {}, values, ++publication, 0, declaration.resource, window->stamp(), {},
+      {&metadata,
+       [](void *context) noexcept {
+         auto &next = *static_cast<Metadata *>(context);
+         next.host.preparedProvider.swap(next.provider);
+         next.host.preparedResource = next.resource;
+         next.host.preparedRevision = next.revision;
+         next.host.offset = next.offset + static_cast<std::int64_t>(next.host.first);
+         next.host.wanted = next.host.offset;
+         next.host.renderedSerial = next.serial;
+         next.host.recordHasBefore = next.before || next.host.first > 0;
+         next.host.recordHasAfter = next.after || next.host.rows.size() + next.host.first < next.delivered;
+         next.host.position.hasBefore = next.host.recordHasBefore || next.host.firstCellOffset > 0;
+         next.host.position.hasAfter =
+           next.host.recordHasAfter ||
+           (!next.host.placements.empty() &&
+            static_cast<std::int64_t>(next.host.placements.back().y) + next.host.placements.back().height >
+              next.host.viewport.height);
+       }},
+      leadingRows, !hasAfter, hasBefore);
     if (!committed || !this->active()) {
       return committed;
     }
@@ -2332,10 +2808,7 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
     if (!ready) {
       return ready;
     }
-    const auto demand = this->viewport.width && this->viewport.height
-                          ? static_cast<std::size_t>(this->viewport.height / this->options.rowHeight +
-                                                     (this->viewport.height % this->options.rowHeight != 0))
-                          : 0;
+    const auto demand = this->rowDemand();
     if (demand > this->options.maxRows) {
       return std::unexpected(TreeError::NODE_LIMIT);
     }
@@ -2423,20 +2896,17 @@ template <class T, class Factory> struct WindowRowsController final : RowsContro
       return;
     }
     try {
-      auto result = updateWindow();
+      auto result = this->applyCellIntent();
+      if (result) {
+        result = updateWindow();
+      }
       if (!result) {
-        this->failure = result.error();
-        this->blockedAttempt = true;
-        this->dirty = false;
+        this->recordFailure(result.error());
       }
     } catch (const std::bad_alloc &) {
-      this->failure = TreeError::NO_MEMORY;
-      this->blockedAttempt = true;
-      this->dirty = false;
+      this->recordFailure(TreeError::NO_MEMORY);
     } catch (...) {
-      this->failure = TreeError::CALLBACK_FAILED;
-      this->blockedAttempt = true;
-      this->dirty = false;
+      this->recordFailure(TreeError::CALLBACK_FAILED);
     }
   }
 };
@@ -2449,7 +2919,8 @@ namespace portals::ui {
  * @tparam Source Finite model or explicit shared navigation descriptor.
  * @tparam Factory Callable returning a fresh ordinary description for a weak exact-record RowContext.
  * @param source Owning cold model binding. @param factory Owning row recipe factory, invoked only for staged rows.
- * @param options Positive fixed-height and mounted-row limits. @param policy Viewport layout bounds.
+ * @param options Fixed-height defaults, opt-in natural sizing and bounded mounted-row limits. @param policy Viewport
+ * layout bounds.
  * @return Cold host recipe; failed staging preserves the previous committed window.
  */
 template <class Source, class Factory>
@@ -2504,7 +2975,7 @@ auto virtualRows(Source source, Factory factory, VirtualRowsOptions options = {}
 /** @brief Describe real delegated rows from native cursor delivery without a finite extent.
  * @tparam T Immutable page row. @tparam Factory Fresh ordinary recipe factory receiving an exact-record weak context.
  * @param source Native window capability descriptor. @param factory Owning row factory.
- * @param options Fixed-height and bounded subtree/edit settings. @param policy Viewport bounds.
+ * @param options Fixed or natural sizing with bounded subtree/edit settings. @param policy Viewport bounds.
  * @return Cold host using the existing application worker and WindowSource delivery engine.
  */
 template <class T, class Factory>
