@@ -5,16 +5,77 @@
 #include <portals/controls.hpp>
 #include <portals/text_value.hpp>
 
+#include <array>
+#include <initializer_list>
+#include <string_view>
+
 namespace portals {
 /** @brief Owning synchronous label lookup, invoked only while staging a configuration. */
 using SpinnerLabelResolver = std::function<std::expected<std::string, TextResourceError>(std::string_view)>;
 /** @brief Original single-row indeterminate animation sequences. */
 enum class SpinnerPreset {
-  DOTS,      ///< Three positions, moving left to right.
-  LINE,      ///< Portable ASCII rotating line.
-  BRAILLE,   ///< Four one-cell braille positions; ASCII fallback for incompatible widths.
-  BAR_BOUNCE ///< Five positions traversed in both directions.
+  DOTS,       ///< Three positions, moving left to right.
+  LINE,       ///< Portable ASCII rotating line.
+  BRAILLE,    ///< Eight one-cell braille positions; ASCII fallback for incompatible widths.
+  BAR_BOUNCE, ///< Five positions traversed in both directions.
+  ARC,        ///< Rotating arc.
+  CIRCLE,     ///< Circle phases.
+  SQUARE,     ///< Square phases.
+  TRIANGLE,   ///< Triangle phases.
+  ARROW,      ///< Arrow directions.
+  BLOCKS,     ///< Rising and falling blocks.
+  ELLIPSIS,   ///< Growing dots.
+  PULSE       ///< Pulsing indicator.
 };
+
+/** @brief Canonical names in SpinnerPreset ordinal order. */
+inline constexpr std::array<std::string_view, 12> SPINNER_PRESET_NAMES{"DOTS",  "LINE",   "BRAILLE",  "BAR_BOUNCE",
+                                                                       "ARC",   "CIRCLE", "SQUARE",   "TRIANGLE",
+                                                                       "ARROW", "BLOCKS", "ELLIPSIS", "PULSE"};
+
+/** @param name Preset name, ASCII case-insensitive; hyphens and underscores are equivalent.
+ * @return Matching preset, or an invalid value collected by ordinary configuration validation.
+ */
+inline SpinnerPreset spinnerPreset(std::string_view name) noexcept {
+  for (std::size_t i = 0; i < SPINNER_PRESET_NAMES.size(); ++i) {
+    const auto candidate = SPINNER_PRESET_NAMES[i];
+    if (candidate.size() != name.size())
+      continue;
+    bool equal = true;
+    for (std::size_t j = 0; j < name.size(); ++j) {
+      char c = name[j];
+      if (c >= 'a' && c <= 'z')
+        c = static_cast<char>(c - 'a' + 'A');
+      if (c == '-')
+        c = '_';
+      if (c != candidate[j]) {
+        equal = false;
+        break;
+      }
+    }
+    if (equal)
+      return static_cast<SpinnerPreset>(i);
+  }
+  return static_cast<SpinnerPreset>(-1);
+}
+
+namespace detail {
+/** Convert an initializer list into the existing owning LF format without hiding invalid entries. */
+inline std::string spinnerFrames(std::initializer_list<std::string_view> values) {
+  std::string result;
+  bool first = true;
+  for (const auto value : values) {
+    if (!first)
+      result += '\n';
+    first = false;
+    if (value.empty() || value.find_first_of("\r\n") != std::string_view::npos)
+      result += '\r';
+    else
+      result += value;
+  }
+  return result;
+}
+} // namespace detail
 
 /** @brief Traversal of the finite owning frame sequence. */
 enum class SpinnerDirection {

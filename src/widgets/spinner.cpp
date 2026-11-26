@@ -53,7 +53,7 @@ std::shared_ptr<detail::SpinnerDefinition> compile(WidthPolicy width, SpinnerOpt
     result->failure = cause;
     return result;
   };
-  if (config.preset < SpinnerPreset::DOTS || config.preset > SpinnerPreset::BAR_BOUNCE ||
+  if (static_cast<std::size_t>(config.preset) >= SPINNER_PRESET_NAMES.size() ||
       config.direction < SpinnerDirection::FORWARD || config.direction > SpinnerDirection::REVERSE ||
       (config.alignment != LayoutAlign::START && config.alignment != LayoutAlign::CENTER &&
        config.alignment != LayoutAlign::END) ||
@@ -61,21 +61,46 @@ std::shared_ptr<detail::SpinnerDefinition> compile(WidthPolicy width, SpinnerOpt
       !config.maxPaintCells) {
     return fail(TreeError::INVALID_ARGUMENT);
   }
+  // All built-in Unicode cycles have one-cell frames; choose the fallback before
+  // applying the caller's budgets so a sequence never mixes glyph families.
+  static constexpr std::array<std::string_view, SPINNER_PRESET_NAMES.size()> SEQUENCES{
+    "o..\n.o.\n..o",
+    "|\n/\n-\n\\",
+    "\u2801\n\u2802\n\u2804\n\u2840\n\u2880\n\u2820\n\u2810\n\u2808",
+    "o....\n.o...\n..o..\n...o.\n....o\n...o.\n..o..\n.o...",
+    "\u25dc\n\u25dd\n\u25de\n\u25df",
+    "\u25d0\n\u25d3\n\u25d1\n\u25d2",
+    "\u25f0\n\u25f3\n\u25f2\n\u25f1",
+    "\u25b2\n\u25b6\n\u25bc\n\u25c0",
+    "\u2190\n\u2191\n\u2192\n\u2193",
+    "\u2581\n\u2583\n\u2585\n\u2587\n\u2585\n\u2583",
+    ".  \n.. \n...",
+    "o\nO\n@\nO"};
+  constexpr std::string_view FALLBACK = "|\n/\n-\n\\";
   std::string_view sequence = config.frames;
   if (sequence.empty()) {
-    switch (config.preset) {
-    case SpinnerPreset::DOTS:
-      sequence = "o..\n.o.\n..o";
-      break;
-    case SpinnerPreset::LINE:
-      sequence = "|\n/\n-\n\\";
-      break;
-    case SpinnerPreset::BRAILLE:
-      sequence = "\xe2\xa0\x81\n\xe2\xa0\x88\n\xe2\xa0\x80\n\xe2\xa0\x82";
-      break;
-    case SpinnerPreset::BAR_BOUNCE:
-      sequence = "o....\n.o...\n..o..\n...o.\n....o\n...o.\n..o..\n.o...";
-      break;
+    sequence = SEQUENCES[static_cast<std::size_t>(config.preset)];
+    if (config.preset == SpinnerPreset::BRAILLE ||
+        (config.preset >= SpinnerPreset::ARC && config.preset <= SpinnerPreset::BLOCKS)) {
+      TextLimits probeLimits;
+      probeLimits.max_input_bytes = config.maxFrameBytes > 16 ? config.maxFrameBytes : 16;
+      probeLimits.max_cells = 8;
+      probeLimits.max_graphemes = 8;
+      for (std::size_t begin = 0;;) {
+        const auto end = sequence.find('\n', begin);
+        auto text = GraphemeText::from(sequence.substr(begin, end == std::string_view::npos ? end : end - begin), width,
+                                       probeLimits);
+        if (!text) {
+          return fail(TreeError::INVALID_ARGUMENT);
+        }
+        if (text->measure() != 1) {
+          sequence = FALLBACK;
+          break;
+        }
+        if (end == std::string_view::npos)
+          break;
+        begin = end + 1;
+      }
     }
   }
   if (sequence.size() > config.maxFrameBytes) {
@@ -102,12 +127,6 @@ std::shared_ptr<detail::SpinnerDefinition> compile(WidthPolicy width, SpinnerOpt
     }
     if (text->measure() == 0) {
       return fail(TreeError::INVALID_ARGUMENT);
-    }
-    if (config.frames.empty() && config.preset == SpinnerPreset::BRAILLE && text->measure() != 1) {
-      text = GraphemeText::from(std::string_view("|/-\\").substr(result->frames.size(), 1), width, limits);
-      if (!text) {
-        return fail(TreeError::INVALID_ARGUMENT);
-      }
     }
     result->frameWidth = std::max(result->frameWidth, text->measure());
     result->frames.push_back(std::make_shared<const GraphemeText>(std::move(*text)));

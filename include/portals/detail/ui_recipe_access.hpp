@@ -836,6 +836,8 @@ struct Access {
       return "Border";
     } else if constexpr (std::same_as<T, Gauge>) {
       return "Gauge";
+    } else if constexpr (std::same_as<T, Spinner>) {
+      return "Spinner";
     } else if constexpr (std::same_as<T, SpinBox>) {
       return "SpinBox";
     } else if constexpr (std::same_as<T, Slider>) {

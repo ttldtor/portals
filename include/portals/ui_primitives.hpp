@@ -184,6 +184,23 @@ inline SpinnerModifier preset(SpinnerPreset value) {
   return {{.spinnerPreset = value}};
 }
 
+/** @tparam Name String-like preset name.
+ * @param value Preset name, checked during preparation.
+ * @return Exact Spinner configuration stage.
+ */
+template <typename Name>
+  requires std::convertible_to<Name, std::string_view>
+inline SpinnerModifier preset(Name &&value) {
+  return preset(spinnerPreset(std::string_view(value)));
+}
+
+/** @param values Complete frames copied into the configuration.
+ * @return Exact Spinner configuration stage.
+ */
+inline SpinnerModifier frames(std::initializer_list<std::string_view> values) {
+  return {{.spinnerFrames = ::portals::detail::spinnerFrames(values)}};
+}
+
 /** @param value Finite owning Spinner frames setting, checked at preparation.
  * @return Exact Spinner configuration stage.
  */
@@ -278,15 +295,28 @@ inline Description<Spinner> spinner(SpinnerOptions options = {}, ControlStyle st
   return detail::Access::configuredControl(std::move(description), "Spinner");
 }
 
-/** @param reference Empty shared observer, published only after complete mount.
+/** @tparam Name String-like preset name.
+ * @param name Preset name, checked during preparation.
+ * @return Single-use retained indicator recipe.
+ */
+template <typename Name>
+  requires std::convertible_to<Name, std::string_view>
+inline Description<Spinner> spinner(Name &&name) {
+  return spinner().preset(std::forward<Name>(name));
+}
+
+/** @tparam Reference Exact Spinner observer type, deduced to preserve empty-brace options.
+ * @param reference Empty shared observer, published only after complete mount.
  * @param options Owning finite animation configuration.
  * @param style Manual active/dim appearances beneath theme rules.
  * @param policy Existing size constraints.
  * @return Observed retained indicator recipe using the existing scheduler.
  */
-inline Description<Spinner> spinner(Ref<Spinner> reference, SpinnerOptions options = {}, ControlStyle style = {},
+template <typename Reference>
+  requires std::same_as<std::remove_cvref_t<Reference>, Ref<Spinner>>
+inline Description<Spinner> spinner(Reference &&reference, SpinnerOptions options = {}, ControlStyle style = {},
                                     SizePolicy policy = DEFAULT_CONTENT_POLICY) {
-  return spinner(std::move(options), style, policy).reference(std::move(reference));
+  return spinner(std::move(options), style, policy).reference(std::forward<Reference>(reference));
 }
 
 /** @param value Finite value in the inclusive configured range; checked at mount.
