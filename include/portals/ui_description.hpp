@@ -1048,6 +1048,25 @@ public:
     return std::move(*this).scalarSettings({.spinnerPreset = value});
   }
 
+  /** @tparam Name String-like preset name.
+   * @param value Preset name copied into the checked configuration.
+   * @return Consuming Spinner recipe.
+   */
+  template <typename Name>
+    requires(std::same_as<T, Spinner> && std::convertible_to<Name, std::string_view>)
+  Description &&preset(Name &&value) && {
+    return std::move(*this).preset(spinnerPreset(std::string_view(value)));
+  }
+
+  /** @param values Complete single-row frames, copied into owning configuration.
+   * @return Consuming Spinner recipe; invalid entries are rejected during preparation.
+   */
+  Description &&frames(std::initializer_list<std::string_view> values) &&
+    requires std::same_as<T, Spinner>
+  {
+    return std::move(*this).frames(::portals::detail::spinnerFrames(values));
+  }
+
   /** @param value Owning/finite Spinner frames setting, checked at preparation.
    * @return Consuming exact Spinner recipe; previous unrelated settings are preserved.
    */

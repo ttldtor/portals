@@ -835,19 +835,20 @@ private:
           return std::unexpected(withProperty(parsed.error(), type, path));
         }
       }
-      const auto value = modeLiteral.empty() ? name() : std::string_view(modeLiteral);
+      const auto value = modeLiteral.empty() ? name(path == "preset") : std::string_view(modeLiteral);
       const bool documentModifier = path == "fastKeyModifier" || path == "fastWheelModifier";
       const auto found = std::ranges::find_if(schema->enumNames, [&](std::string_view candidate) {
-        return documentModifier || path == "syntax" ? std::ranges::equal(candidate, value,
-                                                                         [](char first, char second) {
-                                                                           const auto upper = [](char character) {
-                                                                             return character >= 'a' && character <= 'z'
-                                                                                      ? character - 'a' + 'A'
+        return path == "preset" ? spinnerPreset(value) == spinnerPreset(candidate)
+               : documentModifier || path == "syntax"
+                 ? std::ranges::equal(candidate, value,
+                                      [](char first, char second) {
+                                        const auto upper = [](char character) {
+                                          return character >= 'a' && character <= 'z' ? character - 'a' + 'A'
                                                                                       : character;
-                                                                           };
-                                                                           return upper(first) == upper(second);
-                                                                         })
-                                                    : candidate == value;
+                                        };
+                                        return upper(first) == upper(second);
+                                      })
+                 : candidate == value;
       });
 
       if (found == schema->enumNames.end()) {

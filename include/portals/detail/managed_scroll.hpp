@@ -57,9 +57,10 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
     entry->node = *node;
 
     if constexpr (std::derived_from<T, Control> || std::same_as<T, LineEdit> || std::same_as<T, Password> ||
-                  std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, ScrollArea> ||
-                  std::same_as<T, ScrollBar> || std::same_as<T, Grid> || std::same_as<T, StatusBar> ||
-                  std::same_as<T, RadioGroup> || std::same_as<T, SpinBox> || std::derived_from<T, ScrollArea>) {
+                  std::same_as<T, Border> || std::same_as<T, Gauge> || std::same_as<T, Spinner> ||
+                  std::same_as<T, ScrollArea> || std::same_as<T, ScrollBar> || std::same_as<T, Grid> ||
+                  std::same_as<T, StatusBar> || std::same_as<T, RadioGroup> || std::same_as<T, SpinBox> ||
+                  std::derived_from<T, ScrollArea>) {
       const char *type = "Control";
 
       if constexpr (std::same_as<T, Label>) {
@@ -84,6 +85,8 @@ std::expected<Node<T>, ManagedError> ManagedScene::emplaceConfigured(Node<Widget
         type = "Border";
       } else if constexpr (std::same_as<T, Gauge>) {
         type = "Gauge";
+      } else if constexpr (std::same_as<T, Spinner>) {
+        type = "Spinner";
       } else if constexpr (std::same_as<T, DocumentView>) {
         type = "DocumentView";
       } else if constexpr (std::same_as<T, LogView>) {

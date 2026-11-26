@@ -74,7 +74,6 @@ constexpr std::array<std::string_view, 3> DOCUMENT_MODIFIER_NAMES{"SHIFT", "ALT"
 constexpr std::array<std::string_view, 8> DOCUMENT_ENCODING_NAMES{
   "UNRESOLVED", "UTF8", "UTF16LE", "UTF16BE", "UTF32LE", "UTF32BE", "WINDOWS1251", "WINDOWS1252"};
 constexpr std::array<std::string_view, 2> AXIS_NAMES{"HORIZONTAL", "VERTICAL"};
-constexpr std::array<std::string_view, 4> SPINNER_PRESET_NAMES{"DOTS", "LINE", "BRAILLE", "BAR_BOUNCE"};
 constexpr std::array<std::string_view, 2> SPINNER_DIRECTION_NAMES{"FORWARD", "REVERSE"};
 constexpr std::array<std::string_view, 3> SPINNER_ALIGN_NAMES{"START", "CENTER", "END"};
 constexpr std::array<std::string_view, 2> SEARCH_STRATEGY_NAMES{"PREFIX", "FUZZY_PREFIX"};
@@ -1321,7 +1320,7 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
   } else if constexpr (std::same_as<T, SearchStrategy>) {
     return value == SearchStrategy::PREFIX || value == SearchStrategy::FUZZY_PREFIX;
   } else if constexpr (std::same_as<T, SpinnerPreset>) {
-    return value >= SpinnerPreset::DOTS && value <= SpinnerPreset::BAR_BOUNCE;
+    return static_cast<std::size_t>(value) < SPINNER_PRESET_NAMES.size();
   } else if constexpr (std::same_as<T, SpinnerDirection>) {
     return value == SpinnerDirection::FORWARD || value == SpinnerDirection::REVERSE;
   } else if constexpr (std::same_as<T, FramePattern>) {

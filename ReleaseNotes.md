@@ -7,6 +7,17 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Spinner adds ARC, CIRCLE, SQUARE, TRIANGLE, ARROW, BLOCKS, ELLIPSIS and PULSE
+  presets. Recipes accept compact preset names and owning frame lists, while
+  existing enum, options and LF-separated frame forms remain available. The
+  loading-indicator guide demonstrates every preset and a custom animation.
+  BRAILLE now follows eight visible dot positions without an empty frame.
+  Its expanded Unicode cycle needs maxFrames >= 8; the default of 64 is unchanged.
+  Unicode presets use a complete ASCII sequence when the receiving width policy
+  cannot display their glyphs in one cell; custom frames remain checked.
+  Managed and declarative spinners now register their natural PSS type; explicit
+  style type overrides remain supported.
+
 - Virtual-row recipes can opt into natural composed record heights with
   `.autoRowHeight()`. Measurement, mounted rows and source history remain bounded;
   tall records support cell-level reading offsets, and finite sources retain a

@@ -3,6 +3,7 @@
 #define DOCTEST_CONFIG_IMPLEMENT_WITH_MAIN
 #include <doctest.h>
 #include <portals/ui_scene_resource.hpp>
+#include <portals/ui_style.hpp>
 
 #include <cstdlib>
 #include <new>
@@ -226,11 +227,36 @@ TEST_CASE("runtime rate and direction replacement cancels previous registration 
 }
 
 TEST_CASE("finite owning frames validate UTF-8 geometry and complete budgets") {
-  for (auto preset : {SpinnerPreset::DOTS, SpinnerPreset::LINE, SpinnerPreset::BRAILLE, SpinnerPreset::BAR_BOUNCE}) {
+  for (std::size_t i = 0; i < SPINNER_PRESET_NAMES.size(); ++i) {
     SpinnerOptions options;
-    options.preset = preset;
+    options.preset = static_cast<SpinnerPreset>(i);
     CHECK(Spinner::validate({}, options));
+    WidthPolicy wide;
+    wide.ambiguous = AmbiguousWidth::WIDE;
+    CHECK(Spinner::validate(wide, options));
+    Fixture animated;
+    auto node = take(ui::mount(*animated.scene, ui::spinner(options)));
+    animated.prepare();
+    CHECK(animated.advance(100).timers == 1);
+    CHECK(animated.frame(node) == 1);
   }
+  WidthPolicy wide;
+  wide.ambiguous = AmbiguousWidth::WIDE;
+  auto circle = take(GraphemeText::from("\u25d0", wide));
+  REQUIRE(circle.measure() == 2);
+  SpinnerOptions fallback;
+  fallback.preset = SpinnerPreset::CIRCLE;
+  fallback.maxFrameBytes = 7;
+  fallback.maxFrames = 4;
+  fallback.maxFrameCells = 1;
+  CHECK(Spinner::validate(wide, fallback));
+  fallback.frames = "\u25d0";
+  CHECK_FALSE(Spinner::validate(wide, fallback));
+  fallback.frames.clear();
+  auto invalidWidth = wide;
+  invalidWidth.ambiguous = static_cast<AmbiguousWidth>(-1);
+  CHECK(Spinner::validate(invalidWidth, fallback).error() == TreeError::INVALID_ARGUMENT);
+
   SpinnerOptions custom;
   custom.frames = "x\nwide";
   Fixture f;
@@ -307,6 +333,43 @@ TEST_CASE("resource method pipe and defaults share the indicator schema") {
   auto inherited = take(ui::mount(*defaults.scene, ui::spinner(), controls));
   CHECK(defaults.options(inherited).interval == 333);
   CHECK_FALSE(defaults.options(inherited).active);
+}
+
+TEST_CASE("spinner preset names and owning initializer frames preserve checked errors") {
+  ui::Ref<Spinner> reference;
+  auto oldDefault = ui::spinner({});
+  auto oldRefDefault = ui::spinner(reference, {});
+  auto oldPreset = ui::spinner().preset({});
+  auto emptyFrames = ui::spinner().frames({});
+  (void)oldDefault;
+  (void)oldRefDefault;
+  (void)oldPreset;
+  Fixture empty;
+  auto reset = take(ui::mount(*empty.scene, std::move(emptyFrames)));
+  CHECK(empty.options(reset).frames.empty());
+
+  Fixture named;
+  auto node = take(ui::mount(*named.scene, ui::spinner("arc").frames({"[   ]", "[=  ]"}).interval(120)));
+  CHECK(named.options(node).preset == SpinnerPreset::ARC);
+  CHECK(named.options(node).frames == "[   ]\n[=  ]");
+  CHECK(named.options(node).interval == 120);
+  for (const auto bad : {std::string_view{}, std::string_view{"a\nb"}, std::string_view{"a\rb"}}) {
+    Fixture invalid;
+    CHECK_FALSE(ui::mount(*invalid.scene, ui::spinner().frames({bad})));
+  }
+  Fixture unknown;
+  CHECK_FALSE(ui::mount(*unknown.scene, ui::spinner("unknown")));
+  CHECK(spinnerPreset("bar-bounce") == SpinnerPreset::BAR_BOUNCE);
+  for (auto name : SPINNER_PRESET_NAMES) {
+    ui::SceneResourceOptions resource;
+    resource.format = ui::SceneResourceFormat::CONFIGURATION;
+    auto owner = ui::scene("scene{Spinner{preset=" + std::string(name) + "}}", resource);
+    CHECK(owner.prepareChecked());
+  }
+  ui::SceneResourceOptions resource;
+  resource.format = ui::SceneResourceFormat::CONFIGURATION;
+  auto owner = ui::scene("scene{Spinner{preset=bar-bounce}}", resource);
+  CHECK(owner.prepareChecked());
 }
 
 TEST_CASE("resource invalid leaves report source paths before setup") {
@@ -468,6 +531,69 @@ TEST_CASE("checked Spinner reference starts stops and stages labels with existin
   const auto diagnostics = take(f.scene->diagnostics());
   REQUIRE_FALSE(diagnostics.errors.empty());
   CHECK(diagnostics.errors.back().error.operation == std::string_view("spinner.stop"));
+}
+
+TEST_CASE("managed and DSL spinner use natural style identity and respect explicit overrides") {
+  constexpr auto SHEET = "Spinner { foreground: #123456; } Spinner:disabled { foreground: #654321; } "
+                         "Override { foreground: #abcdef; }";
+
+  struct Sink : PaintContext {
+    std::optional<CellStyle> frameStyle;
+
+    std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+      for (const auto &command : commands) {
+        if (const auto *run = std::get_if<TextCommand>(&command); run && !frameStyle) {
+          frameStyle = run->style;
+        }
+      }
+      return {};
+    }
+  };
+
+  Fixture managed;
+  auto node = take(managed.scene->spinner(managed.scene->root()));
+  take(managed.scene->theme(take(parsePss(SHEET))));
+  managed.prepare();
+  take(managed.app->tree().read(node, [&](const Spinner &spinner) {
+    REQUIRE(spinner.computedStyle());
+    CHECK(spinner.computedStyle()->normal.foreground == RgbColor{0x12, 0x34, 0x56});
+    CHECK(spinner.computedStyle()->disabled.foreground == RgbColor{0x65, 0x43, 0x21});
+  }));
+  Sink active;
+  take(managed.app->tree().frame([&] {
+    take(managed.app->tree().paint(node, active));
+  }));
+  REQUIRE(active.frameStyle);
+  CHECK(active.frameStyle->foreground == RgbColor{0x12, 0x34, 0x56});
+  take(setSpinnerActive(managed.app->tree(), node, false));
+  managed.prepare();
+  Sink stopped;
+  take(managed.app->tree().frame([&] {
+    take(managed.app->tree().paint(node, stopped));
+  }));
+  REQUIRE(stopped.frameStyle);
+  CHECK(stopped.frameStyle->foreground == RgbColor{0x65, 0x43, 0x21});
+  take(managed.scene->style(node, StyleTarget{.type = "Override"}));
+  managed.prepare();
+  take(managed.app->tree().read(node, [&](const Spinner &spinner) {
+    REQUIRE(spinner.computedStyle());
+    CHECK(spinner.computedStyle()->normal.foreground == RgbColor{0xab, 0xcd, 0xef});
+  }));
+
+  ui::Ref<Spinner> reference;
+  auto owner = ui::scene(ui::spinner(reference).active(false)) | ui::style(SHEET);
+  bool inspected{};
+  owner.configure([&](ManagedScene &, Application &application) {
+    take(application.tree().read(reference.node(), [&](const Spinner &spinner) {
+      REQUIRE(spinner.computedStyle());
+      CHECK(spinner.computedStyle()->normal.foreground == RgbColor{0x12, 0x34, 0x56});
+      CHECK(spinner.computedStyle()->disabled.foreground == RgbColor{0x65, 0x43, 0x21});
+      inspected = true;
+    }));
+  });
+  take(owner.prepareChecked());
+  CHECK(inspected);
+  take(owner.close());
 }
 
 TEST_CASE("alignment manual active and dim appearances and paint budget use retained text") {
