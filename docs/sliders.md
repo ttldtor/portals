@@ -2,7 +2,7 @@
 
 [Русская версия](ru/sliders.md) · [Controls](controls.md) · [Bindings](bindings-guide.md)
 
-A slider lets the user adjust a bounded value such as volume; a [Gauge](gauge.md) displays a value or progress without accepting that input. Use a slider where a relative position is useful; use a [SpinBox](spin-boxes.md) when direct numeric text entry matters. The [Slider API](../include/portals/slider.hpp) describes its options and checked operations. The recording below shows the larger settings composition, not just the short guide program.
+A slider lets the user adjust a bounded value such as volume; a [Gauge](gauge.md) displays a value or progress without accepting that input. Use a slider where a relative position is useful; use a [SpinBox](spin-boxes.md) when direct numeric text entry matters. The [Slider API](../include/portals/slider.hpp) describes its options and checked operations. The recordings below use the complete guide application, including every built-in skin.
 
 Use `ui::slider()` to edit a finite numeric value with the keyboard or mouse.
 The default horizontal slider starts at zero in the inclusive range 0..100,
@@ -10,8 +10,7 @@ with a user increment of one and an intrinsic width of 20 cells.
 
 ## A complete application
 
-The application below edits one scene-owned numeric value and updates a label
-after each changed user commit. F10 closes the application.
+The application edits sound and display settings with all four built-in skins, a custom glyph set, read-only and disabled examples, live value previews and Reset. The Themes button switches between Nord and Latte. F10 or Ctrl+C closes it.
 
 \include guide_slider.cpp
 
@@ -24,17 +23,41 @@ For volume and balance, live previews, Reset and gesture completion, build
 `portals_slider_example` with `PORTALS_BUILD_EXAMPLES=ON` and run the
 [complete settings application](../examples/slider/main.cpp).
 
-The track uses ASCII `-` and `O`. Ordinary themes, `Slider` selectors, classes,
-focus/disabled appearances, frames and size constraints apply to it. Its preferred
-width is a content measurement; `.flex(1)` lets the surrounding row allocate more
-space. The text-width policy validates both one-cell glyphs together.
+## Built-in skins and custom glyphs
 
-![Volume drag, keyboard adjustment and Reset in the complete application](images/slider.gif)
+Choose the appearance directly on the recipe:
 
-![Volume at 70 after a completed drag](images/slider.png)
+```cpp
+ui::slider(35).skin("rounded").width(28);
+ui::slider(50).glyphs({"·", "=", "◆"});
+```
 
-The recording runs the native Windows console backend. During a drag,
-`onPreview` reports the changing value; release finishes one gesture.
+| Name | Typed value | Unfilled / filled / thumb |
+| --- | --- | --- |
+| `ascii` (default) | `SliderSkin::ASCII` | `-` / `-` / `O` |
+| `line` | `SliderSkin::LINE` | `─` / `━` / `●` |
+| `rounded` | `SliderSkin::ROUNDED` | `┄` / `━` / `◉` |
+| `blocks` | `SliderSkin::BLOCKS` | `░` / `█` / `■` |
+
+`.skin(SliderSkin::ROUNDED)` is the equivalent typed form. Custom `SliderGlyphs`
+owns its three strings and overrides the skin. Supply all three glyphs; each
+must be one printable grapheme, occupy one cell under the scene's width policy,
+and use at most 64 UTF-8 bytes. Invalid custom glyphs produce checked setup errors.
+When the width policy cannot admit a built-in Unicode set, the entire set falls
+back to ASCII. Font availability is not detected automatically.
+
+The track occupies one terminal row. A pointer selects a numeric tick; the
+filled prefix and thumb share that same position. Themes color these parts
+independently. The glyph set does not change the range or input operations.
+
+![All slider skins, pointer drag and Reset in Nord](images/slider-skins-dark.gif)
+
+![The same controls and state indications in Latte](images/slider-skins-light.gif)
+
+The recordings rasterize actual application VT output using Cascadia Code.
+Input captions mark the actions being demonstrated. They are not measurements
+of physical Windows Terminal presentation latency.
+
 ## Configure the source
 
 An independent recipe can stage its final range and increment:
@@ -128,7 +151,11 @@ The configuration resource uses the same settings and native numeric binding:
 scene {
   Slider#volume {
     value=35 minimum=0 maximum=100 step=5 pageSteps=10
-    preferredWidth=30 readOnly=false
+    preferredWidth=30 readOnly=false skin="rounded"
+  }
+  Slider#custom {
+    value=50 preferredWidth=28
+    glyphs.track="." glyphs.fill="=" glyphs.thumb="@"
   }
 }
 ```
@@ -141,25 +168,59 @@ factory source. A present `readOnly=false` can override a factory's `true` setti
 Styles and ordinary sizing retain the common resource pipeline.
 
 
+The resource accepts `skin` and `glyphs.track`, `glyphs.fill`, `glyphs.thumb`.
+Custom glyphs require all three leaves and override a valid built-in skin.
+Unknown skin names and invalid glyphs produce checked setup errors. The fluent API uses the same restrictions.
+
 ## Styling reference {#sliders-styling-reference}
 
-The natural selector is `Slider`. Track and thumb share one style: disabled takes precedence over focused, then normal. It does not paint selected, header or caret variants. The ASCII track `-` and thumb `O` are fixed; PSS has no separate part or glyph properties. `SliderOptions::preferredWidth` is `std::int32_t`, default 20 cells; intrinsic height is one. Extra allocated rows receive the background, while glyphs occupy the first row.
+The natural selector is `Slider`. Each part uses the same selected state:
+disabled takes precedence over focused, then normal. The `:read-only` predicate
+matches a slider whose user editing is prohibited; programmatic checked writes
+remain available. Built-in themes use a muted appearance for this state.
 
-The common paint properties apply to each painted target:
+Common `foreground`, `background`, `bold`, `italic` and `underline` set the
+receiving surface. The following properties override individual parts:
 
-| Property | Value |
+| Property | Type and meaning |
 | --- | --- |
-| `foreground` | `#RRGGBB` text/ink color |
-| `background` | `#RRGGBB` fill color |
-| `bold` | `true` or `false` |
-| `italic` | `true` or `false` |
-| `underline` | `true` or `false` |
+| `slider-track-foreground` | `#RRGGBB`, unfilled-track ink |
+| `slider-track-background` | `#RRGGBB`, unfilled-track cell background |
+| `slider-track-bold` | `true` / `false` |
+| `slider-track-italic` | `true` / `false` |
+| `slider-track-underline` | `true` / `false` |
+| `slider-fill-foreground` | `#RRGGBB`, filled-prefix ink |
+| `slider-fill-background` | `#RRGGBB`, filled-prefix cell background |
+| `slider-fill-bold` | `true` / `false` |
+| `slider-fill-italic` | `true` / `false` |
+| `slider-fill-underline` | `true` / `false` |
+| `slider-thumb-foreground` | `#RRGGBB`, thumb ink |
+| `slider-thumb-background` | `#RRGGBB`, thumb cell background |
+| `slider-thumb-bold` | `true` / `false` |
+| `slider-thumb-italic` | `true` / `false` |
+| `slider-thumb-underline` | `true` / `false` |
 
-Manual `ControlStyle` defaults use terminal colors, normal text, bold focus and italic disabled text. Theme and PSS declarations override individual manual fields; unspecified fields retain lower-layer values, including explicit `false`. A selector without a state supplies all variants. See [cascade and selectors](styling-guide.md) and [styles](styles.md).
-
-Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `fit-content`, or `flex(positive weight)`; `min-width`, `max-width`, `min-height`, and `max-height` accept nonnegative cell counts. They require selectors without state or `:read-only`; Except for `min-width`, these size declarations are runtime PSS only. Conflicting widget bounds reject the update and retain the previous style and geometry; constraints and recipe precedence are explained in [layout](layout.md). These affect allocation, not the glyphs themselves.
+Absent part leaves inherit the resolved common state, then the ordinary cascade
+selects explicit part overrides. Explicit `false` is retained. Changing only a
+part invalidates its paint; theme and part values publish together. These paint
+properties are available in runtime and compile-time PSS and typed declarations.
 
 ```pss
-Slider { width: 20; foreground: #62b4d7; }
-Slider:focused { bold: true; }
+Slider { slider-track-foreground: #73808f; }
+Slider:focused { slider-thumb-foreground: #c28e2c; slider-thumb-bold: true; }
+Slider:read-only { slider-fill-bold: false; slider-thumb-bold: false; }
 ```
+
+Colors in a user rule are explicit overrides; select values appropriate for the
+active palette. Glyphs and skins are configured by the recipe or scene resource,
+while the part paint properties above are PSS styling.
+
+`SliderOptions::preferredWidth` defaults to 20 cells. Intrinsic height is one;
+extra allocated rows receive the common background. Ordinary frames, classes and
+layout constraints apply. `.width(28)` fixes the allocation; `.flex(1)` shares
+available row width. Size declarations and their checked conflict behavior are
+specified in [layout](layout.md).
+
+The native `setSliderReadOnly` operation changes the input gate and invalidates
+paint. A standalone `StyleEngine` user must refresh styles after changing that
+predicate to re-evaluate `:read-only` declarations.

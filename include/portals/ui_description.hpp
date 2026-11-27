@@ -339,6 +339,31 @@ public:
     return std::move(*this).scalarSettings({.step = amount});
   }
 
+  /** @param name Built-in slider skin name: ascii, line, rounded or blocks.
+   * @return Consuming Slider recipe; invalid names fail during mount.
+   */
+  Description &&skin(std::string_view name) && requires std::same_as<T, Slider> {
+    return std::move(*this).scalarSettings({.sliderSkin = std::string(name)});
+  }
+
+  /** @param value Typed built-in slider skin.
+   * @return Consuming Slider recipe; invalid enum values fail during mount.
+   */
+  Description &&skin(SliderSkin value) && requires std::same_as<T, Slider> {
+    constexpr std::array<std::string_view, 4> SKIN_NAMES{"ascii", "line", "rounded", "blocks"};
+    const auto index = static_cast<std::size_t>(value);
+    return std::move(*this).skin(index < SKIN_NAMES.size() ? SKIN_NAMES[index] : std::string_view{});
+  }
+
+  /** @param value Owning one-cell graphemes, checked against the receiving width policy.
+   * @return Consuming Slider recipe; all three glyphs are retained independently of the caller.
+   */
+  Description &&glyphs(SliderGlyphs value) && requires std::same_as<T, Slider> {
+    return std::move(*this).scalarSettings({.sliderTrack = std::move(value.track),
+                                            .sliderFill = std::move(value.fill),
+                                            .sliderThumb = std::move(value.thumb)});
+  }
+
   /** @param count Positive user increments per PageUp/PageDown action.
    * @return Consuming Slider recipe using the same checked options as resources.
    */

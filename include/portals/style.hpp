@@ -189,6 +189,9 @@ struct StyleDeclarations {
   StylePaintDeclarations scrollbarThumbBody{};   ///< Thumb body overrides, inheriting the common thumb.
   StylePaintDeclarations scrollbarThumbEnd{};    ///< Thumb end overrides, inheriting the common thumb.
   StylePaintDeclarations scrollbarThumbSingle{}; ///< Thumb single overrides, inheriting the common thumb.
+  StylePaintDeclarations sliderTrack{};          ///< Unfilled Slider rail overrides, inheriting the resolved state.
+  StylePaintDeclarations sliderFill{};           ///< Filled Slider rail overrides.
+  StylePaintDeclarations sliderThumb{};          ///< Slider position indicator overrides.
   std::optional<GlyphProfile> glyphProfile{};    ///< Named base beneath independent patterns and literal sources.
   std::optional<GlyphFallback> glyphFallback{};  ///< Explicit portable one-cell admission fallback.
 

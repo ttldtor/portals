@@ -246,39 +246,84 @@ CellStyle resolvePaint(const Visit &visit, const StyleTarget &target, bool readO
   return base;
 }
 
+// Slider paints are resolved only when used, after their ordinary inherited state is complete.
+// They share the exact same matching/rank contract as frame and scrollbar paints, with no registry.
+template <class CascadeRank, class Visit>
+SliderAppearance resolveSliderPaint(const Visit &visit, const StyleTarget &target, bool readOnly, StyleState state,
+                                    SliderAppearance base) noexcept {
+  constexpr std::size_t PAINT_ATTRIBUTE_COUNT = 5;
+  constexpr std::size_t SLIDER_PART_COUNT = 3;
+  std::array<std::optional<CascadeRank>, PAINT_ATTRIBUTE_COUNT * SLIDER_PART_COUNT> ranks;
+  const auto destinations = std::array{&base.track, &base.fill, &base.thumb};
+
+  visit([&](const StyleRule &rule, auto &&makeRank) {
+    if (!matches(rule.selector, target, state, readOnly)) {
+      return;
+    }
+
+    const auto rank = makeRank();
+    const auto sources =
+      std::array{&rule.declarations.sliderTrack, &rule.declarations.sliderFill, &rule.declarations.sliderThumb};
+    for (std::size_t part = 0; part < sources.size(); ++part) {
+      const auto &source = *sources[part];
+      auto &destination = *destinations[part];
+      const auto first = part * PAINT_ATTRIBUTE_COUNT;
+      const auto assign = [&]<class T>(const std::optional<T> &value, auto &leaf, std::size_t attribute) {
+        auto &previous = ranks[first + attribute];
+        if (value && (!previous || rank >= *previous)) {
+          leaf = *value;
+          previous = rank;
+        }
+      };
+
+      assign(source.foreground, destination.foreground, 0);
+      assign(source.background, destination.background, 1);
+      assign(source.bold, destination.bold, 2);
+      assign(source.italic, destination.italic, 3);
+      assign(source.underline, destination.underline, 4);
+    }
+  });
+
+  return base;
+}
+
 template <class CascadeRank, class Visit>
 ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, ComputedStyle defaults,
                            bool readOnly) noexcept {
   bool frameParts{};
   bool scrollbarParts{};
   bool thumbSegments{};
+  bool sliderParts{};
   bool glyphDeclarations{};
   const bool preserveSegments = defaults.scrollbarThumbSegments.has_value();
   std::optional<CascadeRank> rank;
   std::array<std::optional<CascadeRank>, 5> sizingRanks;
   visit([&](const StyleRule &rule, auto &&makeRank) {
+    // Test applicability once before inspecting any extension leaves. Using the selector's own
+    // state preserves state-specific declarations for their later per-state paint resolution.
+    if (!matches(rule.selector, target, rule.selector.state, readOnly)) {
+      return;
+    }
+
     const auto &values = rule.declarations;
 
-    glyphDeclarations = glyphDeclarations || ((values.glyphProfile || values.glyphFallback || rule.scrollbarGlyphs) &&
-                                              matches(rule.selector, target, rule.selector.state, readOnly));
+    glyphDeclarations = glyphDeclarations || values.glyphProfile || values.glyphFallback || rule.scrollbarGlyphs;
+
+    sliderParts = sliderParts || hasPaintDeclarations(values.sliderTrack) || hasPaintDeclarations(values.sliderFill) ||
+                  hasPaintDeclarations(values.sliderThumb);
 
     // Reuse the metric pass; selector states here test applicability, not the current paint state.
-    frameParts = frameParts || ((hasPaintDeclarations(values.frameLine) || hasPaintDeclarations(values.frameTitle) ||
-                                 hasPaintDeclarations(values.frameEnds)) &&
-                                matches(rule.selector, target, rule.selector.state, readOnly));
+    frameParts = frameParts || hasPaintDeclarations(values.frameLine) || hasPaintDeclarations(values.frameTitle) ||
+                 hasPaintDeclarations(values.frameEnds);
 
-    scrollbarParts =
-      scrollbarParts || ((hasPaintDeclarations(values.scrollbarTrack) || hasPaintDeclarations(values.scrollbarThumb) ||
-                          hasPaintDeclarations(values.scrollbarEnds) || hasPaintDeclarations(values.scrollbarArrows) ||
-                          hasPaintDeclarations(values.scrollbarCorner) || values.scrollbarTrackPattern ||
-                          values.scrollbarThumbPattern || values.scrollbarArrowPattern) &&
-                         matches(rule.selector, target, rule.selector.state, readOnly));
+    scrollbarParts = scrollbarParts || hasPaintDeclarations(values.scrollbarTrack) ||
+                     hasPaintDeclarations(values.scrollbarThumb) || hasPaintDeclarations(values.scrollbarEnds) ||
+                     hasPaintDeclarations(values.scrollbarArrows) || hasPaintDeclarations(values.scrollbarCorner) ||
+                     values.scrollbarTrackPattern || values.scrollbarThumbPattern || values.scrollbarArrowPattern;
 
-    thumbSegments =
-      thumbSegments ||
-      ((hasPaintDeclarations(values.scrollbarThumbStart) || hasPaintDeclarations(values.scrollbarThumbBody) ||
-        hasPaintDeclarations(values.scrollbarThumbEnd) || hasPaintDeclarations(values.scrollbarThumbSingle)) &&
-       matches(rule.selector, target, rule.selector.state, readOnly));
+    thumbSegments = thumbSegments || hasPaintDeclarations(values.scrollbarThumbStart) ||
+                    hasPaintDeclarations(values.scrollbarThumbBody) || hasPaintDeclarations(values.scrollbarThumbEnd) ||
+                    hasPaintDeclarations(values.scrollbarThumbSingle);
 
     if ((!values.minWidth && !rule.sizing) || !matches(rule.selector, target, StyleState::ANY, readOnly)) {
       return;
@@ -389,6 +434,23 @@ ComputedStyle resolveRules(const Visit &visit, const StyleTarget &target, Comput
     applyScrollbarStates.template operator()<true>();
   } else {
     applyScrollbarStates.template operator()<false>();
+  }
+
+  if (sliderParts) {
+    const auto states = std::array{defaults.normal,   defaults.focused, defaults.disabled,
+                                   defaults.selected, defaults.header,  defaults.caret};
+    const bool preserveParts = defaults.sliderParts.has_value();
+
+    if (!preserveParts) {
+      defaults.sliderParts.emplace();
+    }
+    for (std::size_t index = 0; index < STYLE_STATES.size(); ++index) {
+      const auto base =
+        preserveParts ? (*defaults.sliderParts)[index] : SliderAppearance{states[index], states[index], states[index]};
+
+      (*defaults.sliderParts)[index] =
+        resolveSliderPaint<CascadeRank>(visit, target, readOnly, STYLE_STATES[index], base);
+    }
   }
 
   return defaults;
@@ -636,6 +698,45 @@ StyleSheet themeFromTokens(ThemeTokens tokens) {
   }
   syntaxDisabled.roles = std::move(disabledRoles);
   sheet.rules.push_back(std::move(syntaxDisabled));
+
+  // Sliders distinguish the filled prefix and thumb without painting the whole rail as an action.
+  StyleRule slider;
+
+  slider.selector.type = "Slider";
+  slider.declarations.sliderTrack.foreground = tokens.muted;
+  slider.declarations.sliderFill.foreground = tokens.accent;
+  slider.declarations.sliderThumb.foreground = tokens.foreground;
+  sheet.rules.push_back(std::move(slider));
+
+  StyleRule sliderFocus;
+
+  sliderFocus.selector.type = "Slider";
+  sliderFocus.selector.state = StyleState::FOCUSED;
+  sliderFocus.declarations.foreground = tokens.foreground;
+  sliderFocus.declarations.background = tokens.background;
+  sliderFocus.declarations.bold = false;
+  sliderFocus.declarations.sliderThumb.foreground = tokens.accent;
+  sliderFocus.declarations.sliderThumb.bold = true;
+  sheet.rules.push_back(std::move(sliderFocus));
+
+  for (const bool readOnly : {false, true}) {
+    StyleRule inactiveSlider;
+
+    inactiveSlider.selector.type = "Slider";
+    inactiveSlider.selector.readOnly = readOnly;
+    inactiveSlider.selector.state = readOnly ? StyleState::ANY : StyleState::DISABLED;
+    inactiveSlider.declarations.foreground = tokens.muted;
+    inactiveSlider.declarations.background = tokens.background;
+    inactiveSlider.declarations.bold = false;
+    inactiveSlider.declarations.italic = false;
+    inactiveSlider.declarations.underline = false;
+    const StylePaintDeclarations muted{.foreground = tokens.muted, .bold = false, .italic = false, .underline = false};
+
+    inactiveSlider.declarations.sliderTrack = muted;
+    inactiveSlider.declarations.sliderFill = muted;
+    inactiveSlider.declarations.sliderThumb = muted;
+    sheet.rules.push_back(std::move(inactiveSlider));
+  }
 
   StyleRule selectedMarker;
   selectedMarker.selector.type = "RadioGroup";
@@ -1135,9 +1236,10 @@ StyleEngine::mutate(Mutation mutation, StyleLayerOptions options, StyleTier tier
         partCount(d.frameLine) + partCount(d.frameTitle) + partCount(d.frameEnds) + partCount(d.scrollbarTrack) +
         partCount(d.scrollbarThumb) + partCount(d.scrollbarEnds) + partCount(d.scrollbarArrows) +
         partCount(d.scrollbarCorner) + partCount(d.scrollbarThumbStart) + partCount(d.scrollbarThumbBody) +
-        partCount(d.scrollbarThumbEnd) + partCount(d.scrollbarThumbSingle) + d.foreground.has_value() +
-        d.background.has_value() + d.bold.has_value() + d.italic.has_value() + d.underline.has_value() +
-        d.minWidth.has_value() + sizing.width.has_value() + sizing.height.has_value() + sizing.maxWidth.has_value() +
+        partCount(d.scrollbarThumbEnd) + partCount(d.scrollbarThumbSingle) + partCount(d.sliderTrack) +
+        partCount(d.sliderFill) + partCount(d.sliderThumb) + d.foreground.has_value() + d.background.has_value() +
+        d.bold.has_value() + d.italic.has_value() + d.underline.has_value() + d.minWidth.has_value() +
+        sizing.width.has_value() + sizing.height.has_value() + sizing.maxWidth.has_value() +
         sizing.minHeight.has_value() + sizing.maxHeight.has_value() + d.scrollbarTrackPattern.has_value() +
         d.scrollbarThumbPattern.has_value() + d.scrollbarArrowPattern.has_value() +
         (rule.scrollbarGlyphs ? std::ranges::count_if(*rule.scrollbarGlyphs,
@@ -2033,13 +2135,17 @@ StyleEngine::install(StyleSheet sheet, std::vector<Binding> &&bindings, LayerSta
               if (next.scrollbarThumbSegments) {
                 blocks.thumb = shareStyleBlock(transaction->thumbs, *next.scrollbarThumbSegments);
               }
-              if (next.glyphs != std::array<GlyphAppearance, 6>{} || next.scrollbarGlyphs.has_value() || next.sizing) {
+              if (next.glyphs != std::array<GlyphAppearance, 6>{} || next.scrollbarGlyphs.has_value() || next.sizing ||
+                  next.sliderParts) {
                 detail::StyleGlyphBlock block{next.glyphs};
                 if (next.scrollbarGlyphs.has_value()) {
                   block.literals = std::make_shared<const detail::ScrollbarGlyphStates>(*next.scrollbarGlyphs);
                 }
                 if (next.sizing) {
                   block.sizing = std::make_shared<const StyleSizing>(*next.sizing);
+                }
+                if (next.sliderParts) {
+                  block.sliderParts = std::make_shared<const std::array<SliderAppearance, 6>>(*next.sliderParts);
                 }
                 blocks.glyphs = shareStyleBlock(transaction->glyphs, block);
               }

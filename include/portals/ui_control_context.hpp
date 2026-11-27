@@ -503,6 +503,10 @@ struct ControlSettings {
   std::optional<std::uint64_t> pageSteps{}; ///< Positive Slider increment count per PageUp/PageDown action.
   std::optional<RadioSelectionMode> radioSelectionMode{};    ///< Keyboard selection policy; appended for compatibility.
   std::shared_ptr<const ControlDocumentSettings> document{}; ///< Cold immutable document settings.
+  std::optional<std::string> sliderSkin{}; ///< Slider built-in skin name.
+  std::optional<std::string> sliderTrack{}; ///< Owning custom unfilled glyph.
+  std::optional<std::string> sliderFill{}; ///< Owning custom filled glyph.
+  std::optional<std::string> sliderThumb{}; ///< Owning custom thumb glyph.
 
   /** @return Immutable document settings, or a shared empty value when absent. */
   const ControlDocumentSettings &documentSettings() const noexcept {

@@ -71,6 +71,13 @@ constexpr char THUMB_SEGMENT_SOURCE[] =
   "single-foreground:#131415;scrollbar-thumb-single-background:#161718;scrollbar-thumb-single-bold:true;scrollbar-"
   "thumb-single-italic:false;scrollbar-thumb-single-underline:true;}";
 
+constexpr char SLIDER_PART_SOURCE[] =
+  "Slider{slider-track-foreground:#010203;slider-track-background:#040506;slider-track-bold:false;"
+  "slider-track-italic:true;slider-track-underline:false;slider-fill-foreground:#070809;"
+  "slider-fill-background:#0a0b0c;slider-fill-bold:true;slider-fill-italic:false;"
+  "slider-fill-underline:true;slider-thumb-foreground:#0d0e0f;slider-thumb-background:#101112;"
+  "slider-thumb-bold:false;slider-thumb-italic:true;slider-thumb-underline:false;}";
+
 constexpr auto DIRECT = sc::pss("Button { foreground: #ff0000; bold: false; }", "fixture.pss");
 constexpr auto AXIS_SIZING = sc::detail::inspectPss("Probe{width:fit-content;}", "");
 static_assert(!AXIS_SIZING.valid && AXIS_SIZING.error.code == PssErrorCode::INVALID_VALUE);
@@ -143,9 +150,10 @@ static_assert(sc::MAX_CT_PSS_DESCRIPTOR_BYTES == 192 * 1024);
 static_assert(static_cast<std::size_t>(PssProperty::FRAME_ENDS_UNDERLINE) == 20);
 static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_TRACK_FOREGROUND) == 21);
 static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_THUMB_SINGLE_UNDERLINE) == 68);
-static_assert(static_cast<std::size_t>(PssProperty::GLYPH_PROFILE) == 69);
-static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_CORNER_GLYPH) == 91);
-static_assert(static_cast<std::size_t>(PssProperty::WIDTH) == 92);
+// The fifteen Slider scalar paint leaves extend the prefix before glyph and runtime-only properties.
+static_assert(static_cast<std::size_t>(PssProperty::GLYPH_PROFILE) == 84);
+static_assert(static_cast<std::size_t>(PssProperty::SCROLLBAR_CORNER_GLYPH) == 106);
+static_assert(static_cast<std::size_t>(PssProperty::WIDTH) == 107);
 static_assert(static_cast<std::size_t>(PssProperty::MAX_HEIGHT) + 1 ==
               static_cast<std::size_t>(PssProperty::ROLE_FOREGROUND));
 static_assert(static_cast<std::size_t>(PssProperty::ROLE_UNDERLINE) + 1 == PSS_PROPERTY_COUNT);
@@ -649,4 +657,57 @@ TEST_CASE("read-only PSS qualifier survives constexpr runtime and typed conversi
     REQUIRE_FALSE(invalid);
     CHECK(invalid.error().code == PssErrorCode::INVALID_WIDTH);
   }
+}
+
+TEST_CASE("Slider paint leaves agree across runtime, literal, compact, typed and flat PSS paths") {
+  constexpr auto LITERAL = sc::pss(SLIDER_PART_SOURCE, "slider.pss");
+  constexpr auto COMPACT = sc::pss(
+    [] {
+      return std::string_view{SLIDER_PART_SOURCE};
+    },
+    [] {
+      return "slider.pss"sv;
+    });
+  constexpr auto TYPED =
+    sc::sheet(sc::parameters(),
+              sc::rule(sc::type<"Slider">(), sc::sliderTrackForeground(sc::rgb(1, 2, 3)),
+                       sc::sliderTrackBackground(sc::rgb(4, 5, 6)), sc::sliderTrackBold(false),
+                       sc::sliderTrackItalic(true), sc::sliderTrackUnderline(false),
+                       sc::sliderFillForeground(sc::rgb(7, 8, 9)), sc::sliderFillBackground(sc::rgb(10, 11, 12)),
+                       sc::sliderFillBold(true), sc::sliderFillItalic(false), sc::sliderFillUnderline(true),
+                       sc::sliderThumbForeground(sc::rgb(13, 14, 15)), sc::sliderThumbBackground(sc::rgb(16, 17, 18)),
+                       sc::sliderThumbBold(false), sc::sliderThumbItalic(true), sc::sliderThumbUnderline(false)));
+  constexpr auto FLAT = sc::compactSheet(std::array{sc::flatRule(
+    sc::type<"Slider">(), sc::sliderTrackForeground(sc::rgb(1, 2, 3)), sc::sliderTrackBackground(sc::rgb(4, 5, 6)),
+    sc::sliderTrackBold(false), sc::sliderTrackItalic(true), sc::sliderTrackUnderline(false),
+    sc::sliderFillForeground(sc::rgb(7, 8, 9)), sc::sliderFillBackground(sc::rgb(10, 11, 12)), sc::sliderFillBold(true),
+    sc::sliderFillItalic(false), sc::sliderFillUnderline(true), sc::sliderThumbForeground(sc::rgb(13, 14, 15)),
+    sc::sliderThumbBackground(sc::rgb(16, 17, 18)), sc::sliderThumbBold(false), sc::sliderThumbItalic(true),
+    sc::sliderThumbUnderline(false))});
+  static_assert(LITERAL.declarations().size() == 15 && COMPACT.declarations().size() == 15);
+  const auto runtime = parsePssDocument(SLIDER_PART_SOURCE, "slider.pss");
+  const auto literal = sc::materializeDocument(LITERAL);
+  const auto compact = sc::materializeDocument(COMPACT);
+  const auto flat = sc::materializeDocument(FLAT);
+  REQUIRE(runtime);
+  REQUIRE(literal);
+  REQUIRE(compact);
+  REQUIRE(flat);
+  CHECK(*literal == *runtime);
+  CHECK(*compact == *runtime);
+  CHECK(flat->sheet == runtime->sheet);
+  CHECK(sc::materialize(TYPED) == runtime->sheet);
+  const auto legacy = parsePss(SLIDER_PART_SOURCE);
+  REQUIRE(legacy);
+  CHECK(*legacy == runtime->sheet);
+  for (const auto &declaration : runtime->declarations) {
+    CHECK(runtime->origins[0].effectiveDeclaration[static_cast<std::size_t>(declaration.property)] < 15);
+  }
+  const auto parsed = resolveStyle(runtime->sheet, {.type = "Slider"});
+  REQUIRE(parsed.sliderParts);
+  CHECK((*parsed.sliderParts)[0].track.foreground == RgbColor{1, 2, 3});
+  CHECK_FALSE((*parsed.sliderParts)[0].thumb.bold);
+  CHECK((*parsed.sliderParts)[0].fill.underline);
+  CHECK_FALSE(parsePss("Slider{slider-thumb-bold:#010203;}"));
+  CHECK_FALSE(parsePss("Slider{slider-fill-background:false;}"));
 }

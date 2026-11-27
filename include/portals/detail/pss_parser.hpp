@@ -164,6 +164,21 @@ inline constexpr std::array<std::string_view, PSS_PROPERTY_COUNT> PSS_PROPERTY_N
   "scrollbar-thumb-single-bold",
   "scrollbar-thumb-single-italic",
   "scrollbar-thumb-single-underline",
+  "slider-track-foreground",
+  "slider-track-background",
+  "slider-track-bold",
+  "slider-track-italic",
+  "slider-track-underline",
+  "slider-fill-foreground",
+  "slider-fill-background",
+  "slider-fill-bold",
+  "slider-fill-italic",
+  "slider-fill-underline",
+  "slider-thumb-foreground",
+  "slider-thumb-background",
+  "slider-thumb-bold",
+  "slider-thumb-italic",
+  "slider-thumb-underline",
   "glyph-profile",
   "glyph-fallback",
   "scrollbar-horizontal-track-glyph",
@@ -826,7 +841,10 @@ private:
                property == PssProperty::SCROLLBAR_ARROWS_FOREGROUND ||
                property == PssProperty::SCROLLBAR_ARROWS_BACKGROUND ||
                property == PssProperty::SCROLLBAR_CORNER_FOREGROUND ||
-               property == PssProperty::SCROLLBAR_CORNER_BACKGROUND) {
+               property == PssProperty::SCROLLBAR_CORNER_BACKGROUND ||
+               property == PssProperty::SLIDER_TRACK_FOREGROUND || property == PssProperty::SLIDER_TRACK_BACKGROUND ||
+               property == PssProperty::SLIDER_FILL_FOREGROUND || property == PssProperty::SLIDER_FILL_BACKGROUND ||
+               property == PssProperty::SLIDER_THUMB_FOREGROUND || property == PssProperty::SLIDER_THUMB_BACKGROUND) {
       const auto color = parseColor(text);
 
       if (!color) {
@@ -1196,6 +1214,66 @@ constexpr void assignPssDeclaration(PssProperty property, PssValue value, StyleD
 
     break;
 
+  case PssProperty::SLIDER_TRACK_FOREGROUND:
+    destination.sliderTrack.foreground = value.color;
+
+    break;
+  case PssProperty::SLIDER_TRACK_BACKGROUND:
+    destination.sliderTrack.background = value.color;
+
+    break;
+  case PssProperty::SLIDER_TRACK_BOLD:
+    destination.sliderTrack.bold = value.boolean;
+
+    break;
+  case PssProperty::SLIDER_TRACK_ITALIC:
+    destination.sliderTrack.italic = value.boolean;
+
+    break;
+  case PssProperty::SLIDER_TRACK_UNDERLINE:
+    destination.sliderTrack.underline = value.boolean;
+
+    break;
+  case PssProperty::SLIDER_FILL_FOREGROUND:
+    destination.sliderFill.foreground = value.color;
+
+    break;
+  case PssProperty::SLIDER_FILL_BACKGROUND:
+    destination.sliderFill.background = value.color;
+
+    break;
+  case PssProperty::SLIDER_FILL_BOLD:
+    destination.sliderFill.bold = value.boolean;
+
+    break;
+  case PssProperty::SLIDER_FILL_ITALIC:
+    destination.sliderFill.italic = value.boolean;
+
+    break;
+  case PssProperty::SLIDER_FILL_UNDERLINE:
+    destination.sliderFill.underline = value.boolean;
+
+    break;
+  case PssProperty::SLIDER_THUMB_FOREGROUND:
+    destination.sliderThumb.foreground = value.color;
+
+    break;
+  case PssProperty::SLIDER_THUMB_BACKGROUND:
+    destination.sliderThumb.background = value.color;
+
+    break;
+  case PssProperty::SLIDER_THUMB_BOLD:
+    destination.sliderThumb.bold = value.boolean;
+
+    break;
+  case PssProperty::SLIDER_THUMB_ITALIC:
+    destination.sliderThumb.italic = value.boolean;
+
+    break;
+  case PssProperty::SLIDER_THUMB_UNDERLINE:
+    destination.sliderThumb.underline = value.boolean;
+
+    break;
   case PssProperty::GLYPH_PROFILE:
     destination.glyphProfile = static_cast<GlyphProfile>(value.pattern);
 

@@ -7,6 +7,13 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- Slider recipes add named ASCII, line, rounded and block skins and owning custom
+  track/fill/thumb glyphs, with equivalent loaded-scene settings. Independent PSS
+  paint leaves style each part through the existing atomic cascade. Token-based
+  themes show focus on the thumb and muted read-only/disabled states. The complete
+  settings guide demonstrates all skins, customization, previews, Reset and themes.
+  The default ASCII glyphs and numeric/input operations remain compatible.
+
 - Spinner adds ARC, CIRCLE, SQUARE, TRIANGLE, ARROW, BLOCKS, ELLIPSIS and PULSE
   presets. Recipes accept compact preset names and owning frame lists, while
   existing enum, options and LF-separated frame forms remain available. The

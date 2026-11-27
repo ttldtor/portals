@@ -26,13 +26,65 @@ std::optional<Action> sliderAction(const RoutedEvent &event) {
 } // namespace
 
 Slider::Slider(WidthPolicy width, SliderOptions options, ControlStyle style, SizePolicy policy)
-    : Control(sliderGlyph("", width), "", "", style, policy), options_(options), track_(sliderGlyph("-", width)),
-      thumb_(sliderGlyph("O", width)) {
+    : Control(sliderGlyph("", width), "", "", style, policy),
+      options_{options.preferredWidth, options.pageSteps, options.maxPaintCells, options.readOnly},
+      track_(sliderGlyph("-", width)), fill_(sliderGlyph("-", width)), thumb_(sliderGlyph("O", width)) {
+  if (options.skin < SliderSkin::ASCII || options.skin > SliderSkin::BLOCKS) {
+    validGlyphs_ = false;
+    return;
+  }
+
+  std::array<std::string_view, 3> source;
+  if (options.glyphs) {
+    source = {options.glyphs->track, options.glyphs->fill, options.glyphs->thumb};
+  } else {
+    switch (options.skin) {
+    case SliderSkin::ASCII:
+      source = {"-", "-", "O"};
+      break;
+    case SliderSkin::LINE:
+      source = {"\xe2\x94\x80", "\xe2\x94\x81", "\xe2\x97\x8f"};
+      break;
+    case SliderSkin::ROUNDED:
+      source = {"\xe2\x94\x84", "\xe2\x94\x81", "\xe2\x97\x89"};
+      break;
+    case SliderSkin::BLOCKS:
+      source = {"\xe2\x96\x91", "\xe2\x96\x88", "\xe2\x96\xa0"};
+      break;
+    default:
+      validGlyphs_ = false;
+      return;
+    }
+  }
+
+  const bool custom = options.glyphs.has_value();
+  constexpr std::size_t MAX_GLYPH_BYTES = 64;
+  if (custom && (source[0].size() > MAX_GLYPH_BYTES || source[1].size() > MAX_GLYPH_BYTES ||
+                 source[2].size() > MAX_GLYPH_BYTES)) {
+    validGlyphs_ = false;
+    return;
+  }
+  auto track = GraphemeText::from(source[0], width);
+  auto fill = GraphemeText::from(source[1], width);
+  auto thumb = GraphemeText::from(source[2], width);
+  const auto oneCell = [](const auto &glyph) {
+    return glyph && glyph->graphemes().size() == 1 && glyph->measure() == 1 &&
+           glyph->graphemes().front().display == TextDisplay::PRINTABLE;
+  };
+
+  if (!oneCell(track) || !oneCell(fill) || !oneCell(thumb)) {
+    validGlyphs_ = !custom;
+    return;
+  }
+
+  track_ = std::move(*track);
+  fill_ = std::move(*fill);
+  thumb_ = std::move(*thumb);
 }
 
 std::expected<CellSize, TreeError> Slider::measure(CellSize) {
-  if (options_.preferredWidth < 0 || options_.pageSteps == 0 || options_.maxPaintCells == 0 || track_.measure() != 1 ||
-      thumb_.measure() != 1) {
+  if (!validGlyphs_ || options_.preferredWidth < 0 || options_.pageSteps == 0 || options_.maxPaintCells == 0 ||
+      track_.measure() != 1 || thumb_.measure() != 1) {
     return std::unexpected(TreeError::INVALID_ARGUMENT);
   }
 
@@ -98,9 +150,15 @@ std::expected<void, TreeError> Slider::paint(PaintContext &context) {
     return filled;
   }
 
+  const auto state = !enabled() ? 2 : focused() ? 1 : 0;
+  const auto parts = style.sliderParts ? (*style.sliderParts)[state] : SliderAppearance{ink, ink, ink};
+
   for (std::int32_t column = 0; column < width; ++column) {
-    const std::array<RenderCommand, 1> command{
-      TextCommand{{column, 0}, column == thumbColumn_ ? thumb_ : track_, bounds_, ink}};
+    const bool isThumb = column == thumbColumn_;
+    const bool isFill = column < thumbColumn_;
+    const auto &partInk = isThumb ? parts.thumb : isFill ? parts.fill : parts.track;
+    const auto &glyph = isThumb ? thumb_ : isFill ? fill_ : track_;
+    const std::array<RenderCommand, 1> command{TextCommand{{column, 0}, glyph, bounds_, partInk}};
     auto submitted = context.submit(command);
 
     if (!submitted) {

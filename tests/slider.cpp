@@ -40,6 +40,12 @@ static_assert(requires(ui::Ref<Slider> reference) {
   ui::slider(reference, 0, {});
 });
 
+static_assert(requires(ui::Ref<Slider> reference) {
+  ui::slider(reference, 35).skin("rounded").width(28);
+  ui::slider(reference, 35).skin(SliderSkin::LINE);
+  ui::slider(reference, 35).glyphs(SliderGlyphs{"-", "=", "O"});
+});
+
 void check(bool condition, const char *message) {
   if (!condition) {
     ++failures;
@@ -67,6 +73,9 @@ T take(std::expected<T, E> result, std::source_location location = std::source_l
       }
     }
 
+    if constexpr (std::same_as<E, TreeError>) {
+      std::cerr << " tree=" << static_cast<int>(result.error());
+    }
     std::cerr << '\n';
     std::exit(2);
   }
@@ -78,6 +87,119 @@ T take(std::expected<T, E> result, std::source_location location = std::source_l
 
 bool numericError(const std::expected<NumericValue, NumericError> &result, NumericError expected) {
   return !result && result.error() == expected;
+}
+
+struct SliderPaintCapture : PaintContext {
+  std::vector<std::string> glyphs;
+  std::vector<CellStyle> styles;
+
+  std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+    for (const auto &command : commands) {
+      if (const auto *text = std::get_if<TextCommand>(&command)) {
+        glyphs.emplace_back(text->text.bytes());
+        styles.push_back(text->style);
+      }
+    }
+    return {};
+  }
+};
+
+void sliderGlyphs() {
+  const auto rect = take(CellRect::from({}, {4, 1}));
+  const auto output = [&](SliderOptions options, WidthPolicy width = {}) {
+    Slider slider(width, std::move(options));
+    take(slider.arrange(rect));
+    SliderPaintCapture capture;
+    take(slider.paint(capture));
+    return capture.glyphs;
+  };
+  const auto ascii = output({});
+  const auto line = output({.skin = SliderSkin::LINE});
+  const auto rounded = output({.skin = SliderSkin::ROUNDED});
+  const auto blocks = output({.skin = SliderSkin::BLOCKS});
+  check(ascii == std::vector<std::string>({"O", "-", "-", "-"}), "default slider output preserved");
+  check(line != ascii && rounded != line && blocks != rounded && blocks != line, "built-in skins differ");
+  check(output({.skin = SliderSkin::LINE}, {.ambiguous = AmbiguousWidth::WIDE}) == ascii,
+        "incompatible built-in glyph widths fall back to ASCII");
+  SliderGlyphs source{".", "=", "@"};
+  Slider custom({}, {.glyphs = source});
+  source.thumb = "changed";
+  take(custom.arrange(rect));
+  SliderPaintCapture capture;
+  take(custom.paint(capture));
+  check(capture.glyphs == std::vector<std::string>({"@", ".", ".", "."}), "custom glyphs own their input");
+  Slider invalidSkin({}, {.skin = static_cast<SliderSkin>(-1), .glyphs = SliderGlyphs{".", "=", "@"}});
+  const auto invalidSkinResult = invalidSkin.measure({});
+  check(!invalidSkinResult && invalidSkinResult.error() == TreeError::INVALID_ARGUMENT,
+        "invalid skin remains an error with custom glyphs");
+  for (const auto &bad : {std::string{}, std::string("ab"), std::string("\n"), std::string("\xff")}) {
+    Slider invalid({}, {.glyphs = SliderGlyphs{bad, "=", "@"}});
+    const auto measured = invalid.measure({});
+    check(!measured && measured.error() == TreeError::INVALID_ARGUMENT, "invalid custom glyph rejected");
+  }
+}
+
+void sliderPartPaint() {
+  auto scheduler = take(Scheduler::create());
+  auto tree = take(WidgetTree::create(*scheduler));
+  auto root = take(tree->root());
+  auto node = take(tree->emplace<Slider>(root, WidthPolicy{}, SliderOptions{.glyphs = SliderGlyphs{".", "=", "@"}}));
+  auto router = take(EventRouter::create(*tree));
+  std::shared_ptr<Property<NumericValue>> model =
+    take(Property<NumericValue>::create(*tree, node, take(NumericValue::create(50)), Invalidation::PAINT));
+  auto binding = take(bindSlider(*tree, *router, node, model, [](SliderResult) {
+  }));
+  StyleEngine styles(*tree);
+  take(styles.bind(node, {.type = "Slider"}));
+  take(styles.replacePss("Slider {slider-track-foreground:#010203;slider-fill-foreground:#040506;"
+                         "slider-thumb-foreground:#070809;slider-thumb-bold:true;}"
+                         "Slider:focused {slider-thumb-foreground:#0a0b0c;slider-thumb-bold:false;}"
+                         "Slider:disabled {slider-thumb-foreground:#0d0e0f;}"
+                         "Slider:read-only {slider-fill-foreground:#101112;}"));
+  const auto rect = take(CellRect::from({}, {5, 1}));
+  bool testFocus{};
+  const auto paint = [&] {
+    take(syncControl(*tree, node, testFocus ? Node<Widget>(node) : Node<Widget>{}));
+    SliderPaintCapture capture;
+    take(tree->frame([&] {
+      take(layoutTree(*tree, root, rect, rect));
+      take(tree->paint(node, capture));
+    }));
+    return capture;
+  };
+  auto normal = paint();
+  if (normal.styles.size() != 5) {
+    check(false, "slider emits one glyph per cell");
+    return;
+  }
+  check(normal.styles[0].foreground == RgbColor{4, 5, 6} && normal.styles[2].foreground == RgbColor{7, 8, 9} &&
+          normal.styles[2].bold && normal.styles[4].foreground == RgbColor{1, 2, 3},
+        "slider paints independent part colors");
+  take(router->setFocus(node));
+  testFocus = true;
+  auto focused = paint();
+  if (focused.styles.size() != 5) {
+    check(false, "focused slider emits one glyph per cell");
+    return;
+  }
+  check(focused.styles[2].foreground == RgbColor{10, 11, 12} && !focused.styles[2].bold,
+        "focused thumb style respects explicit false");
+  take(tree->setEnabled(node, false));
+  auto disabled = paint();
+  if (disabled.styles.size() != 5) {
+    check(false, "disabled slider emits one glyph per cell");
+    return;
+  }
+  check(disabled.styles[2].foreground == RgbColor{13, 14, 15}, "disabled thumb style is selected");
+  take(tree->setEnabled(node, true));
+  take(setSliderReadOnly(*tree, node, true));
+  take(styles.refresh());
+  auto readOnly = paint();
+  if (readOnly.styles.size() != 5) {
+    check(false, "read-only slider emits one glyph per cell");
+    return;
+  }
+  check(readOnly.styles[0].foreground == RgbColor{16, 17, 18}, "read-only selector matches after refresh");
 }
 
 void numericValidation() {
@@ -651,6 +773,44 @@ void initializationAndErrorPreservation() {
 }
 
 void resourceParity() {
+  struct AppearanceCase {
+    std::string_view source;
+    std::vector<std::string> expected;
+  };
+
+  const AppearanceCase appearances[]{
+    {"scene{Slider{value=50 preferredWidth=5 skin=\"rounded\"}}", {"━", "━", "◉", "┄", "┄"}},
+    {"scene{Slider{value=50 preferredWidth=5 skin=\"rounded\" glyphs.track=\".\" glyphs.fill=\"=\" "
+     "glyphs.thumb=\"@\"}}",
+     {"=", "=", "@", ".", "."}},
+    {"scene{Styled{value=50 preferredWidth=5 skin=\"line\"}}", {"━", "━", "●", "─", "─"}},
+    {"scene{Styled{value=50 preferredWidth=5 glyphs.track=\".\" glyphs.fill=\"=\" glyphs.thumb=\"@\"}}",
+     {"=", "=", "@", ".", "."}}};
+
+  for (const auto &appearance : appearances) {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    ui::SceneResourceOptions options;
+
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    take(options.registry.add<Slider>("Styled", [](ui::SceneResourceArguments) {
+      return ui::slider().skin("blocks");
+    }));
+    auto node = take(ui::mount(*owner, ui::resource(appearance.source, options)));
+
+    take(owner->prepare(*app, {5, 1}));
+
+    SliderPaintCapture capture;
+
+    take(app->tree().frame([&] {
+      const auto bounds = take(CellRect::from({}, {5, 1}));
+
+      take(layoutTree(app->tree(), app->root(), bounds, bounds));
+      take(app->tree().paint(node, capture));
+    }));
+    check(capture.glyphs == appearance.expected,
+          "resource skin and custom glyphs reach built-in and registered Slider factories");
+  }
   for (const bool invalidRange : {false, true}) {
     auto app = take(Application::create());
     auto owner = take(ManagedScene::create(*app));
@@ -778,6 +938,29 @@ void resourceParity() {
     check(!mounted && mounted.error().numeric == NumericError::INITIAL_CONFLICT &&
             take(source.snapshot())->value.value() == 25,
           "custom resource factory cannot silently overwrite external numeric source, even with equal value");
+  }
+}
+
+void declarativeGlyphErrors() {
+  {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    auto mounted = ui::mount(*owner, ui::slider().glyphs({".", "=", "ab"}));
+    check(!mounted, "invalid custom glyph fails before declarative mount");
+  }
+  {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    auto mounted = ui::mount(*owner, ui::slider().skin("unknown").glyphs({".", "=", "@"}));
+    check(!mounted, "unknown skin fails before declarative mount even with custom glyphs");
+  }
+  {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    auto mounted = ui::mount(*owner, ui::resource("scene{Slider{glyphs.track=\".\"}}", options));
+    check(!mounted, "incomplete resource glyph tuple fails");
   }
 }
 
@@ -1002,6 +1185,8 @@ void deletingSceneCallbackAdmission() {
 } // namespace
 
 int main() {
+  sliderGlyphs();
+  sliderPartPaint();
   numericValidation();
   numericInput();
   numericOracle();
@@ -1019,6 +1204,7 @@ int main() {
   managedModelAndProperty();
   initializationAndErrorPreservation();
   resourceParity();
+  declarativeGlyphErrors();
   semanticNumericErrors();
   numericOnlyCaptionCapability();
   emptyNumericCallbacks();

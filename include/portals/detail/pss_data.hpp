@@ -80,6 +80,21 @@ enum class PssProperty {
   SCROLLBAR_THUMB_SINGLE_BOLD,             ///< Thumb single bold.
   SCROLLBAR_THUMB_SINGLE_ITALIC,           ///< Thumb single italic.
   SCROLLBAR_THUMB_SINGLE_UNDERLINE,        ///< Thumb single underline.
+  SLIDER_TRACK_FOREGROUND,                 ///< Slider track foreground.
+  SLIDER_TRACK_BACKGROUND,                 ///< Slider track background.
+  SLIDER_TRACK_BOLD,                       ///< Slider track bold.
+  SLIDER_TRACK_ITALIC,                     ///< Slider track italic.
+  SLIDER_TRACK_UNDERLINE,                  ///< Slider track underline.
+  SLIDER_FILL_FOREGROUND,                  ///< Slider fill foreground.
+  SLIDER_FILL_BACKGROUND,                  ///< Slider fill background.
+  SLIDER_FILL_BOLD,                        ///< Slider fill bold.
+  SLIDER_FILL_ITALIC,                      ///< Slider fill italic.
+  SLIDER_FILL_UNDERLINE,                   ///< Slider fill underline.
+  SLIDER_THUMB_FOREGROUND,                 ///< Slider thumb foreground.
+  SLIDER_THUMB_BACKGROUND,                 ///< Slider thumb background.
+  SLIDER_THUMB_BOLD,                       ///< Slider thumb bold.
+  SLIDER_THUMB_ITALIC,                     ///< Slider thumb italic.
+  SLIDER_THUMB_UNDERLINE,                  ///< Slider thumb underline.
   GLYPH_PROFILE,                           ///< Named base glyph map.
   GLYPH_FALLBACK,                          ///< Portable admission fallback.
   SCROLLBAR_HORIZONTAL_TRACK_GLYPH,        ///< Owning runtime literal glyph.
@@ -118,7 +133,7 @@ enum class PssProperty {
 /** @brief Number of supported PSS v0 properties. */
 inline constexpr std::size_t PSS_PROPERTY_COUNT = static_cast<std::size_t>(PssProperty::ROLE_UNDERLINE) + 1;
 /** @brief Scalar-only prefix retained by compile-time PSS descriptors. */
-inline constexpr std::size_t PSS_SCALAR_PROPERTY_COUNT = 71;
+inline constexpr std::size_t PSS_SCALAR_PROPERTY_COUNT = static_cast<std::size_t>(PssProperty::GLYPH_FALLBACK) + 1;
 /** @brief Marker for an absent effective declaration occurrence. */
 inline constexpr std::size_t NO_PSS_DECLARATION = std::numeric_limits<std::size_t>::max();
 /** @brief Maximum owned ASCII bytes retained in an error subject. */
