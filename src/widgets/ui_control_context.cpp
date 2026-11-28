@@ -428,7 +428,8 @@ constexpr Mask CHECK_MASK = SIZE_MASK | TEXT_MASK | propertyMask(5, 6);
 constexpr Mask SWITCH_MASK = CHECK_MASK | propertyMask(8);
 constexpr Mask LAYOUT_MASK = SIZE_MASK | propertyMask(4, 22, 23, 24, 25, 30, 31, 32);
 constexpr Mask EDIT_MASK = SIZE_MASK | TEXT_MASK | propertyMask(7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 33, 34, 35, 36);
-constexpr Mask SPIN_BOX_MASK = EDIT_MASK | propertyMask(40, 41, 42, SLIDER_STEP_PROPERTY, SLIDER_PAGE_STEPS_PROPERTY);
+constexpr Mask SPIN_BOX_MASK =
+  EDIT_MASK | propertyMask(40, 41, 42, SLIDER_STEP_PROPERTY, SLIDER_PAGE_STEPS_PROPERTY, 281);
 constexpr Mask CHOICE_MASK = EDIT_MASK | propertyMask(230);
 constexpr Mask FORM_FIELD_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(200, 216, 217, 218);
 constexpr Mask FIND_BAR_MASK = EDIT_MASK | LAYOUT_MASK | propertyMask(219, 220, 221, 222, 223, 224);
@@ -473,8 +474,8 @@ constexpr auto GAUGE_SCHEMA =
                            PROPERTIES[41], PROPERTIES[42], PROPERTIES[43]}));
 constexpr auto SLIDER_SCHEMA = withFrame(std::to_array(
   {PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[39], PROPERTIES[40], PROPERTIES[41],
-   PROPERTIES[42], PROPERTIES[43], PROPERTIES[SLIDER_STEP_PROPERTY], PROPERTIES[SLIDER_PAGE_STEPS_PROPERTY], PROPERTIES[281], PROPERTIES[282],
-   PROPERTIES[283], PROPERTIES[284]}));
+   PROPERTIES[42], PROPERTIES[43], PROPERTIES[SLIDER_STEP_PROPERTY], PROPERTIES[SLIDER_PAGE_STEPS_PROPERTY],
+   PROPERTIES[281], PROPERTIES[282], PROPERTIES[283], PROPERTIES[284]}));
 constexpr auto SPINNER_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[39], PROPERTIES[193],
                            PROPERTIES[194], PROPERTIES[195], PROPERTIES[196], PROPERTIES[197], PROPERTIES[198],
@@ -572,10 +573,11 @@ constexpr auto EDIT_SCHEMA = withFrame(
                  PROPERTIES[9], PROPERTIES[10], PROPERTIES[11], PROPERTIES[12], PROPERTIES[13], PROPERTIES[14],
                  PROPERTIES[15], PROPERTIES[16], PROPERTIES[33], PROPERTIES[34], PROPERTIES[35], PROPERTIES[36]}));
 constexpr auto SPIN_BOX_SCHEMA = [] {
-  std::array<ControlPropertyDescriptor, EDIT_SCHEMA.size() + 5> schema{};
+  std::array<ControlPropertyDescriptor, EDIT_SCHEMA.size() + 6> schema{};
   std::ranges::copy(EDIT_SCHEMA, schema.begin());
   std::size_t index = EDIT_SCHEMA.size();
-  for (const auto property : std::array<std::size_t, 5>{40, 41, 42, SLIDER_STEP_PROPERTY, SLIDER_PAGE_STEPS_PROPERTY}) {
+  for (const auto property :
+       std::array<std::size_t, 6>{40, 41, 42, SLIDER_STEP_PROPERTY, SLIDER_PAGE_STEPS_PROPERTY, 281}) {
     schema[index++] = PROPERTIES[property];
   }
   return schema;
@@ -1120,16 +1122,15 @@ ControlContextError exceptionError() noexcept {
   X(documentSettings().maxAutoHighlightBytes, 279)                                                                     \
   X(documentSettings().tailWorkTurns, 280)
 
-#define PORTALS_SLIDER_LEAVES(X) \
-  X(sliderSkin, 281) \
-  X(sliderTrack, 282) \
-  X(sliderFill, 283) \
+#define PORTALS_SLIDER_LEAVES(X)                                                                                       \
+  X(sliderSkin, 281)                                                                                                   \
+  X(sliderTrack, 282)                                                                                                  \
+  X(sliderFill, 283)                                                                                                   \
   X(sliderThumb, 284)
 
 #define LEAF_INDEX(field, index) index,
-constexpr auto LEAF_INDICES =
-  std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX) PORTALS_DOCUMENT_LEAVES(LEAF_INDEX)
-                               PORTALS_SLIDER_LEAVES(LEAF_INDEX)});
+constexpr auto LEAF_INDICES = std::to_array<std::size_t>(
+  {PORTALS_CONTROL_LEAVES(LEAF_INDEX) PORTALS_DOCUMENT_LEAVES(LEAF_INDEX) PORTALS_SLIDER_LEAVES(LEAF_INDEX)});
 #undef LEAF_INDEX
 static_assert(LEAF_INDICES.size() == detail::CONTROL_PROPERTY_COUNT);
 static_assert([] {

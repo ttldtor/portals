@@ -7,6 +7,11 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Added
 
+- SpinBox adds standard, compact and arrow button skins through the fluent API and
+  loaded scenes. The existing editor and step-button classes remain independently
+  stylable; both buttons also share the `spin-box-button` class. The complete
+  order-settings example demonstrates all skins, availability states and two themes.
+
 - Slider recipes add named ASCII, line, rounded and block skins and owning custom
   track/fill/thumb glyphs, with equivalent loaded-scene settings. Independent PSS
   paint leaves style each part through the existing atomic cascade. Token-based
@@ -50,6 +55,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
   implicit filesystem or UI-thread I/O.
 
 ### Changed
+
+- SpinBox now uses visible `[ - ]` and `[ + ]` button contours by default. Its
+  intrinsic width grows from 10 to 18 cells; `.skin("compact")` retains the former
+  one-cell step buttons. The three-child structure, editor focus stop and numeric
+  editing/validation/model behavior remain unchanged. Arrow glyphs use ASCII
+  fallbacks when the receiving width policy cannot display them in one cell.
 
 - Virtual rows now provide one outer Tab stop and separate row-navigation and
   control-editing modes. Up/Down move the current row instead of only shifting

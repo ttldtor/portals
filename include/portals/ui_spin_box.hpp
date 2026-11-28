@@ -24,7 +24,27 @@ inline Description<SpinBox> spinBoxRecipe(ControlSettings arguments, std::option
           return std::unexpected(numericSettingsError(parent, initial.error(), settings, "SpinBox"));
         }
       }
-      return scene.emplace<SpinBox>(parent);
+      SpinBoxSkin skin = SpinBoxSkin::STANDARD;
+      if (settings.sliderSkin) {
+        constexpr std::array<std::string_view, 3> SKIN_NAMES{"standard", "compact", "arrows"};
+        const auto found = std::ranges::find(SKIN_NAMES, *settings.sliderSkin);
+        if (found == SKIN_NAMES.end()) {
+          auto diagnostic = std::make_shared<ControlContextDiagnostic>();
+          diagnostic->path = "SpinBox.skin";
+          diagnostic->origin = settings.origin;
+          const auto origin =
+            std::ranges::find(settings.origins, std::string_view("skin"), &ControlPropertyOrigin::path);
+          if (origin != settings.origins.end()) {
+            diagnostic->origin = origin->source;
+          }
+
+          return std::unexpected(
+            controlContextError({ControlContextErrorCode::INVALID_VALUE, std::move(diagnostic)}, parent));
+        }
+        skin = static_cast<SpinBoxSkin>(found - SKIN_NAMES.begin());
+      }
+
+      return scene.emplace<SpinBox>(parent, DEFAULT_CONTENT_POLICY, skin);
     });
   return Access::controlSetup(
     Access::controlArguments(Access::configuredControl(std::move(description), "SpinBox"), std::move(arguments)),

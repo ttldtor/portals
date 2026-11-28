@@ -7,7 +7,21 @@
 namespace portals {
 namespace {
 constexpr std::int32_t SPIN_BOX_EDITOR_CELLS = 8;
-constexpr std::int32_t SPIN_BOX_ARROW_CELLS = 1;
+constexpr std::int32_t SPIN_BOX_COMPACT_BUTTON_CELLS = 1;
+constexpr std::int32_t SPIN_BOX_BUTTON_CELLS = 5;
+
+std::expected<GraphemeText, TreeError> spinBoxCaption(std::string_view symbol, std::string_view fallback,
+                                                      WidthPolicy width) {
+  auto text = GraphemeText::from(symbol, width);
+  if (!text) {
+    return std::unexpected(TreeError::INVALID_ARGUMENT);
+  }
+  if (text->measure() != 1) {
+    text = GraphemeText::from(fallback, width);
+  }
+
+  return text ? std::expected<GraphemeText, TreeError>(std::move(*text)) : std::unexpected(TreeError::INVALID_ARGUMENT);
+}
 
 ManagedError numericFailure(TreeError cause, NodeId node = {}) {
   return {ManagedPhase::STATE, node, cause, {}, {}};
@@ -526,6 +540,25 @@ std::expected<void, ManagedError> ManagedScene::bind(Node<SpinBox> node, Numeric
     return std::unexpected(std::move(failure));
   };
   try {
+    SpinBoxSkin skin{};
+    auto inspected = app_.tree().read(node, [&](const SpinBox &spin) {
+      skin = spin.skin();
+    });
+    if (!inspected) {
+      return fail(error(ManagedPhase::BIND, node, inspected.error()));
+    }
+    if (skin != SpinBoxSkin::STANDARD && skin != SpinBoxSkin::COMPACT && skin != SpinBoxSkin::ARROWS) {
+      return fail(error(ManagedPhase::BIND, node, TreeError::INVALID_ARGUMENT));
+    }
+    const bool compact = skin == SpinBoxSkin::COMPACT;
+    const auto buttonCells = compact ? SPIN_BOX_COMPACT_BUTTON_CELLS : SPIN_BOX_BUTTON_CELLS;
+    const auto chrome = compact ? ButtonChrome::NONE : ButtonChrome::BRACKETS;
+    auto downText = spinBoxCaption(skin == SpinBoxSkin::ARROWS ? "▼" : "-", "v", widthPolicy());
+    auto upText = spinBoxCaption(skin == SpinBoxSkin::ARROWS ? "▲" : "+", "^", widthPolicy());
+    if (!downText || !upText) {
+      return fail(error(ManagedPhase::BIND, node, !downText ? downText.error() : upText.error()));
+    }
+
     auto record = std::make_shared<detail::ManagedSpinBoxRecord>();
     auto editing = std::make_shared<EditorEventChain>();
     auto editor =
@@ -536,32 +569,33 @@ std::expected<void, ManagedError> ManagedScene::bind(Node<SpinBox> node, Numeric
       return fail(editor.error());
     }
     parts[0] = *editor;
-    auto down = emplace<Button>(node, *GraphemeText::from("-", widthPolicy()), ControlStyle{},
-                                SizePolicy{.width = {.minimum = SPIN_BOX_ARROW_CELLS,
-                                                     .preferred = SPIN_BOX_ARROW_CELLS,
-                                                     .maximum = SPIN_BOX_ARROW_CELLS,
-                                                     .mode = SizeMode::FIXED},
-                                           .height = {.mode = SizeMode::CONTENT}},
-                                ButtonChrome::NONE);
+    auto down = emplace<Button>(
+      node, std::move(*downText), ControlStyle{},
+      SizePolicy{
+        .width = {.minimum = buttonCells, .preferred = buttonCells, .maximum = buttonCells, .mode = SizeMode::FIXED},
+        .height = {.mode = SizeMode::CONTENT}},
+      chrome);
     if (!down) {
       return fail(down.error());
     }
     parts[1] = *down;
-    auto up = emplace<Button>(node, *GraphemeText::from("+", widthPolicy()), ControlStyle{},
-                              SizePolicy{.width = {.minimum = SPIN_BOX_ARROW_CELLS,
-                                                   .preferred = SPIN_BOX_ARROW_CELLS,
-                                                   .maximum = SPIN_BOX_ARROW_CELLS,
-                                                   .mode = SizeMode::FIXED},
-                                         .height = {.mode = SizeMode::CONTENT}},
-                              ButtonChrome::NONE);
+    auto up = emplace<Button>(
+      node, std::move(*upText), ControlStyle{},
+      SizePolicy{
+        .width = {.minimum = buttonCells, .preferred = buttonCells, .maximum = buttonCells, .mode = SizeMode::FIXED},
+        .height = {.mode = SizeMode::CONTENT}},
+      chrome);
     if (!up) {
       return fail(up.error());
     }
     parts[2] = *up;
     for (const auto part : {Node<Widget>(*editor), Node<Widget>(*down), Node<Widget>(*up)}) {
-      auto styled = classes(part, {part == Node<Widget>(*editor) ? "spin-box-editor"
-                                   : part == Node<Widget>(*down) ? "spin-box-decrease"
-                                                                 : "spin-box-increase"});
+      auto partClasses =
+        part == Node<Widget>(*editor)
+          ? std::vector<std::string>{"spin-box-editor"}
+          : std::vector<std::string>{part == Node<Widget>(*down) ? "spin-box-decrease" : "spin-box-increase",
+                                     "spin-box-button"};
+      auto styled = classes(part, std::move(partClasses));
       if (!styled) {
         return fail(styled.error());
       }

@@ -5,13 +5,23 @@
 #include <portals/numeric.hpp>
 
 namespace portals {
+/** @brief Immutable presentation of the two numeric step buttons. */
+enum class SpinBoxSkin {
+  STANDARD, ///< Five-cell bracketed minus/plus buttons; the default.
+  COMPACT,  ///< Legacy one-cell minus/plus buttons.
+  ARROWS    ///< Bracketed down/up arrows with ASCII width fallback.
+};
+
 /** @brief Numeric editor with one ordinary LineEdit and two nonfocusable step buttons.
  * The containing tree owns all three child nodes. NumericValue is the only committed source.
  */
 class SpinBox : public Row {
 public:
-  /** @param policy Root sizing constraints; the ordinary editor prefers eight cells plus two arrows. */
-  explicit SpinBox(SizePolicy policy = DEFAULT_CONTENT_POLICY) : Row({}, policy) {
+  /** @param policy Root sizing constraints; the editor prefers eight cells.
+   * @param skin Button presentation retained until binding; invalid values fail measure/bind.
+   */
+  explicit SpinBox(SizePolicy policy = DEFAULT_CONTENT_POLICY, SpinBoxSkin skin = SpinBoxSkin::STANDARD)
+      : Row({}, policy), skin_(skin) {
   }
 
   /** @return The one editor identity; empty until managed binding succeeds. */
@@ -19,8 +29,23 @@ public:
     return editor_;
   }
 
+  /** @return Button presentation; changing it requires remounting. */
+  SpinBoxSkin skin() const noexcept {
+    return skin_;
+  }
+
+  /** @param available Offered extent. @return Row size or an invalid-skin error. */
+  std::expected<CellSize, TreeError> measure(CellSize available) override {
+    if (skin_ != SpinBoxSkin::STANDARD && skin_ != SpinBoxSkin::COMPACT && skin_ != SpinBoxSkin::ARROWS) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+
+    return Row::measure(available);
+  }
+
 private:
   friend class ManagedScene;
+  SpinBoxSkin skin_;
   Node<LineEdit> editor_;
 };
 

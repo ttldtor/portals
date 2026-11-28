@@ -303,8 +303,8 @@ private:
         patch.readOnly = source.readOnly;
         patch.preferredWidth = source.preferredWidth;
         patch.maxPaintCells = source.maxPaintCells;
+        patch.sliderSkin = source.sliderSkin;
         if constexpr (std::derived_from<T, Slider>) {
-          patch.sliderSkin = source.sliderSkin;
           patch.sliderTrack = source.sliderTrack;
           patch.sliderFill = source.sliderFill;
           patch.sliderThumb = source.sliderThumb;
