@@ -2,7 +2,7 @@
 
 [Русская версия](ru/spin-boxes.md) · [LineEdit](line-edit.md) · [Sliders](sliders.md)
 
-Choose SpinBox for a bounded finite number that users can type or adjust by steps; a [Slider](sliders.md) instead emphasizes position in a range. The [SpinBox API](../include/portals/spin_box.hpp) and [numeric source](../include/portals/numeric.hpp) document checked values and range constraints. The preview below shows the larger numeric-form composition.
+Choose SpinBox for a bounded finite number that users can type or adjust by steps; a [Slider](sliders.md) instead emphasizes position in a range. The [SpinBox API](../include/portals/spin_box.hpp) and [numeric source](../include/portals/numeric.hpp) document checked values and range constraints. The application below demonstrates the available appearances.
 
 Use `ui::spinBox()` to edit a finite number as text or with step buttons.
 The default value is zero, the inclusive range is 0..100, the increment is one,
@@ -12,25 +12,36 @@ and the publication mode is `EditMode::IMMEDIATE`.
 
 \include guide_spin_box.cpp
 
-Build this program with `cmake --build <build> --target portals_docs_spin_box`.
-For an installed SDK, use the same source with [Package setup](package.md).
-The [numeric form example](../examples/numeric_form/main.cpp) shows three fields,
-deferred publication, reset and a theme selector for Nord and Latte. The step
-buttons use the selected theme's default styling. Build it with target
-`portals_numeric_form`. Both programs use `ui::runApp()` for terminal restoration
-and scene cleanup.
+The [complete source](examples/guide_spin_box.cpp) shows three skins, read-only
+and disabled fields, reset, and a Nord/Latte theme selector. Build it with
+`cmake --build <build> --target portals_docs_spin_box`. For an installed SDK,
+use the same source with [Package setup](package.md). The
+[numeric form example](../examples/numeric_form/main.cpp) explores deferred
+publication and shared numeric behavior; its target is `portals_numeric_form`.
+Both programs use `ui::runApp()` for terminal restoration and scene cleanup.
 
-![Native numeric form session with immediate quantity updates, deferred price and discount drafts, Reset, and Nord/Latte theme selection](images/spin-boxes.gif)
+![Order settings with SpinBox skins in Nord](images/spinbox-skins-dark.gif)
+![Order settings with SpinBox skins in Latte](images/spinbox-skins-light.gif)
 
-Static frames: [Nord dark theme](images/spin-boxes-dark.png) · [Latte light theme](images/spin-boxes-light.png).
+## Skins and structure
+
+Select an appearance with `.skin("standard")`, `.skin("compact")`, or
+`.skin("arrows")`. The typed values are `SpinBoxSkin::STANDARD`,
+`SpinBoxSkin::COMPACT`, and `SpinBoxSkin::ARROWS`. The native constructor accepts
+`SpinBox(SizePolicy = DEFAULT_CONTENT_POLICY, SpinBoxSkin = SpinBoxSkin::STANDARD)`.
+A skin is fixed at mount time; remount the control to change it.
+
+Each skin has an eight-cell preferred editor. Standard (the default) has two
+five-cell bracketed buttons, `[ - ]` and `[ + ]`; compact retains one-cell `-`
+and `+` buttons for a ten-cell intrinsic width. Arrows uses `[ ▼ ]` and `[ ▲ ]`;
+when the active `WidthPolicy` does not give the arrows one cell, it uses `v` and
+`^` instead. These are intrinsic sizes; layout constraints may allocate more space.
+All skins have exactly three children: a LineEdit and two buttons. Tab visits only
+the editor; the buttons are not focus stops. The numeric model and validation are
+the same for every skin. The editor retains its selection, Unicode text limits,
+clipboard policy and [Undo/Redo history](editor-history.md).
 
 ## Draft and numeric source
-
-A SpinBox contains one ordinary LineEdit and two plain `-`/`+` buttons. Tab visits
-only the editor. The editor keeps its existing selection, Unicode text limits,
-clipboard policy and [Undo/Redo history](editor-history.md). Its preferred width
-is eight cells; the two buttons each occupy one cell. Ordinary sizing and frames
-apply to the containing row.
 
 `ManagedScene::remove` rejects removal of a bound SpinBox's editor or either step
 button with `INVALID_ARGUMENT`; remove the whole SpinBox instead. Removing an
@@ -96,22 +107,22 @@ point; an invalid draft is preserved. A clean field steps from the complete sour
 value, including an off-grid fraction. Steps saturate at the bounds and follow the
 current edit mode. Each step is a separate ordinary history operation.
 
-`.readOnly()` blocks user input, history mutation and steps. Programmatic text,
+`.readOnly()` blocks user input, history mutation and steps; it makes the control read-only rather than disabled. Programmatic text,
 numeric draft and external model writes remain available. Disabled ancestry also
 blocks user mutation.
 
 The registered `SpinBox` resource accepts numeric `value`, `minimum`, `maximum`,
-`step`, `pageSteps`, `readOnly`, `editMode`, ordinary text/history/limits and
+`step`, `pageSteps`, `readOnly`, `editMode`, `skin`, ordinary text/history/limits and
 sizing/frame properties. Sparse settings preserve absent factory leaves; explicit
 false settings remain overrides. Numeric failures preserve the causal property
 origin. `SpinBox` is the natural root style type. Its real children use `LineEdit`
 and `Button` with classes `spin-box-editor`, `spin-box-decrease` and
-`spin-box-increase`; ordinary theme, class and ID rules apply.
+`spin-box-increase`; both buttons also have `spin-box-button`. Ordinary theme, class and ID rules apply. For example, `SpinBox{skin="arrows", value=10}` selects the arrows skin in a resource.
 
 
 ## Styling reference {#spin-boxes-styling-reference}
 
-`SpinBox` is a layout root, not the painted editor. Its children are a `LineEdit` and two `Button` widgets. Target the confirmed classes `.spin-box-editor`, `.spin-box-decrease`, and `.spin-box-increase`; the latter buttons display fixed `-` and `+` captions with no PSS glyph property. The editor paints normal/focused/disabled, selected and caret as described in [LineEdit](line-edit.md#line-edit-styling-reference); buttons paint normal/focused/disabled. Editor manual defaults come from `LineEditOptions`, buttons use `ControlStyle{}`. Style the children independently; a root declaration does not propagate to them.
+`SpinBox` is a layout root, not the painted editor. Its children are a `LineEdit` and two `Button` widgets. Target the confirmed classes `.spin-box-editor`, `.spin-box-button`, `.spin-box-decrease`, and `.spin-box-increase`. The skin determines button captions; PSS has no glyph property for changing them. The editor paints normal/focused/disabled, selected and caret as described in [LineEdit](line-edit.md#line-edit-styling-reference); buttons paint normal/focused/disabled. Editor manual defaults come from `LineEditOptions`, buttons use `ControlStyle{}`. Style the children independently; a root declaration does not propagate to them.
 
 The common paint properties apply to each painted target:
 
@@ -130,6 +141,5 @@ Layout properties `width` and `height` accept nonnegative cell counts, `auto`, `
 ```pss
 .spin-box-editor { min-width: 8; }
 .spin-box-editor:focused { background: #245070; }
-.spin-box-decrease { foreground: #62b4d7; }
-.spin-box-increase { foreground: #62b4d7; }
+.spin-box-button { foreground: #62b4d7; }
 ```

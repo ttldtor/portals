@@ -339,26 +339,44 @@ public:
     return std::move(*this).scalarSettings({.step = amount});
   }
 
-  /** @param name Built-in slider skin name: ascii, line, rounded or blocks.
-   * @return Consuming Slider recipe; invalid names fail during mount.
+  /** @param name Numeric skin: Slider ascii/line/rounded/blocks; SpinBox standard/compact/arrows.
+   * @return Consuming numeric recipe; invalid names fail during mount.
    */
-  Description &&skin(std::string_view name) && requires std::same_as<T, Slider> {
+  Description &&skin(std::string_view name) &&
+    requires(std::same_as<T, Slider> || std::same_as<T, SpinBox>)
+  {
     return std::move(*this).scalarSettings({.sliderSkin = std::string(name)});
   }
 
   /** @param value Typed built-in slider skin.
    * @return Consuming Slider recipe; invalid enum values fail during mount.
    */
-  Description &&skin(SliderSkin value) && requires std::same_as<T, Slider> {
+  Description &&skin(SliderSkin value) &&
+    requires std::same_as<T, Slider>
+  {
     constexpr std::array<std::string_view, 4> SKIN_NAMES{"ascii", "line", "rounded", "blocks"};
     const auto index = static_cast<std::size_t>(value);
+    return std::move(*this).skin(index < SKIN_NAMES.size() ? SKIN_NAMES[index] : std::string_view{});
+  }
+
+  /** @param value Typed SpinBox presentation.
+   * @return Consuming recipe; invalid enum values fail during mount.
+   */
+  Description &&skin(SpinBoxSkin value) &&
+    requires std::same_as<T, SpinBox>
+  {
+    constexpr std::array<std::string_view, 3> SKIN_NAMES{"standard", "compact", "arrows"};
+    const auto index = static_cast<std::size_t>(value);
+
     return std::move(*this).skin(index < SKIN_NAMES.size() ? SKIN_NAMES[index] : std::string_view{});
   }
 
   /** @param value Owning one-cell graphemes, checked against the receiving width policy.
    * @return Consuming Slider recipe; all three glyphs are retained independently of the caller.
    */
-  Description &&glyphs(SliderGlyphs value) && requires std::same_as<T, Slider> {
+  Description &&glyphs(SliderGlyphs value) &&
+    requires std::same_as<T, Slider>
+  {
     return std::move(*this).scalarSettings({.sliderTrack = std::move(value.track),
                                             .sliderFill = std::move(value.fill),
                                             .sliderThumb = std::move(value.thumb)});

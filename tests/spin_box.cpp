@@ -4,6 +4,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <limits>
+#include <portals/render.hpp>
 #include <portals/spin_box.hpp>
 #include <portals/ui.hpp>
 #include <vector>
@@ -383,6 +384,152 @@ void resourcesAndDraftGet() {
   }
 }
 
+struct SpinBoxPaintCapture : PaintContext {
+  std::int32_t width;
+  WidthPolicy policy;
+  std::string text;
+
+  SpinBoxPaintCapture(std::int32_t cells, WidthPolicy receiving) : width(cells), policy(receiving) {
+  }
+
+  std::expected<void, TreeError> submit(std::span<const RenderCommand> commands) override {
+    auto rendered = renderFullFrame({width, 1}, commands, policy);
+    if (!rendered) {
+      return std::unexpected(TreeError::CALLBACK_FAILED);
+    }
+    for (std::int32_t column = 0; column < width; ++column) {
+      text += take(rendered->at({column, 0})).glyph;
+    }
+
+    return {};
+  }
+};
+
+void skinsAndResources() {
+  for (const auto ambiguous : {AmbiguousWidth::NARROW, AmbiguousWidth::WIDE}) {
+    for (const auto skin : {SpinBoxSkin::STANDARD, SpinBoxSkin::COMPACT, SpinBoxSkin::ARROWS}) {
+      auto app = take(Application::create({.widthPolicy = {.ambiguous = ambiguous}}));
+      auto owner = take(ManagedScene::create(*app));
+      ui::Ref<SpinBox> reference;
+      take(ui::mount(*owner, ui::spinBox(reference, 25).skin(skin)));
+      const auto root = reference.node();
+      const auto parts = take(app->tree().inspect(root)).children;
+      check(parts.size() == 3 && parts.front() == Node<Widget>(reference.lineEdit().node()),
+            "skin retains exactly one editor and two existing button identities");
+      take(app->tree().read(root, [&](const SpinBox &spin) {
+        check(spin.skin() == skin, "native root retains the selected skin");
+      }));
+      const auto viewport = take(CellRect::from({}, {40, 5}));
+      take(app->tree().frame([&] {
+        take(layoutTree(app->tree(), app->root(), viewport, viewport));
+      }));
+      const bool compact = skin == SpinBoxSkin::COMPACT;
+      check(take(app->tree().inspect(root)).geometry.local.size() == CellSize{compact ? 10 : 18, 1},
+            "skins preserve the editor width and reserve visible complete button contours");
+      for (std::size_t index = 1; index < parts.size(); ++index) {
+        take(owner->prepare(*app, {40, 5}));
+        take(app->tree().frame([&] {
+          take(layoutTree(app->tree(), app->root(), viewport, viewport));
+        }));
+        SpinBoxPaintCapture capture(compact ? 1 : 5, {.ambiguous = ambiguous});
+        take(app->tree().frame([&] {
+          take(app->tree().paint(parts[index], capture));
+        }));
+        std::string symbol = index == 1 ? "-" : "+";
+        if (skin == SpinBoxSkin::ARROWS) {
+          symbol = ambiguous == AmbiguousWidth::WIDE ? (index == 1 ? "v" : "^") : (index == 1 ? "▼" : "▲");
+        }
+        check(capture.text == (compact ? symbol : "[ " + symbol + " ]"),
+              "actual rendered cells keep the step symbol visible inside the contour with ASCII width fallback");
+        if (!compact) {
+          SpinBoxPaintCapture clipped(1, {.ambiguous = ambiguous});
+          take(app->tree().frame([&] {
+            take(app->tree().paint(parts[index], clipped));
+          }));
+          check(clipped.text == "[", "one-cell renderer viewport clips the real button without stray captions");
+        }
+        const auto bounds = take(app->tree().inspect(parts[index])).geometry.surface;
+        for (std::int32_t column = 0; column < bounds.size().width; ++column) {
+          const auto before = take(reference.value().get());
+          take(owner->prepare(*app, {40, 5}));
+          take(app->tree().frame([&] {
+            take(layoutTree(app->tree(), app->root(), viewport, viewport));
+          }));
+          const auto origin = bounds.origin();
+          take(app->router().dispatch(
+            MouseInputEvent{origin.x + column, origin.y, MouseButton::LEFT, MouseAction::PRESS}));
+          take(app->router().dispatch(
+            MouseInputEvent{origin.x + column, origin.y, MouseButton::LEFT, MouseAction::RELEASE}));
+          check(take(reference.value().get()) == before + (index == 1 ? -1 : 1),
+                "every allocated button cell, including its contour, steps once per mouse click");
+        }
+      }
+      take(app->router().setFocus(reference.lineEdit().node()));
+      take(app->router().invoke(parts[2], ActionEvent{Action::ACTIVATE}));
+      check(take(reference.value().get()) == 26, "all skins retain the same numeric increment action");
+      take(app->router().dispatch(KeyEvent{InputKey::TAB}));
+      check(take(app->router().focused()) == Node<Widget>(reference.lineEdit().node()),
+            "skin adds no keyboard focus stops");
+    }
+  }
+
+  for (const auto skin : {SpinBoxSkin::STANDARD, SpinBoxSkin::COMPACT, SpinBoxSkin::ARROWS}) {
+    for (const auto [readOnly, enabled] : {std::pair{true, true}, std::pair{false, false}}) {
+      auto app = take(Application::create());
+      auto owner = take(ManagedScene::create(*app));
+      ui::Ref<SpinBox> reference;
+      take(ui::mount(*owner, ui::spinBox(reference, 25).skin(skin).readOnly(readOnly).enabled(enabled)));
+      const auto parts = take(app->tree().inspect(reference.node())).children;
+      take(app->router().invoke(parts[2], ActionEvent{Action::ACTIVATE}));
+      check(take(reference.value().get()) == 25,
+            "read-only and disabled controls keep their numeric value in every skin");
+    }
+  }
+
+  for (const std::string skin : {"standard", "compact", "arrows"}) {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    ui::Ref<SpinBox> reference;
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    take(options.registry.add<SpinBox>("Amount", [=](ui::SceneResourceArguments) {
+      return ui::spinBox(reference, 25).skin("compact");
+    }));
+    take(ui::mount(*owner, ui::resource("scene{Amount{skin=\"" + skin + "\"}}", options)));
+    take(app->tree().read(reference.node(), [&](const SpinBox &spin) {
+      const auto expected = skin == "standard"  ? SpinBoxSkin::STANDARD
+                            : skin == "compact" ? SpinBoxSkin::COMPACT
+                                                : SpinBoxSkin::ARROWS;
+      check(spin.skin() == expected, "resource skin overrides the registered factory without losing its value");
+    }));
+    check(take(reference.value().get()) == 25, "presentation does not override the numeric source");
+  }
+
+  for (const std::string skin : {"invalid", "line"}) {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    ui::Ref<SpinBox> reference;
+    const auto mounted = ui::mount(*owner, ui::spinBox(reference, 1).skin(skin));
+    check(!mounted && reference.node() == Node<SpinBox>{},
+          "invalid or Slider-only skin fails before reference publication");
+  }
+  {
+    auto app = take(Application::create());
+    auto owner = take(ManagedScene::create(*app));
+    const auto mounted = ui::mount(*owner, ui::spinBox(1).skin(static_cast<SpinBoxSkin>(-1)));
+    check(!mounted, "invalid typed skin is rejected at mount");
+    SpinBox invalid(DEFAULT_CONTENT_POLICY, static_cast<SpinBoxSkin>(-1));
+    const auto size = invalid.measure({40, 5});
+    check(!size && size.error() == TreeError::INVALID_ARGUMENT, "native measurement rejects invalid typed skins");
+    ui::SceneResourceOptions options;
+    options.format = ui::SceneResourceFormat::CONFIGURATION;
+    const auto resource = ui::mount(*owner, ui::resource("scene{SpinBox{skin=\"invalid\"}}", options));
+    check(!resource && resource.error().sceneResource && resource.error().sceneResource->propertyPath &&
+            resource.error().sceneResource->propertyPath->ends_with(".skin"),
+          "invalid loaded skin retains its precise property origin");
+  }
+}
+
 void focusLayoutAndTypedEvents() {
   auto app = take(Application::create());
   auto owner = take(ManagedScene::create(*app));
@@ -394,7 +541,8 @@ void focusLayoutAndTypedEvents() {
     take(layoutTree(app->tree(), app->root(), viewport, viewport));
   }));
   auto geometry = take(app->tree().inspect(reference.node())).geometry;
-  check(geometry.local.size() == CellSize{10, 1}, "SpinBox intrinsic row is editor eight plus two one-cell buttons");
+  check(geometry.local.size() == CellSize{18, 1},
+        "SpinBox default row separates an eight-cell editor and two five-cell buttons");
   take(app->router().setFocus(editor.node()));
   take(app->router().dispatch(KeyEvent{InputKey::TAB}));
   check(take(app->router().focused()) == Node<Widget>(editor.node()), "arrows add no Tab stops");
@@ -610,6 +758,7 @@ int main() {
   legacyBindAllocationObservation();
   precommitAllocationBoundaries();
   resourcesAndDraftGet();
+  skinsAndResources();
   focusLayoutAndTypedEvents();
   proxyReporterRemoval();
   managedFacade();
