@@ -371,7 +371,11 @@ StyleSheet materialize(const CompactSheet<R, C, D, B> &description) {
     target.selector.id = description.text(rule.id);
     target.selector.state = rule.state;
     target.selector.readOnly = rule.readOnly;
-    target.declarations = rule.values;
+    // Occurrences already own every scalar. Replay their source order instead of storing a second
+    // expanded declaration set in every compact rule, including unused maximum-capacity staging rules.
+    for (const auto &declaration : description.declarations().subspan(rule.declarationBegin, rule.declarationCount)) {
+      portals::detail::assignPssDeclaration(declaration.property, declaration.value, target.declarations);
+    }
     target.selector.classes.reserve(rule.classCount);
 
     for (std::size_t index = 0; index < rule.classCount; ++index) {
@@ -595,7 +599,10 @@ template <class D, class P> consteval bool flatDeclarationTypeMatches() {
     D::KIND == Property::SCROLLBAR_THUMB_BACKGROUND || D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_ARROWS_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_ARROWS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
-    D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND;
+    D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND || D::KIND == Property::SLIDER_TRACK_FOREGROUND ||
+    D::KIND == Property::SLIDER_TRACK_BACKGROUND || D::KIND == Property::SLIDER_FILL_FOREGROUND ||
+    D::KIND == Property::SLIDER_FILL_BACKGROUND || D::KIND == Property::SLIDER_THUMB_FOREGROUND ||
+    D::KIND == Property::SLIDER_THUMB_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
   using Expected = std::conditional_t<
     D::KIND == Property::SCROLLBAR_TRACK_PATTERN, ScrollbarPattern,
@@ -774,6 +781,36 @@ constexpr bool pssPropertyPresent(PssProperty property, const StyleDeclarations 
     return value.scrollbarThumbPattern.has_value();
   case PssProperty::SCROLLBAR_ARROW_PATTERN:
     return value.scrollbarArrowPattern.has_value();
+  case PssProperty::SLIDER_TRACK_FOREGROUND:
+    return value.sliderTrack.foreground.has_value();
+  case PssProperty::SLIDER_TRACK_BACKGROUND:
+    return value.sliderTrack.background.has_value();
+  case PssProperty::SLIDER_TRACK_BOLD:
+    return value.sliderTrack.bold.has_value();
+  case PssProperty::SLIDER_TRACK_ITALIC:
+    return value.sliderTrack.italic.has_value();
+  case PssProperty::SLIDER_TRACK_UNDERLINE:
+    return value.sliderTrack.underline.has_value();
+  case PssProperty::SLIDER_FILL_FOREGROUND:
+    return value.sliderFill.foreground.has_value();
+  case PssProperty::SLIDER_FILL_BACKGROUND:
+    return value.sliderFill.background.has_value();
+  case PssProperty::SLIDER_FILL_BOLD:
+    return value.sliderFill.bold.has_value();
+  case PssProperty::SLIDER_FILL_ITALIC:
+    return value.sliderFill.italic.has_value();
+  case PssProperty::SLIDER_FILL_UNDERLINE:
+    return value.sliderFill.underline.has_value();
+  case PssProperty::SLIDER_THUMB_FOREGROUND:
+    return value.sliderThumb.foreground.has_value();
+  case PssProperty::SLIDER_THUMB_BACKGROUND:
+    return value.sliderThumb.background.has_value();
+  case PssProperty::SLIDER_THUMB_BOLD:
+    return value.sliderThumb.bold.has_value();
+  case PssProperty::SLIDER_THUMB_ITALIC:
+    return value.sliderThumb.italic.has_value();
+  case PssProperty::SLIDER_THUMB_UNDERLINE:
+    return value.sliderThumb.underline.has_value();
   case PssProperty::GLYPH_PROFILE:
     return value.glyphProfile.has_value();
   case PssProperty::GLYPH_FALLBACK:
@@ -1069,6 +1106,66 @@ constexpr PssValue pssScalar(PssProperty property, const StyleDeclarations &valu
     break;
   case PssProperty::SCROLLBAR_ARROW_PATTERN:
     result.pattern = static_cast<std::int32_t>(*value.scrollbarArrowPattern);
+
+    break;
+  case PssProperty::SLIDER_TRACK_FOREGROUND:
+    result.color = *value.sliderTrack.foreground;
+
+    break;
+  case PssProperty::SLIDER_TRACK_BACKGROUND:
+    result.color = *value.sliderTrack.background;
+
+    break;
+  case PssProperty::SLIDER_TRACK_BOLD:
+    result.boolean = *value.sliderTrack.bold;
+
+    break;
+  case PssProperty::SLIDER_TRACK_ITALIC:
+    result.boolean = *value.sliderTrack.italic;
+
+    break;
+  case PssProperty::SLIDER_TRACK_UNDERLINE:
+    result.boolean = *value.sliderTrack.underline;
+
+    break;
+  case PssProperty::SLIDER_FILL_FOREGROUND:
+    result.color = *value.sliderFill.foreground;
+
+    break;
+  case PssProperty::SLIDER_FILL_BACKGROUND:
+    result.color = *value.sliderFill.background;
+
+    break;
+  case PssProperty::SLIDER_FILL_BOLD:
+    result.boolean = *value.sliderFill.bold;
+
+    break;
+  case PssProperty::SLIDER_FILL_ITALIC:
+    result.boolean = *value.sliderFill.italic;
+
+    break;
+  case PssProperty::SLIDER_FILL_UNDERLINE:
+    result.boolean = *value.sliderFill.underline;
+
+    break;
+  case PssProperty::SLIDER_THUMB_FOREGROUND:
+    result.color = *value.sliderThumb.foreground;
+
+    break;
+  case PssProperty::SLIDER_THUMB_BACKGROUND:
+    result.color = *value.sliderThumb.background;
+
+    break;
+  case PssProperty::SLIDER_THUMB_BOLD:
+    result.boolean = *value.sliderThumb.bold;
+
+    break;
+  case PssProperty::SLIDER_THUMB_ITALIC:
+    result.boolean = *value.sliderThumb.italic;
+
+    break;
+  case PssProperty::SLIDER_THUMB_UNDERLINE:
+    result.boolean = *value.sliderThumb.underline;
 
     break;
   case PssProperty::GLYPH_PROFILE:

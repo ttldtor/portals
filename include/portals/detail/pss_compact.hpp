@@ -53,7 +53,6 @@ struct PssCompactRule {
   std::uint32_t classCount{};        ///< Number of conjunction classes.
   StyleState state{StyleState::ANY}; ///< Presentation-state predicate.
   bool readOnly{};                   ///< Orthogonal read-only predicate.
-  StyleDeclarations values;          ///< Last-winner scalar declarations.
   PssPosition selector;              ///< Original selector start.
   std::uint32_t declarationBegin{};  ///< First declaration occurrence index.
   std::uint32_t declarationCount{};  ///< All occurrences, including duplicates.
@@ -408,7 +407,7 @@ public:
   /** @param property Validated property destination.
    * @param value Validated single scalar declaration.
    * @param location Original property start.
-   * @return Occurrence admission and last-winner scalar storage result.
+   * @return Occurrence admission and last-winner index storage result.
    */
   constexpr std::expected<void, PssError> declaration(PssProperty property, PssValue value, PssLocation location) {
     if (static_cast<std::size_t>(property) >= PSS_SCALAR_PROPERTY_COUNT) {
@@ -425,7 +424,6 @@ public:
     rule.effectiveDeclaration[static_cast<std::size_t>(property)] =
       static_cast<std::uint16_t>(sheet_.declarationCount_);
     ++rule.declarationCount;
-    portals::detail::assignPssDeclaration(property, value, rule.values);
     sheet_.declarations_[sheet_.declarationCount_++] = {static_cast<std::uint32_t>(sheet_.ruleCount_), property,
                                                         compactPosition(location), value};
 

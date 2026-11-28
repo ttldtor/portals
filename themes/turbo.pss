@@ -37,6 +37,58 @@
 /* Document focus uses the text surface; frame and scrollbar keep their accent. */
 DocumentView:focused { foreground: #ffff55; background: #0000aa; bold: false; }
 
+/* Slider focus marks the handle; inactive parts keep the theme surface. */
+Slider {
+  slider-track-foreground: #aaaaaa;
+  slider-fill-foreground: #00aaaa;
+  slider-thumb-foreground: #ffff55;
+}
+Slider:focused {
+  foreground: #ffff55;
+  background: #0000aa;
+  bold: false;
+  slider-thumb-foreground: #00aaaa;
+  slider-thumb-bold: true;
+}
+Slider:disabled {
+  foreground: #aaaaaa;
+  background: #0000aa;
+  bold: false;
+  italic: false;
+  underline: false;
+  slider-track-foreground: #aaaaaa;
+  slider-track-bold: false;
+  slider-track-italic: false;
+  slider-track-underline: false;
+  slider-fill-foreground: #aaaaaa;
+  slider-fill-bold: false;
+  slider-fill-italic: false;
+  slider-fill-underline: false;
+  slider-thumb-foreground: #aaaaaa;
+  slider-thumb-bold: false;
+  slider-thumb-italic: false;
+  slider-thumb-underline: false;
+}
+Slider:read-only {
+  foreground: #aaaaaa;
+  background: #0000aa;
+  bold: false;
+  italic: false;
+  underline: false;
+  slider-track-foreground: #aaaaaa;
+  slider-track-bold: false;
+  slider-track-italic: false;
+  slider-track-underline: false;
+  slider-fill-foreground: #aaaaaa;
+  slider-fill-bold: false;
+  slider-fill-italic: false;
+  slider-fill-underline: false;
+  slider-thumb-foreground: #aaaaaa;
+  slider-thumb-bold: false;
+  slider-thumb-italic: false;
+  slider-thumb-underline: false;
+}
+
 /* Selected radio markers use the surface; read-only remains keyboard navigable. */
 RadioGroup:selected { background: #0000aa; }
 RadioGroup:read-only { foreground: #aaaaaa; background: #0000aa; bold: false; italic: false; underline: false; }

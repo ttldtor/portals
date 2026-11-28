@@ -7,12 +7,31 @@
 
 namespace portals {
 
+/** @brief Built-in one-cell slider glyph sets. */
+enum class SliderSkin {
+  ASCII,   ///< Compatible default, retaining the original unfilled appearance.
+  LINE,    ///< Fine track with a stronger filled prefix.
+  ROUNDED, ///< Dotted track and rounded thumb.
+  BLOCKS   ///< Shaded track and solid filled prefix.
+};
+
+/** @brief Owning custom one-cell printable graphemes used for slider parts.
+ * Each value is at most 64 UTF-8 bytes and must measure one cell under the receiving width policy.
+ */
+struct SliderGlyphs {
+  std::string track; ///< Unfilled track grapheme.
+  std::string fill;  ///< Filled-prefix grapheme.
+  std::string thumb; ///< Thumb grapheme.
+};
+
 /** @brief Horizontal slider presentation and user-input configuration. */
 struct SliderOptions {
   std::int32_t preferredWidth{20};  ///< Nonnegative intrinsic width in cells; intrinsic height is one.
   std::uint64_t pageSteps{10};      ///< Positive increments applied by PageUp/PageDown.
   std::size_t maxPaintCells{16384}; ///< Positive bound on the allocated background area, including extra rows.
   bool readOnly{};                  ///< User mutation gate; programmatic model writes remain allowed.
+  SliderSkin skin{SliderSkin::ASCII}; ///< Valid built-in set; custom glyphs override it, and incompatible built-ins fall back to ASCII.
+  std::optional<SliderGlyphs> glyphs{}; ///< Owning custom one-cell glyphs, validated using the receiving width policy.
 };
 
 /** @brief One completed or interrupted numeric user operation. */
@@ -41,8 +60,8 @@ struct SliderOperationEvent {
  */
 class Slider : public Control {
 public:
-  /** @param width Complete receiving text policy used by the paired ASCII track/thumb glyphs.
-   * @param options Intrinsic extent, page increment count, paint cap and user-mutation policy.
+  /** @param width Complete receiving text policy used to prepare track, fill and thumb glyphs.
+   * @param options Intrinsic extent, page increment, paint cap, user-mutation policy and owning glyph selection.
    * @param style Owning manual appearances beneath ordinary theme rules.
    * @param policy Owning layout constraints validated by the layout owner.
    * Constructor arguments and glyph construction may throw; tree emplacement translates internal failures.
@@ -75,6 +94,11 @@ public:
     return value_.range();
   }
 
+  /** @return Whether the read-only style selector matches this slider. */
+  bool styleReadOnly() const noexcept override {
+    return options_.readOnly;
+  }
+
   /** @return Whether user mutation is currently prohibited; focus remains available. */
   bool readOnly() const noexcept {
     return options_.readOnly;
@@ -87,10 +111,19 @@ private:
   void display(NumericValue value) noexcept;
   void placeThumb() noexcept;
 
+  struct RuntimeOptions {
+    std::int32_t preferredWidth;
+    std::uint64_t pageSteps;
+    std::size_t maxPaintCells;
+    bool readOnly;
+  };
+
   NumericValue value_;
-  SliderOptions options_;
+  RuntimeOptions options_;
   GraphemeText track_;
+  GraphemeText fill_;
   GraphemeText thumb_;
+  bool validGlyphs_{true};
   CellRect bounds_;
   double position_{};
   std::int32_t thumbColumn_{};

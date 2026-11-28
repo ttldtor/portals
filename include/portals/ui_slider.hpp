@@ -83,13 +83,39 @@ inline std::expected<NumericValue, NumericError> sliderInitial(const ControlSett
   return NumericValue::create(initial, range);
 }
 
-inline SliderOptions sliderOptions(const ControlSettings &settings) {
+inline std::expected<SliderOptions, TreeError> sliderOptions(const ControlSettings &settings, WidthPolicy width) {
   SliderOptions options;
 
   options.preferredWidth = settings.preferredWidth.value_or(options.preferredWidth);
   options.maxPaintCells = settings.maxPaintCells.value_or(options.maxPaintCells);
   options.pageSteps = settings.pageSteps.value_or(options.pageSteps);
   options.readOnly = settings.readOnly.value_or(options.readOnly);
+  if (settings.sliderSkin) {
+    constexpr std::array<std::string_view, 4> SKIN_NAMES{"ascii", "line", "rounded", "blocks"};
+    const auto found = std::ranges::find(SKIN_NAMES, *settings.sliderSkin);
+    if (found == SKIN_NAMES.end()) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    options.skin = static_cast<SliderSkin>(found - SKIN_NAMES.begin());
+  }
+  if (settings.sliderTrack || settings.sliderFill || settings.sliderThumb) {
+    if (!settings.sliderTrack || !settings.sliderFill || !settings.sliderThumb) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    constexpr std::size_t MAX_GLYPH_BYTES = 64;
+    const auto valid = [&](const std::string &bytes) {
+      if (bytes.size() > MAX_GLYPH_BYTES) {
+        return false;
+      }
+      const auto text = GraphemeText::from(bytes, width);
+      return text && text->graphemes().size() == 1 && text->measure() == 1 &&
+             text->graphemes().front().display == TextDisplay::PRINTABLE;
+    };
+    if (!valid(*settings.sliderTrack) || !valid(*settings.sliderFill) || !valid(*settings.sliderThumb)) {
+      return std::unexpected(TreeError::INVALID_ARGUMENT);
+    }
+    options.glyphs = SliderGlyphs{*settings.sliderTrack, *settings.sliderFill, *settings.sliderThumb};
+  }
 
   return options;
 }
@@ -121,7 +147,11 @@ inline Description<Slider> sliderRecipe(ControlSettings arguments, std::optional
       }
     }
 
-    return scene.emplace<Slider>(parent, scene.widthPolicy(), sliderOptions(settings));
+    auto options = sliderOptions(settings, scene.widthPolicy());
+    if (!options) {
+      return std::unexpected(error(parent, options.error()));
+    }
+    return scene.emplace<Slider>(parent, scene.widthPolicy(), std::move(*options));
   });
 
   return Access::controlSetup(

@@ -624,7 +624,15 @@ private:
       if (!parsed) {
         return std::unexpected(withProperty(parsed.error(), type, path));
       }
-      if (path == "language") {
+      if (path == "skin") {
+        settings.sliderSkin = std::move(value);
+      } else if (path == "glyphs.track") {
+        settings.sliderTrack = std::move(value);
+      } else if (path == "glyphs.fill") {
+        settings.sliderFill = std::move(value);
+      } else if (path == "glyphs.thumb") {
+        settings.sliderThumb = std::move(value);
+      } else if (path == "language") {
         auto document = std::make_shared<ControlDocumentSettings>(settings.documentSettings());
         document->language = documentLanguageFromName(value);
         settings.document = std::move(document);

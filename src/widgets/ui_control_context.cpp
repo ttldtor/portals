@@ -23,6 +23,8 @@ constexpr std::size_t WHEEL_STEP_PROPERTY = 44;
 constexpr std::size_t SLIDER_STEP_PROPERTY = 261;
 constexpr std::size_t SLIDER_PAGE_STEPS_PROPERTY = 262;
 constexpr std::size_t RADIO_SELECTION_MODE_PROPERTY = 263;
+constexpr std::size_t FIRST_DOCUMENT_PROPERTY = 264;
+constexpr std::size_t FIRST_SLIDER_APPEARANCE_PROPERTY = 281;
 constexpr std::size_t MINIMUM_THUMB_PROPERTY = 47;
 constexpr std::size_t ROW_HEIGHT_PROPERTY = 69;
 constexpr std::size_t STATUS_ROWS_PROPERTY = 81;
@@ -359,7 +361,11 @@ constexpr std::array<ControlPropertyDescriptor, detail::CONTROL_PROPERTY_COUNT> 
    {"language", Kind::LITERAL_STRING, 1, {}},
    {"syntax", Kind::ENUMERATION, 1, DOCUMENT_SYNTAX_NAMES},
    {"maxAutoHighlightBytes", Kind::UNSIGNED_INTEGER, 1, {}},
-   {"tailWorkTurns", Kind::UNSIGNED_INTEGER, 1, {}}}};
+   {"tailWorkTurns", Kind::UNSIGNED_INTEGER, 1, {}},
+   {"skin", Kind::LITERAL_STRING, 1, {}},
+   {"glyphs.track", Kind::LITERAL_STRING, 2, {}},
+   {"glyphs.fill", Kind::LITERAL_STRING, 2, {}},
+   {"glyphs.thumb", Kind::LITERAL_STRING, 2, {}}}};
 static_assert(std::ranges::all_of(PROPERTIES, [](const auto &property) {
   return !property.path.empty();
 }));
@@ -384,7 +390,7 @@ constexpr Mask BUTTON_MASK = SIZE_MASK | TEXT_MASK | propertyMask(37);
 constexpr Mask BORDER_MASK = SIZE_MASK | propertyMask(38, 39);
 constexpr Mask GAUGE_MASK = BORDER_MASK | propertyMask(40, 41, 42, 43);
 constexpr Mask SLIDER_MASK =
-  SIZE_MASK | propertyMask(8, 39, 40, 41, 42, 43, SLIDER_STEP_PROPERTY, SLIDER_PAGE_STEPS_PROPERTY);
+  SIZE_MASK | propertyMask(8, 39, 40, 41, 42, 43, SLIDER_STEP_PROPERTY, SLIDER_PAGE_STEPS_PROPERTY, 281, 282, 283, 284);
 constexpr Mask SPINNER_MASK = SIZE_MASK | propertyMask(39, 193, 194, 195, 196, 197, 198, 199, 200, 201, 202, 203);
 constexpr Mask SCROLLBAR_MASK = propertyMask(204, 205, 206, 207, 208, 209, 210, 211, 212, 213, 214, 215, 234, 235, 236,
                                              237, 238, 239, 240, 241, 242, 243, 244, 245, 246, 247, 248);
@@ -467,7 +473,8 @@ constexpr auto GAUGE_SCHEMA =
                            PROPERTIES[41], PROPERTIES[42], PROPERTIES[43]}));
 constexpr auto SLIDER_SCHEMA = withFrame(std::to_array(
   {PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[8], PROPERTIES[39], PROPERTIES[40], PROPERTIES[41],
-   PROPERTIES[42], PROPERTIES[43], PROPERTIES[SLIDER_STEP_PROPERTY], PROPERTIES[SLIDER_PAGE_STEPS_PROPERTY]}));
+   PROPERTIES[42], PROPERTIES[43], PROPERTIES[SLIDER_STEP_PROPERTY], PROPERTIES[SLIDER_PAGE_STEPS_PROPERTY], PROPERTIES[281], PROPERTIES[282],
+   PROPERTIES[283], PROPERTIES[284]}));
 constexpr auto SPINNER_SCHEMA =
   withFrame(std::to_array({PROPERTIES[1], PROPERTIES[2], PROPERTIES[3], PROPERTIES[39], PROPERTIES[193],
                            PROPERTIES[194], PROPERTIES[195], PROPERTIES[196], PROPERTIES[197], PROPERTIES[198],
@@ -489,11 +496,11 @@ constexpr auto SCROLL_AREA_SCHEMA = withFrame(
                  PROPERTIES[241], PROPERTIES[242], PROPERTIES[243], PROPERTIES[244], PROPERTIES[245], PROPERTIES[246],
                  PROPERTIES[247], PROPERTIES[248]}));
 constexpr auto DOCUMENT_VIEW_SCHEMA = [] {
-  constexpr auto DOCUMENT_PROPERTIES = PROPERTIES.size() - 264;
+  constexpr auto DOCUMENT_PROPERTIES = FIRST_SLIDER_APPEARANCE_PROPERTY - FIRST_DOCUMENT_PROPERTY;
   std::array<ControlPropertyDescriptor, SCROLL_AREA_SCHEMA.size() + DOCUMENT_PROPERTIES> schema{};
   std::ranges::copy(SCROLL_AREA_SCHEMA, schema.begin());
   for (std::size_t index = 0; index < DOCUMENT_PROPERTIES; ++index) {
-    schema[SCROLL_AREA_SCHEMA.size() + index] = PROPERTIES[264 + index];
+    schema[SCROLL_AREA_SCHEMA.size() + index] = PROPERTIES[FIRST_DOCUMENT_PROPERTY + index];
   }
   return schema;
 }();
@@ -1113,9 +1120,16 @@ ControlContextError exceptionError() noexcept {
   X(documentSettings().maxAutoHighlightBytes, 279)                                                                     \
   X(documentSettings().tailWorkTurns, 280)
 
+#define PORTALS_SLIDER_LEAVES(X) \
+  X(sliderSkin, 281) \
+  X(sliderTrack, 282) \
+  X(sliderFill, 283) \
+  X(sliderThumb, 284)
+
 #define LEAF_INDEX(field, index) index,
 constexpr auto LEAF_INDICES =
-  std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX) PORTALS_DOCUMENT_LEAVES(LEAF_INDEX)});
+  std::to_array<std::size_t>({PORTALS_CONTROL_LEAVES(LEAF_INDEX) PORTALS_DOCUMENT_LEAVES(LEAF_INDEX)
+                               PORTALS_SLIDER_LEAVES(LEAF_INDEX)});
 #undef LEAF_INDEX
 static_assert(LEAF_INDICES.size() == detail::CONTROL_PROPERTY_COUNT);
 static_assert([] {
@@ -1132,6 +1146,7 @@ template <class Visitor> void visitLeaves(const ControlSettings &settings, Visit
 #define VISIT(field, index) visitor(index, settings.field);
   PORTALS_CONTROL_LEAVES(VISIT)
   PORTALS_DOCUMENT_LEAVES(VISIT)
+  PORTALS_SLIDER_LEAVES(VISIT)
 #undef VISIT
 }
 
@@ -1224,6 +1239,7 @@ void merge(ControlSettings &target, const ControlSettings &patch) {
   };
 #define ASSIGN(field, index) assign(target.field, patch.field, index);
   PORTALS_CONTROL_LEAVES(ASSIGN)
+  PORTALS_SLIDER_LEAVES(ASSIGN)
 #undef ASSIGN
   if (patch.document) {
     auto document = std::make_shared<ControlDocumentSettings>(target.documentSettings());
@@ -1271,6 +1287,7 @@ template <class T> bool validValue(const T &value, std::size_t index) noexcept {
     return index == 155 ? value >= 2 : !POSITIVE_UNSIGNED_MASK.test(index) || value > 0;
   } else if constexpr (std::same_as<T, std::string>) {
     return detail::validControlLiteral(value) && (index != 68 || !value.empty()) &&
+           (index < 282 || index > 284 || (!value.empty() && value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES)) &&
            (index < FRAME_FIRST_CUSTOM_GLYPH_PROPERTY || index > 179 ||
             (value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES && !value.empty())) &&
            ((index != 191 && index != 192) || value.size() <= FRAME_CUSTOM_GLYPH_MAX_BYTES);
@@ -1513,6 +1530,7 @@ void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &
   PORTALS_CONTROL_DIALOG_BASE_LEAVES(ASSIGN_RECIPE)
   PORTALS_CONTROL_DIALOG_ACTION_LEAVES(ASSIGN_RECIPE)
   PORTALS_CONTROL_COMPOSITE_LEAVES(ASSIGN_RECIPE)
+  PORTALS_SLIDER_LEAVES(ASSIGN_RECIPE)
 #undef ASSIGN_RECIPE
 
   if (patch.document) {
@@ -1553,6 +1571,7 @@ void mergeRecipeControlSettings(ControlSettings &target, const ControlSettings &
 #undef PORTALS_CONTROL_TITLE_DECORATION_LEAVES
 #undef PORTALS_CONTROL_SPINNER_LEAVES
 #undef PORTALS_CONTROL_SCROLLBAR_LEAVES
+#undef PORTALS_SLIDER_LEAVES
 
 void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &previous) {
   if (previous.origin || !previous.origins.empty()) {
@@ -1610,6 +1629,10 @@ void applyFluentControlOrigins(ControlSettings &patch, const ControlSettings &pr
       std::pair<std::string_view, bool>{"preferredWidth", patch.preferredWidth.has_value()},
       std::pair<std::string_view, bool>{"step", patch.step.has_value()},
       std::pair<std::string_view, bool>{"pageSteps", patch.pageSteps.has_value()},
+      std::pair<std::string_view, bool>{"skin", patch.sliderSkin.has_value()},
+      std::pair<std::string_view, bool>{"glyphs.track", patch.sliderTrack.has_value()},
+      std::pair<std::string_view, bool>{"glyphs.fill", patch.sliderFill.has_value()},
+      std::pair<std::string_view, bool>{"glyphs.thumb", patch.sliderThumb.has_value()},
       std::pair<std::string_view, bool>{"readOnly", patch.readOnly.has_value()},
       std::pair<std::string_view, bool>{"radioInitial.enabled", patch.radioInitial.enabled.has_value()},
       std::pair<std::string_view, bool>{"radioInitial.index", patch.radioInitial.index.has_value()},

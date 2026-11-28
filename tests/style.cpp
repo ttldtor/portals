@@ -189,13 +189,14 @@ void parserAndCascade(const char *themeDirectory) {
     auto fromCpp = std::string_view(name) == "modern" ? modernTheme() : turboTheme();
 
     for (const auto type :
-         {"Button", "CheckBox", "LineEdit", "Table", "Custom", "RadioGroup", "LogView", "DocumentView"}) {
+         {"Button", "CheckBox", "LineEdit", "Table", "Custom", "RadioGroup", "LogView", "DocumentView", "Slider"}) {
       check(resolveStyle(fromPss, {type, "", {}}) == resolveStyle(fromCpp, {type, "", {}}),
             "typed factory and shipped PSS give identical complete styles");
     }
-    check(resolveStyle(fromPss, {.type = "RadioGroup"}, {}, true) ==
-            resolveStyle(fromCpp, {.type = "RadioGroup"}, {}, true),
-          "typed factory and shipped PSS give identical read-only radio styles");
+    for (const auto type : {"RadioGroup", "Slider"}) {
+      check(resolveStyle(fromPss, {.type = type}, {}, true) == resolveStyle(fromCpp, {.type = type}, {}, true),
+            "typed factory and shipped PSS give identical complete read-only styles");
+    }
   }
 }
 
@@ -1088,6 +1089,12 @@ void literalStorageNoAllocation() {
         "engaged literal copies, assignment, self-copy and move preserve owning values without allocation");
 }
 
+void sliderPartParserAdmission() {
+  const auto sheet = parsePss("Slider{slider-track-foreground:#123456;slider-fill-background:#234567;"
+                              "slider-thumb-bold:false;slider-thumb-italic:true;slider-track-underline:false;}");
+  check(sheet.has_value(), "PSS admits independent Slider track, fill and thumb paint leaves");
+}
+
 void thumbResolutionNoAllocation() {
   static_assert(std::is_nothrow_default_constructible_v<ComputedStyle>);
   static_assert(std::is_nothrow_copy_constructible_v<ComputedStyle>);
@@ -1111,6 +1118,61 @@ void thumbResolutionNoAllocation() {
   check(resolved.scrollbarThumbSegments && resolved == copied && !(*resolved.scrollbarThumbSegments)[0].start.bold &&
           (*resolved.scrollbarThumbSegments)[0].body.bold && (*resolved.scrollbarThumbSegments)[0].single.italic,
         "matching thumb resolution and owning copies remain noexcept and allocation-free");
+}
+
+void sliderResolutionNoAllocation() {
+  static_assert(std::is_nothrow_copy_constructible_v<ComputedStyle>);
+  static_assert(std::is_nothrow_copy_assignable_v<ComputedStyle>);
+  const auto sheet =
+    take(parsePss("*{foreground:#010203;background:#040506;bold:true;italic:true;underline:true;}"
+                  "Slider{slider-track-foreground:#111213;slider-fill-background:#141516;slider-thumb-bold:false;}"
+                  ".hot{slider-track-foreground:#212223;slider-thumb-italic:false;}"
+                  "Slider#subject.hot:focused{slider-thumb-foreground:#313233;slider-track-underline:false;}"
+                  "Slider:read-only{slider-fill-bold:false;slider-fill-underline:false;}"));
+  const StyleTarget target{"Slider", "subject", {"hot"}};
+  const StyleTarget ordinaryTarget{"Button", "", {}};
+  const StyleSheet empty;
+  allocation_test::remaining = 0;
+  const auto absent = resolveStyle(empty, target);
+  const auto ordinary = resolveStyle(sheet, ordinaryTarget);
+  const auto resolved = resolveStyle(sheet, target);
+  const auto readOnly = resolveStyle(sheet, target, {}, true);
+  const auto copy = resolved;
+  allocation_test::remaining = -1;
+  check(!absent.sliderParts && !ordinary.sliderParts,
+        "nonmatching Slider declarations retain an absent allocation-free extension");
+  check(
+    resolved == copy && resolved.sliderParts && (*resolved.sliderParts)[0].track.foreground == RgbColor{33, 34, 35} &&
+      (*resolved.sliderParts)[0].track.background == RgbColor{4, 5, 6} &&
+      (*resolved.sliderParts)[0].fill.background == RgbColor{20, 21, 22} && !(*resolved.sliderParts)[0].thumb.bold &&
+      !(*resolved.sliderParts)[0].thumb.italic && (*resolved.sliderParts)[0].thumb.underline &&
+      (*resolved.sliderParts)[1].thumb.foreground == RgbColor{49, 50, 51} &&
+      !(*resolved.sliderParts)[1].track.underline && (*resolved.sliderParts)[2].track.underline,
+    "Slider parts preserve per-leaf specificity, states, inherited paints and explicit false without allocation");
+  check((*resolved.sliderParts)[0].fill.bold && (*resolved.sliderParts)[0].fill.underline &&
+          !(*readOnly.sliderParts)[0].fill.bold && !(*readOnly.sliderParts)[0].fill.underline,
+        "Slider read-only predicate changes only matching part leaves");
+}
+
+void sliderThemeParts() {
+  for (const auto theme : {modernTheme(), nordTheme(), catppuccinLatteTheme()}) {
+    const auto slider = resolveStyle(theme, {.type = "Slider"});
+    const auto readOnly = resolveStyle(theme, {.type = "Slider"}, {}, true);
+    const auto ordinary = resolveStyle(theme, {.type = "Button"});
+    check(slider.sliderParts && !ordinary.sliderParts &&
+            (*slider.sliderParts)[0].fill.foreground != (*slider.sliderParts)[0].track.foreground &&
+            (*slider.sliderParts)[1].thumb.bold && !(*slider.sliderParts)[1].track.bold &&
+            (*slider.sliderParts)[1].track.background == slider.normal.background &&
+            (*slider.sliderParts)[1].thumb.background == slider.normal.background,
+          "token themes distinguish Slider parts and focus the thumb on an unchanged surface");
+    const auto &disabled = (*slider.sliderParts)[2];
+    const auto &view = (*readOnly.sliderParts)[1];
+    check(disabled.track.foreground == disabled.fill.foreground &&
+            disabled.fill.foreground == disabled.thumb.foreground && view.track.foreground == view.fill.foreground &&
+            view.fill.foreground == view.thumb.foreground && !view.thumb.bold && !view.thumb.italic &&
+            !view.thumb.underline,
+          "disabled and read-only Slider paints remain muted and free from decorative attributes");
+  }
 }
 
 class SnapshotDefaults final : public Widget {
@@ -1138,6 +1200,8 @@ ComputedStyle rareStyle() {
   value.frame[0].line = CellStyle{.bold = false};
   value.scrollbar[0].trackPattern = ScrollbarPattern::LEGACY;
   value.scrollbarThumbSegments.emplace();
+  value.sliderParts.emplace();
+  (*value.sliderParts)[1].thumb.bold = true;
   value.glyphs[0].profile = GlyphProfile::DEFAULT;
   return value;
 }
@@ -1147,7 +1211,8 @@ void sparseSnapshotValuesAndAllocation() {
   static_assert(noexcept(std::declval<const Widget &>().computedStyle()));
   const ComputedStyle ordinary;
   StyleSnapshot plain(ordinary);
-  check(!plain.hasFrame() && !plain.hasScrollbar() && !plain.hasThumbSegments() && !plain.hasGlyphs(),
+  check(!plain.hasFrame() && !plain.hasScrollbar() && !plain.hasThumbSegments() && !plain.hasGlyphs() &&
+          !plain.sliderParts(),
         "ordinary distinct styles allocate no irrelevant extension blocks");
 
   const auto rare = rareStyle();
@@ -1158,7 +1223,8 @@ void sparseSnapshotValuesAndAllocation() {
     try {
       const auto snapshot = std::make_shared<const StyleSnapshot>(rare);
       allocation_test::remaining = -1;
-      check(snapshot->hasFrame() && snapshot->hasScrollbar() && snapshot->hasThumbSegments() && snapshot->hasGlyphs(),
+      check(snapshot->hasFrame() && snapshot->hasScrollbar() && snapshot->hasThumbSegments() && snapshot->hasGlyphs() &&
+              snapshot->sliderParts(),
             "explicit empty/false/default choices retain all relevant extension blocks");
       allocation_test::remaining = 0;
       const auto flat = snapshot->flatten();
@@ -1178,7 +1244,8 @@ void sparseSnapshotValuesAndAllocation() {
       ++failedAllocations;
     }
   }
-  check(complete && failedAllocations == 5, "snapshot/control block and each sparse block have exercised failures");
+  check(complete && failedAllocations == 6,
+        "snapshot/control block and each sparse block, including Slider paints, have exercised failures");
 }
 
 void snapshotSharingAndRetirement() {
@@ -1252,6 +1319,57 @@ void sparseSnapshotTransactionFailures() {
         "mixed batch publishes one shared complete sparse snapshot after the allocation sweep");
 }
 
+void sliderPartTransactionsAndLifetime() {
+  std::shared_ptr<const StyleSnapshot> retained;
+  std::weak_ptr<const StyleSnapshot> retired;
+  {
+    Fixture fixture;
+    const auto first = take(fixture.tree->emplace<SnapshotDefaults>(fixture.root));
+    const auto second = take(fixture.tree->emplace<SnapshotDefaults>(fixture.root));
+    take(fixture.styles.bindBatch(std::array{StyleRegistration{first, {.type = "Slider", .id = "first"}},
+                                             StyleRegistration{second, {.type = "Slider", .id = "second"}}}));
+    take(fixture.styles.enableLayers());
+    const auto theme = take(parsePss("Slider#first{slider-thumb-foreground:#010203;slider-thumb-bold:true;}"));
+    take(fixture.styles.theme(theme));
+    auto application = take(parsePss("Slider{slider-thumb-foreground:#040506;slider-thumb-bold:false;}"));
+    application.scope = first.id();
+    take(fixture.tree->consumeFrameRequest());
+    const auto layer = take(fixture.styles.addLayer(StyleTier::APPLICATION, "parts", application));
+    retained = readSnapshot(fixture, first);
+    retired = retained;
+    check(retained->sliderParts() && (*retained->sliderParts())[0].thumb.foreground == RgbColor{4, 5, 6} &&
+            !(*retained->sliderParts())[0].thumb.bold && !readSnapshot(fixture, second)->sliderParts() &&
+            take(fixture.tree->consumeFrameRequest()) == Invalidation::PAINT,
+          "scoped higher-tier Slider parts override specificity and publish paint-only invalidation");
+    auto coreChanged = application;
+    coreChanged.rules[0].declarations.bold = true;
+    take(fixture.styles.replaceLayer(layer, coreChanged));
+    const auto changed = readSnapshot(fixture, first);
+    check(retained->normal.bold == false && changed->normal.bold && retained->sliderParts() &&
+            (*retained->sliderParts())[0].track.bold == false && (*changed->sliderParts())[0].track.bold,
+          "retained Slider snapshot owns complete old parts while replacement inherits the new ordinary paint");
+    take(fixture.styles.removeLayer(layer));
+    check((*readSnapshot(fixture, first)->sliderParts())[0].thumb.foreground == RgbColor{1, 2, 3} &&
+            (*readSnapshot(fixture, first)->sliderParts())[0].thumb.bold,
+          "removing Slider part layer restores the lower-tier parts");
+    take(fixture.styles.theme({}));
+    check(!readSnapshot(fixture, first)->sliderParts() && !readSnapshot(fixture, second)->sliderParts(),
+          "clearing the last Slider part declaration restores the ordinary absent extension");
+    take(fixture.tree->remove(first));
+    take(fixture.tree->remove(second));
+  }
+  allocation_test::remaining = 0;
+  const auto flat = retained->flatten();
+  const detail::ComputedStyleView view(*retained);
+  const auto coherent = flat == *retained && view.sliderParts == retained->sliderParts() &&
+                        retained->contentHash() == StyleSnapshot::contentHash(flat);
+  allocation_test::remaining = -1;
+  check(coherent && (*view.sliderParts)[0].thumb.foreground == RgbColor{4, 5, 6},
+        "Slider part ownership outlives engine and tree; flatten, borrowed view and hash agree without allocation");
+  retained.reset();
+  check(retired.expired(), "retired Slider snapshots have no permanent interning owner");
+}
+
 void independentBlockSharingAndExplicitMetadata() {
   Fixture fixture;
   auto first = take(fixture.tree->emplace<SnapshotDefaults>(fixture.root, rareStyle()));
@@ -1298,7 +1416,11 @@ int main(int argc, char **argv) {
 
   parserAndCascade(argv[1]);
   literalStorageNoAllocation();
+  sliderPartParserAdmission();
   thumbResolutionNoAllocation();
+  sliderResolutionNoAllocation();
+  sliderThemeParts();
+  sliderPartTransactionsAndLifetime();
   sparseSnapshotValuesAndAllocation();
   snapshotSharingAndRetirement();
   sparseSnapshotTransactionFailures();

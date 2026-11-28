@@ -203,6 +203,21 @@ enum class Property {
   SCROLLBAR_TRACK_PATTERN,           ///< Independent track source.
   SCROLLBAR_THUMB_PATTERN,           ///< Independent thumb source.
   SCROLLBAR_ARROW_PATTERN,           ///< Independent arrow source.
+  SLIDER_TRACK_FOREGROUND,           ///< Slider track foreground.
+  SLIDER_TRACK_BACKGROUND,           ///< Slider track background.
+  SLIDER_TRACK_BOLD,                 ///< Slider track bold.
+  SLIDER_TRACK_ITALIC,               ///< Slider track italic.
+  SLIDER_TRACK_UNDERLINE,            ///< Slider track underline.
+  SLIDER_FILL_FOREGROUND,            ///< Slider fill foreground.
+  SLIDER_FILL_BACKGROUND,            ///< Slider fill background.
+  SLIDER_FILL_BOLD,                  ///< Slider fill bold.
+  SLIDER_FILL_ITALIC,                ///< Slider fill italic.
+  SLIDER_FILL_UNDERLINE,             ///< Slider fill underline.
+  SLIDER_THUMB_FOREGROUND,           ///< Slider thumb foreground.
+  SLIDER_THUMB_BACKGROUND,           ///< Slider thumb background.
+  SLIDER_THUMB_BOLD,                 ///< Slider thumb bold.
+  SLIDER_THUMB_ITALIC,               ///< Slider thumb italic.
+  SLIDER_THUMB_UNDERLINE,            ///< Slider thumb underline.
   GLYPH_PROFILE,                     ///< Named base glyph map.
   GLYPH_FALLBACK,                    ///< Portable admission fallback.
   SCROLLBAR_THUMB_START_FOREGROUND,  ///< Thumb start foreground.
@@ -365,7 +380,10 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
     D::KIND == Property::SCROLLBAR_THUMB_BACKGROUND || D::KIND == Property::SCROLLBAR_ENDS_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_ENDS_BACKGROUND || D::KIND == Property::SCROLLBAR_ARROWS_FOREGROUND ||
     D::KIND == Property::SCROLLBAR_ARROWS_BACKGROUND || D::KIND == Property::SCROLLBAR_CORNER_FOREGROUND ||
-    D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND;
+    D::KIND == Property::SCROLLBAR_CORNER_BACKGROUND || D::KIND == Property::SLIDER_TRACK_FOREGROUND ||
+    D::KIND == Property::SLIDER_TRACK_BACKGROUND || D::KIND == Property::SLIDER_FILL_FOREGROUND ||
+    D::KIND == Property::SLIDER_FILL_BACKGROUND || D::KIND == Property::SLIDER_THUMB_FOREGROUND ||
+    D::KIND == Property::SLIDER_THUMB_BACKGROUND;
   constexpr bool METRIC = D::KIND == Property::MIN_WIDTH;
   using Expected = std::conditional_t<
     D::KIND == Property::SCROLLBAR_TRACK_PATTERN, ScrollbarPattern,
@@ -514,6 +532,36 @@ constexpr void assign(const D &declaration, StyleDeclarations &destination, cons
       destination.scrollbarTrackPattern = value;
     } else if constexpr (D::KIND == Property::SCROLLBAR_THUMB_PATTERN) {
       destination.scrollbarThumbPattern = value;
+    } else if constexpr (D::KIND == Property::SLIDER_TRACK_FOREGROUND) {
+      destination.sliderTrack.foreground = value;
+    } else if constexpr (D::KIND == Property::SLIDER_TRACK_BACKGROUND) {
+      destination.sliderTrack.background = value;
+    } else if constexpr (D::KIND == Property::SLIDER_TRACK_BOLD) {
+      destination.sliderTrack.bold = value;
+    } else if constexpr (D::KIND == Property::SLIDER_TRACK_ITALIC) {
+      destination.sliderTrack.italic = value;
+    } else if constexpr (D::KIND == Property::SLIDER_TRACK_UNDERLINE) {
+      destination.sliderTrack.underline = value;
+    } else if constexpr (D::KIND == Property::SLIDER_FILL_FOREGROUND) {
+      destination.sliderFill.foreground = value;
+    } else if constexpr (D::KIND == Property::SLIDER_FILL_BACKGROUND) {
+      destination.sliderFill.background = value;
+    } else if constexpr (D::KIND == Property::SLIDER_FILL_BOLD) {
+      destination.sliderFill.bold = value;
+    } else if constexpr (D::KIND == Property::SLIDER_FILL_ITALIC) {
+      destination.sliderFill.italic = value;
+    } else if constexpr (D::KIND == Property::SLIDER_FILL_UNDERLINE) {
+      destination.sliderFill.underline = value;
+    } else if constexpr (D::KIND == Property::SLIDER_THUMB_FOREGROUND) {
+      destination.sliderThumb.foreground = value;
+    } else if constexpr (D::KIND == Property::SLIDER_THUMB_BACKGROUND) {
+      destination.sliderThumb.background = value;
+    } else if constexpr (D::KIND == Property::SLIDER_THUMB_BOLD) {
+      destination.sliderThumb.bold = value;
+    } else if constexpr (D::KIND == Property::SLIDER_THUMB_ITALIC) {
+      destination.sliderThumb.italic = value;
+    } else if constexpr (D::KIND == Property::SLIDER_THUMB_UNDERLINE) {
+      destination.sliderThumb.underline = value;
     } else if constexpr (D::KIND == Property::GLYPH_PROFILE) {
       destination.glyphProfile = value;
     } else if constexpr (D::KIND == Property::GLYPH_FALLBACK) {
@@ -1155,6 +1203,81 @@ template <class E> consteval auto scrollbarThumbSingleItalic(E expression) {
 /** @tparam E Owning scalar expression. @param expression Segment attribute. @return Typed thumb segment declaration. */
 template <class E> consteval auto scrollbarThumbSingleUnderline(E expression) {
   return detail::Declaration<detail::Property::SCROLLBAR_THUMB_SINGLE_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderTrackForeground(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_TRACK_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderTrackBackground(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_TRACK_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderTrackBold(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_TRACK_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderTrackItalic(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_TRACK_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderTrackUnderline(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_TRACK_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderFillForeground(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_FILL_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderFillBackground(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_FILL_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderFillBold(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_FILL_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderFillItalic(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_FILL_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderFillUnderline(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_FILL_UNDERLINE, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderThumbForeground(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_THUMB_FOREGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderThumbBackground(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_THUMB_BACKGROUND, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderThumbBold(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_THUMB_BOLD, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderThumbItalic(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_THUMB_ITALIC, E>{expression};
+}
+
+/** @tparam E Owning scalar expression. @param expression Part paint leaf. @return Typed Slider declaration. */
+template <class E> consteval auto sliderThumbUnderline(E expression) {
+  return detail::Declaration<detail::Property::SLIDER_THUMB_UNDERLINE, E>{expression};
 }
 
 /** @tparam E Owning scalar expression. @param expression Part attribute. @return Typed scrollbar declaration. */

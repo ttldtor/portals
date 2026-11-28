@@ -303,6 +303,12 @@ private:
         patch.readOnly = source.readOnly;
         patch.preferredWidth = source.preferredWidth;
         patch.maxPaintCells = source.maxPaintCells;
+        if constexpr (std::derived_from<T, Slider>) {
+          patch.sliderSkin = source.sliderSkin;
+          patch.sliderTrack = source.sliderTrack;
+          patch.sliderFill = source.sliderFill;
+          patch.sliderThumb = source.sliderThumb;
+        }
         if constexpr (std::same_as<T, SpinBox>) {
           patch.text = source.text;
           patch.editMode = source.editMode;
@@ -314,11 +320,18 @@ private:
           patch.origins = source.origins;
         }
         patch.origin = source.origin;
-        const std::pair<std::string_view, bool> fields[]{
-          {"value", patch.value.has_value()}, {"minimum", patch.minimum.has_value()},
-          {"maximum", patch.maximum.has_value()}, {"step", patch.step.has_value()},
-          {"pageSteps", patch.pageSteps.has_value()}, {"readOnly", patch.readOnly.has_value()},
-          {"preferredWidth", patch.preferredWidth.has_value()}, {"maxPaintCells", patch.maxPaintCells.has_value()}};
+        const std::pair<std::string_view, bool> fields[]{{"value", patch.value.has_value()},
+                                                         {"minimum", patch.minimum.has_value()},
+                                                         {"maximum", patch.maximum.has_value()},
+                                                         {"step", patch.step.has_value()},
+                                                         {"pageSteps", patch.pageSteps.has_value()},
+                                                         {"readOnly", patch.readOnly.has_value()},
+                                                         {"preferredWidth", patch.preferredWidth.has_value()},
+                                                         {"maxPaintCells", patch.maxPaintCells.has_value()},
+                                                         {"skin", patch.sliderSkin.has_value()},
+                                                         {"glyphs.track", patch.sliderTrack.has_value()},
+                                                         {"glyphs.fill", patch.sliderFill.has_value()},
+                                                         {"glyphs.thumb", patch.sliderThumb.has_value()}};
 
         for (const auto &[path, present] : fields) {
           if (present) {

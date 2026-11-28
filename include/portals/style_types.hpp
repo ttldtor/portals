@@ -116,6 +116,16 @@ struct ScrollbarThumbAppearance {
   bool operator==(const ScrollbarThumbAppearance &other) const = default;
 };
 
+/** @brief Complete resolved Slider part paints, inheriting the ordinary control state. */
+struct SliderAppearance {
+  CellStyle track{}; ///< Unfilled rail cells.
+  CellStyle fill{};  ///< Filled rail prefix.
+  CellStyle thumb{}; ///< Movable position indicator.
+
+  /** @param other Resolved paints to compare. @return Whether every part agrees. */
+  bool operator==(const SliderAppearance &other) const = default;
+};
+
 /** @brief Logical glyph overrides; absent values retain the control's owning manual map. */
 struct GlyphAppearance {
   std::optional<GlyphProfile> profile{};   ///< Explicit base map, independent of colors.
@@ -171,6 +181,11 @@ struct ComputedStyle {
    * resolution and copies allocation-free; absence retains the common thumb and avoids segment resolution.
    */
   std::optional<std::array<ScrollbarThumbAppearance, 6>> scrollbarThumbSegments{};
+  /** @brief Complete Slider paints in normal/focused/disabled/selected/header/caret order.
+   * Engaged only for matching part declarations or explicit widget defaults. Inline ownership keeps
+   * resolution and copying allocation-free; an absent value retains the ordinary control paint.
+   */
+  std::optional<std::array<SliderAppearance, 6>> sliderParts{};
   std::array<GlyphAppearance, 6> glyphs{}; ///< Logical maps in normal/focused/disabled/selected/header/caret order.
   /// @cond INTERNAL
   detail::ScrollbarGlyphStorage scrollbarGlyphs{};
@@ -188,6 +203,7 @@ struct StyleGlyphBlock {
   std::array<GlyphAppearance, 6> values{};
   std::shared_ptr<const ScrollbarGlyphStates> literals;
   std::shared_ptr<const StyleSizing> sizing;
+  std::shared_ptr<const std::array<SliderAppearance, 6>> sliderParts;
 
   bool operator==(const StyleGlyphBlock &other) const noexcept;
 };
@@ -245,6 +261,8 @@ public:
   const std::array<ScrollbarAppearance, 6> &scrollbar() const noexcept;
   /** @return Complete thumb states, or null when no segment override exists. */
   const std::array<ScrollbarThumbAppearance, 6> *scrollbarThumbSegments() const noexcept;
+  /** @return Complete Slider states, or null; borrow ends with this snapshot's lifetime. */
+  const std::array<SliderAppearance, 6> *sliderParts() const noexcept;
   /** @return Logical glyph states, or shared constant absent states. */
   const std::array<GlyphAppearance, 6> &glyphs() const noexcept;
   /// @cond INTERNAL
@@ -290,6 +308,7 @@ struct ComputedStyleView {
   const std::array<FrameAppearance, 6> &frame;
   const std::array<ScrollbarAppearance, 6> &scrollbar;
   const std::array<ScrollbarThumbAppearance, 6> *scrollbarThumbSegments;
+  const std::array<SliderAppearance, 6> *sliderParts;
   const std::array<GlyphAppearance, 6> &glyphs;
   const ScrollbarGlyphStates *scrollbarGlyphs;
   const StyleSizing *sizing;
@@ -299,15 +318,17 @@ struct ComputedStyleView {
         header(value.header), caret(value.caret), minWidth(value.minWidth), frame(value.frame),
         scrollbar(value.scrollbar),
         scrollbarThumbSegments(value.scrollbarThumbSegments ? &*value.scrollbarThumbSegments : nullptr),
-        glyphs(value.glyphs), scrollbarGlyphs(value.scrollbarGlyphs ? &*value.scrollbarGlyphs : nullptr),
+        sliderParts(value.sliderParts ? &*value.sliderParts : nullptr), glyphs(value.glyphs),
+        scrollbarGlyphs(value.scrollbarGlyphs ? &*value.scrollbarGlyphs : nullptr),
         sizing(value.sizing ? &*value.sizing : nullptr) {
   }
 
   ComputedStyleView(const StyleSnapshot &value) noexcept
       : normal(value.normal), focused(value.focused), disabled(value.disabled), selected(value.selected),
         header(value.header), caret(value.caret), minWidth(value.minWidth), frame(value.frame()),
-        scrollbar(value.scrollbar()), scrollbarThumbSegments(value.scrollbarThumbSegments()), glyphs(value.glyphs()),
-        scrollbarGlyphs(value.scrollbarGlyphs()), sizing(value.sizing()) {
+        scrollbar(value.scrollbar()), scrollbarThumbSegments(value.scrollbarThumbSegments()),
+        sliderParts(value.sliderParts()), glyphs(value.glyphs()), scrollbarGlyphs(value.scrollbarGlyphs()),
+        sizing(value.sizing()) {
   }
 };
 
