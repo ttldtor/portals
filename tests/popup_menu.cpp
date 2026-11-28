@@ -98,6 +98,24 @@ struct PopupPaintCapture : PaintContext {
     return {};
   }
 };
+
+std::vector<CellRect> paintedScreenPanels(PopupFixture &fixture) {
+  PopupPaintCapture capture;
+  take(fixture.app->tree().frame([&] {
+    take(fixture.app->tree().paint(fixture.menu.node(), capture));
+  }));
+  const auto origin = take(fixture.scene->geometry(fixture.menu.node())).surface.origin();
+  std::vector<CellRect> result(0);
+
+  for (auto rectangle : capture.fills) {
+    if (rectangle.size().height > 1) {
+      result.push_back(take(rectangle.translated(origin)));
+    }
+  }
+
+  return result;
+}
+
 } // namespace
 
 TEST_CASE("popup closes and restores opener focus before invoking shared leaf") {
@@ -838,3 +856,165 @@ TEST_CASE("popup empty entry storage propagates debug proxy allocation failure")
   CHECK(allocationFailed);
 }
 #endif
+
+TEST_CASE("popup cascade keeps opening left after its parent flipped at the right edge") {
+  PopupFixture fixture;
+  ui::ActionSet actions;
+  auto leaf = actions.action("leaf", "Leaf", [] {
+  });
+
+  take(ui::mount(
+    *fixture.scene,
+    ui::overlayHost(fixture.host,
+                    ui::overlay(OverlayOptions{.horizontal = LayoutAlign::END, .vertical = LayoutAlign::START},
+                                ui::button(fixture.opener, "Open").width(8).height(1)),
+                    ui::popupMenu(fixture.menu, {ui::submenu("First", {ui::submenu("Second", {ui::menuItem(leaf)})}),
+                                                 ui::menuItem(leaf), ui::menuItem(leaf)}))));
+  fixture.layout({60, 12});
+  take(fixture.menu.open(fixture.opener).result());
+  fixture.layout({60, 12});
+  fixture.key(InputKey::RIGHT);
+  fixture.layout({60, 12});
+  fixture.key(InputKey::RIGHT);
+  fixture.layout({60, 12});
+
+  PopupPaintCapture capture;
+  take(fixture.app->tree().frame([&] {
+    take(fixture.app->tree().paint(fixture.menu.node(), capture));
+  }));
+  std::vector<CellRect> panels(0);
+  for (auto rectangle : capture.fills) {
+    if (rectangle.size().height > 1) {
+      panels.push_back(rectangle);
+    }
+  }
+
+  REQUIRE(panels.size() == 3);
+  CHECK(panels[1].right() < panels[0].origin().x);
+  CHECK(panels[2].right() < panels[1].origin().x);
+  CHECK(panels[2].intersection(panels[0]).empty());
+}
+
+TEST_CASE("popup aligns the first submenu row with its selected parent row") {
+  PopupFixture fixture;
+  ui::ActionSet actions;
+  auto leaf = actions.action("leaf", "Leaf", [] {
+  });
+  fixture.mount({ui::menuItem(leaf), ui::submenu("More", {ui::menuItem(leaf)}), ui::menuItem(leaf)});
+  fixture.open();
+  fixture.key(InputKey::DOWN);
+  fixture.key(InputKey::RIGHT);
+  fixture.layout();
+
+  const auto panels = paintedScreenPanels(fixture);
+  REQUIRE(panels.size() == 2);
+  const auto selectedParentRow = panels[0].origin().y + 2;
+  const auto firstSubmenuRow = panels[1].origin().y + 1;
+  CHECK(firstSubmenuRow == selectedParentRow);
+}
+
+TEST_CASE("popup root stays anchored when a taller submenu opens above a bottom opener") {
+  PopupFixture fixture;
+  ui::ActionSet actions;
+  auto leaf = actions.action("leaf", "Leaf", [] {
+  });
+  take(ui::mount(
+    *fixture.scene,
+    ui::overlayHost(
+      fixture.host,
+      ui::overlay(OverlayOptions{.horizontal = LayoutAlign::START, .vertical = LayoutAlign::END},
+                  ui::button(fixture.opener, "Open").width(8).height(1)),
+      ui::popupMenu(fixture.menu, {ui::submenu("More", {ui::menuItem(leaf), ui::menuItem(leaf), ui::menuItem(leaf),
+                                                        ui::menuItem(leaf), ui::menuItem(leaf), ui::menuItem(leaf),
+                                                        ui::menuItem(leaf), ui::menuItem(leaf)}),
+                                   ui::menuItem(leaf)}))));
+  fixture.layout({60, 16});
+  take(fixture.menu.open(fixture.opener).result());
+  fixture.layout({60, 16});
+  const auto before = paintedScreenPanels(fixture);
+  REQUIRE(before.size() == 1);
+
+  fixture.key(InputKey::RIGHT);
+  fixture.layout({60, 16});
+  const auto after = paintedScreenPanels(fixture);
+  REQUIRE(after.size() == 2);
+  CHECK(after[0] == before[0]);
+}
+
+TEST_CASE("popup managed placement keeps its root stable as a tall child opens and closes") {
+  for (const auto placement : {DialogPlacement::BELOW_START, DialogPlacement::ABOVE_START, DialogPlacement::CENTER}) {
+    CAPTURE(placement);
+    PopupFixture fixture;
+    ui::ActionSet actions;
+    int calls{};
+    auto leaf = actions.action("leaf", "Leaf", [&] {
+      ++calls;
+    });
+
+    take(ui::mount(
+      *fixture.scene,
+      ui::overlayHost(
+        fixture.host,
+        ui::overlay(OverlayOptions{.horizontal = LayoutAlign::START, .vertical = LayoutAlign::CENTER},
+                    ui::button(fixture.opener, "Open").width(8).height(1)),
+        ui::popupMenu(fixture.menu, {ui::submenu("More", {ui::menuItem(leaf), ui::menuItem(leaf), ui::menuItem(leaf),
+                                                          ui::menuItem(leaf), ui::menuItem(leaf), ui::menuItem(leaf),
+                                                          ui::menuItem(leaf), ui::menuItem(leaf)})}))));
+    fixture.layout({60, 24});
+    Node<Dialog> layer;
+    take(fixture.app->tree().read(fixture.menu.node(), [&](const PopupMenu &popup) {
+      layer = popup.dialogRoot();
+    }));
+    take(fixture.scene->dialogAnchor(layer, fixture.opener.node(), placement));
+    take(fixture.scene->openDialog(layer));
+    fixture.layout({60, 24});
+    const auto before = paintedScreenPanels(fixture);
+    REQUIRE(before.size() == 1);
+
+    fixture.key(InputKey::RIGHT);
+    fixture.layout({60, 24});
+    const auto after = paintedScreenPanels(fixture);
+    REQUIRE(after.size() == 2);
+    CHECK(after.front() == before.front());
+
+    fixture.key(InputKey::LEFT);
+    fixture.layout({60, 24});
+    CHECK(paintedScreenPanels(fixture).front() == before.front());
+
+    fixture.key(InputKey::RIGHT);
+    fixture.layout({40, 16});
+    // The completed body layout publishes its resized anchor for the next popup preparation.
+    fixture.layout({40, 16});
+    const auto resized = paintedScreenPanels(fixture);
+    REQUIRE(resized.size() == 2);
+    const auto viewport = take(CellRect::from({}, {40, 16}));
+
+    for (auto panel : resized) {
+      CHECK(panel.intersection(viewport) == panel);
+    }
+
+    MouseInputEvent click;
+    click.column = resized[1].origin().x + 1;
+    click.row = resized[1].origin().y + 1;
+    click.button = MouseButton::LEFT;
+    click.action = MouseAction::PRESS;
+    take(fixture.app->router().dispatch(click));
+    CHECK(calls == 1);
+    CHECK_FALSE(take(fixture.menu.opened()));
+  }
+}
+
+TEST_CASE("popup plane reserves the vertical offset of equal-height submenu rows") {
+  PopupFixture fixture;
+  ui::ActionSet actions;
+  auto leaf = actions.action("leaf", "Leaf", [] {});
+  fixture.mount({ui::menuItem(leaf), ui::submenu("More", {ui::menuItem(leaf), ui::menuItem(leaf)})});
+  fixture.open();
+  fixture.key(InputKey::DOWN);
+  fixture.key(InputKey::RIGHT);
+  fixture.layout();
+  const auto panels = paintedScreenPanels(fixture);
+
+  REQUIRE(panels.size() == 2);
+  CHECK(panels[1].origin().y + 1 == panels[0].origin().y + 2);
+}

@@ -11,8 +11,65 @@
 #include <array>
 #include <limits>
 
+namespace portals::ui::detail {
+// Owning popup-only metrics: prepare publishes root size; layout caches its offset in the bounded plane.
+struct PopupLayout {
+  CellSize rootSize{2, 2};
+  CellPoint rootOffset{};
+};
+} // namespace portals::ui::detail
+
 namespace portals {
 namespace {
+// Only popup layers share these prepared scalar metrics. Ordinary Dialogs retain their existing layout and size.
+class PopupLayer final : public Dialog {
+public:
+  PopupLayer(DialogOptions options, std::shared_ptr<ui::detail::PopupLayout> layout)
+      : Dialog(options), layout_(std::move(layout)) {
+  }
+
+  std::expected<std::vector<CellRect>, TreeError> arrangeChildren(std::span<const MeasuredChild> children,
+                                                                  CellSize available) const override {
+    try {
+      auto placed = Dialog::arrangeChildren(children, available);
+
+      if (!placed || placed->empty()) {
+        return placed;
+      }
+
+      const auto planeSize = placed->front().size();
+      const MeasuredChild root{
+        {std::min(layout_->rootSize.width, planeSize.width), std::min(layout_->rootSize.height, planeSize.height)},
+        DEFAULT_MENU_POLICY};
+      auto anchor = detail::placeDialogPanel(options(), available, root, detail::DialogAccess::anchorValue(*this));
+
+      if (!anchor) {
+        return std::unexpected(anchor.error());
+      }
+
+      // Fit the complete bounded plane around the independently anchored root, rather than moving the root for a child.
+      const auto origin = anchor->origin();
+      auto plane = CellRect::from({std::clamp(origin.x, 0, std::max(0, available.width - planeSize.width)),
+                                   std::clamp(origin.y, 0, std::max(0, available.height - planeSize.height))},
+                                  planeSize);
+
+      if (!plane) {
+        return std::unexpected(TreeError::INVALID_GEOMETRY);
+      }
+
+      layout_->rootOffset = {origin.x - plane->origin().x, origin.y - plane->origin().y};
+      placed->front() = *plane;
+
+      return placed;
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(TreeError::NO_MEMORY);
+    }
+  }
+
+private:
+  std::shared_ptr<ui::detail::PopupLayout> layout_;
+};
+
 // Translate the existing zero-origin Border painter into one popup panel, without retaining commands.
 class PanelPaint final : public PaintContext {
 public:
@@ -168,7 +225,18 @@ struct PopupMenu::State {
   detail::PreparedFrameText frame;
   CellRect bounds;
   std::optional<CellRect> anchor;
+  std::shared_ptr<ui::detail::PopupLayout> layout;
   bool dirty{true};
+
+  static std::size_t firstVisibleRow(const Panel &panel, std::size_t page) {
+    if (!panel.selected || !page) {
+      return panel.first;
+    }
+
+    const auto first = std::min(panel.first, *panel.selected);
+
+    return *panel.selected >= first + page ? *panel.selected - page + 1 : first;
+  }
 
   static std::optional<std::size_t> next(const Prepared &prepared, const Panel &panel,
                                          std::optional<std::size_t> current, bool forward) {
@@ -412,6 +480,13 @@ std::expected<void, TreeError> PopupMenu::prepare(WidgetTree &tree, Node<Menu> n
       return invalidated;
     }
 
+    if (state_->layout) {
+      const auto &root = (*incoming)->panels.front();
+      state_->layout->rootSize = {
+        root.width, static_cast<std::int32_t>(std::min<std::size_t>(
+                      root.rows.size() + 2, static_cast<std::size_t>(state_->options.maximumPanelSize.height)))};
+    }
+
     state_->prepared = std::move(*incoming);
     state_->anchor = anchor;
     state_->dirty = false;
@@ -441,13 +516,20 @@ std::expected<CellSize, TreeError> PopupMenu::measure(CellSize available) {
   CellSize desired{2, 2};
 
   if (state_->prepared) {
-    std::int64_t width{};
+    std::int64_t width{}, offset{};
+    const auto heightLimit = std::max(0, std::min(available.height, state_->options.maximumPanelSize.height));
 
     for (const auto &panel : state_->prepared->panels) {
       width += panel.width + (width ? state_->options.panelGap : 0);
-      desired.height = std::max(
-        desired.height, static_cast<std::int32_t>(std::min<std::size_t>(
-                          panel.rows.size() + 2, static_cast<std::size_t>(state_->options.maximumPanelSize.height))));
+
+      const auto height = std::min(panel.rows.size() + 2, static_cast<std::size_t>(heightLimit));
+      const auto page = height > 2 ? height - 2 : 0;
+      const auto first = State::firstVisibleRow(panel, page);
+
+      // A child begins at its parent's selected row, so the plane includes each cumulative row offset.
+      desired.height = std::max(desired.height, static_cast<std::int32_t>(std::min<std::int64_t>(
+        offset + height, state_->options.maximumPanelSize.height)));
+      offset += panel.selected.value_or(first) - std::min(first, panel.selected.value_or(first));
     }
 
     desired.width = static_cast<std::int32_t>(std::min<std::int64_t>(width, state_->options.maximumPanelSize.width));
@@ -473,6 +555,7 @@ std::expected<void, TreeError> PopupMenu::arrange(CellRect local) {
   }
 
   auto &panels = state_->prepared->panels;
+  bool openLeft{};
 
   for (std::size_t index = 0; index < panels.size(); ++index) {
     auto &panel = panels[index];
@@ -481,17 +564,13 @@ std::expected<void, TreeError> PopupMenu::arrange(CellRect local) {
       std::min<std::size_t>(panel.rows.size() + 2, static_cast<std::size_t>(local.size().height)));
     const auto page = static_cast<std::size_t>(std::max(0, height - 2));
 
-    if (panel.selected && page) {
-      panel.first = std::min(panel.first, *panel.selected);
-
-      if (*panel.selected >= panel.first + page) {
-        panel.first = *panel.selected - page + 1;
-      }
-    }
+    panel.first = State::firstVisibleRow(panel, page);
 
     CellPoint origin{};
 
-    if (!index && state_->anchor) {
+    if (!index && state_->layout) {
+      origin = state_->layout->rootOffset;
+    } else if (!index && state_->anchor) {
       const auto x = std::int64_t(state_->anchor->origin().x) - local.origin().x;
 
       origin.x = static_cast<std::int32_t>(std::clamp<std::int64_t>(x, 0, std::max(0, local.size().width - width)));
@@ -500,12 +579,16 @@ std::expected<void, TreeError> PopupMenu::arrange(CellRect local) {
     if (index) {
       const auto &parent = panels[index - 1];
 
-      auto x = std::int64_t(parent.bounds.right()) + state_->options.panelGap;
-      const auto y = std::int64_t(parent.bounds.origin().y) + 1 +
-                     static_cast<std::int64_t>(parent.selected.value_or(0) - parent.first);
+      const auto left = std::int64_t(parent.bounds.origin().x) - state_->options.panelGap - width;
+      const auto right = std::int64_t(parent.bounds.right()) + state_->options.panelGap;
+      auto x = openLeft ? left : right;
+      const auto y =
+        std::int64_t(parent.bounds.origin().y) + static_cast<std::int64_t>(parent.selected.value_or(0) - parent.first);
 
-      if (x + width > local.size().width) {
-        x = std::int64_t(parent.bounds.origin().x) - state_->options.panelGap - width;
+      // Continue away from ancestors after an edge flip; reverse only when that side no longer fits.
+      if (openLeft ? x < 0 : x + width > local.size().width) {
+        openLeft = !openLeft;
+        x = openLeft ? left : right;
       }
 
       origin.x = static_cast<std::int32_t>(std::clamp<std::int64_t>(x, 0, std::max(0, local.size().width - width)));
@@ -812,6 +895,16 @@ std::expected<Menu::Input, TreeError> PopupMenu::input(WidgetTree &tree, Node<Me
 } // namespace portals
 
 namespace portals::ui::detail {
+std::expected<void, ManagedError> ActionAccess::popupLayout(ManagedScene &scene, Node<PopupMenu> node,
+                                                            std::shared_ptr<ui::detail::PopupLayout> layout) {
+  auto bound = scene.app_.tree().edit(node, [&](PopupMenu &menu) {
+    menu.state_->layout = std::move(layout);
+  });
+
+  return bound ? std::expected<void, ManagedError>{}
+               : std::unexpected(ManagedScene::error(ManagedPhase::MOUNT, node, bound.error()));
+}
+
 Description<PopupMenu> popupMenuRecipe(std::span<const PopupEntry> entries, PopupMenuOptions options,
                                        ControlStyle style, SizePolicy policy) {
   struct Cold {
@@ -869,11 +962,21 @@ Description<PopupMenu> popupMenuRecipe(std::span<const PopupEntry> entries, Popu
       return std::unexpected(error(parent, frame ? TreeError::INVALID_ARGUMENT : frame.error()));
     }
 
-    auto layer = scene.emplace<Dialog>(*host, DialogOptions{.placement = DialogPlacement::BELOW_START,
-                                                            .maximumPanelSize = options.maximumPanelSize,
-                                                            .viewportMargin = 0,
-                                                            .anchorGap = 0,
-                                                            .closeOnEscape = false});
+    std::shared_ptr<ui::detail::PopupLayout> layout;
+
+    try {
+      layout = std::make_shared<PopupLayout>();
+    } catch (const std::bad_alloc &) {
+      return std::unexpected(error(parent, TreeError::NO_MEMORY));
+    }
+
+    auto layer = scene.emplace<PopupLayer>(*host,
+                                           DialogOptions{.placement = DialogPlacement::BELOW_START,
+                                                         .maximumPanelSize = options.maximumPanelSize,
+                                                         .viewportMargin = 0,
+                                                         .anchorGap = 0,
+                                                         .closeOnEscape = false},
+                                           layout);
 
     if (!layer) {
       return std::unexpected(layer.error());
@@ -884,6 +987,12 @@ Description<PopupMenu> popupMenuRecipe(std::span<const PopupEntry> entries, Popu
 
     if (!node) {
       return node;
+    }
+
+    auto bound = ActionAccess::popupLayout(scene, *node, layout);
+
+    if (!bound) {
+      return std::unexpected(bound.error());
     }
 
     auto attached = ActionAccess::menu(scene, *node, context);
