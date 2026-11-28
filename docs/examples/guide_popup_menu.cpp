@@ -1,45 +1,71 @@
 // Copyright (c) 2026 ttldtor.
 // SPDX-License-Identifier: BSL-1.0
 #include <portals/ui.hpp>
+#include <portals/ui_style.hpp>
 
-/** @brief Show a shared command tree in an automatically hosted popup.
+/** @brief Share document commands between buttons, shortcuts and nested popup panels.
  * @return Application exit status after terminal cleanup.
  */
 int main() {
   using namespace portals;
 
-  ui::Ref<Button> opener;
-  ui::Ref<Button> rightOpener;
+  ui::Ref<Button> left, right, bottom;
   ui::Ref<Label> status;
   ui::Ref<PopupMenu> commands;
+  ui::Ref<ThemeSelector> themes;
   ui::ActionSet actions;
   auto save = actions.action("save", "Save", [status] {
-    status.text() = "Saved";
+    status.text() = "Document saved";
   });
-  auto copy = actions.action("copy", "Save a copy…", [status] {
+  auto copy = actions.action("copy", "Save a copy", [status] {
     status.text() = "Copy saved";
   });
-  auto quit = actions.action("quit", "Quit", ui::quit);
+  auto markdown = actions.action("markdown", "Markdown", [status] {
+    status.text() = "Export preview: Markdown";
+  });
+  auto csv = actions.action("csv", "CSV", [status] {
+    status.text() = "Export preview: CSV";
+  });
 
   // clang-format off
   return ui::scene(
     ui::vbox(
-      ui::label("Shared actions, nested panels and explicit keyboard mnemonics"),
+      ui::label("Document desk | shared actions and nested popup menus"),
       ui::hbox(
-        ui::button(opener, "File").onClick([commands, opener] { commands.open(opener); }).fitWidth(),
+        ui::button(left, "File", [=] { commands.open(left); }).fitWidth(),
         ui::spacer(),
-        ui::button(rightOpener, "File at right").onClick([commands, rightOpener] {
-          commands.open(rightOpener);
-        }).fitWidth()),
-      ui::button(save).fitWidth(),
-      ui::label(status, "Open File at right, press M, then A. The submenu flips left; Escape returns.")),
+        ui::button(right, "File at right", [=] { commands.open(right); }).fitWidth()),
+      ui::vbox(
+        ui::label("Quarterly report"),
+        ui::label("Revenue     125,000"),
+        ui::label("Expenses     82,000"),
+        ui::label("Profit       43,000"),
+        ui::label("Export is a preview; this example writes no files."))
+        .framed("rounded", "Document").height(9),
+      ui::spacer(),
+      ui::hbox(
+        ui::button(bottom, "File below", [=] { commands.open(bottom); }).fitWidth(),
+        ui::button(save).fitWidth(),
+        ui::spacer(),
+        ui::button("Themes", [themes] { return themes.open(); }).fitWidth()),
+      ui::label(status, "Open File, then Export and Format. Escape returns to the opener."),
+      ui::label("F2: File | F3: right | F4: below | Ctrl+S: save | F10: quit")),
     ui::popupMenu(commands, {
       ui::menuItem(save, U's'),
-      ui::submenu("More", {ui::menuItem(copy, U'a')}, U'm'),
-      ui::menuItem(quit, U'q')
-    }).minWidth(18).maxWidth(56))
-    | ui::onKey(key::F10, [commands, opener] { commands.open(opener); })
+      ui::submenu("Export", {
+        ui::submenu("Format", {ui::menuItem(markdown, U'm'), ui::menuItem(csv, U'c')}, U'f'),
+        ui::menuItem(copy, U'a')
+      }, U'e')
+    }),
+    ui::themeSelector(themes, {
+      {"nord", "Nord", nordTheme},
+      {"latte", "Latte", catppuccinLatteTheme}}))
+    | ui::theme(nordTheme())
+    | ui::onKey(key::F2, [=] { commands.open(left); })
+    | ui::onKey(key::F3, [=] { commands.open(right); })
+    | ui::onKey(key::F4, [=] { commands.open(bottom); })
     | ui::onKey("Ctrl+S", save)
+    | ui::onKey("F10 | Ctrl+C", ui::quit)
     | ui::runApp();
   // clang-format on
 }

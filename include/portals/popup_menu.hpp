@@ -83,6 +83,7 @@ public:
   void resetSelection() noexcept;
 
 private:
+  friend struct ui::detail::ActionAccess;
   struct State;
   std::unique_ptr<State> state_;
   Node<Dialog> layer_;

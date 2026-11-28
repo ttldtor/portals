@@ -282,6 +282,12 @@ planned work is not included. An **Unreleased** heading has no publication date.
 
 ### Fixed
 
+- Popup menus keep their root anchored when taller submenus open, align child
+  content with the selected parent row while viewport space permits, and continue
+  a cascade away from its ancestors after flipping at the right edge. The complete
+  popup plane still respects its configured size cap. The document-desk guide
+  includes three-level menus, lower-edge placement, resizing and both color themes.
+
 - Keep the final DocumentView page full on repeated End and EOF drags with
   long unwrapped lines or a late bookmark seed. Tail checkpoint reuse now
   requires a proven full row window; preparation retains bounded memory.

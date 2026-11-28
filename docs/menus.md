@@ -101,14 +101,16 @@ Use `ui::scene(body, ui::popupMenu(...))` to declare an initially closed popup.
 The scene composes or reuses its existing overlay host. A `ui::Ref<PopupMenu>`
 observes the real sized control with ordinary content/min/max/flex modifiers.
 The [complete example](examples/guide_popup_menu.cpp) shares Save between a button,
-explicit shortcut and popup, and opens a nested More panel:
+explicit shortcut and popup. Export / Format opens a three-level cascade:
 
 ```cpp
 ui::popupMenu(commands, {
   ui::menuItem(save, U's'),
-  ui::submenu("More", {ui::menuItem(copy, U'a')}, U'm'),
-  ui::menuItem(quit, U'q')
-}).minWidth(18).maxWidth(56)
+  ui::submenu("Export", {
+    ui::submenu("Format", {ui::menuItem(markdown, U'm'), ui::menuItem(csv, U'c')}, U'f'),
+    ui::menuItem(copy, U'a')
+  }, U'e')
+})
 ```
 
 Call `commands.open(opener)` from an ordinary managed callback. Its anchor must
@@ -125,8 +127,13 @@ a branch; Left closes the deepest branch. Escape closes the deepest branch, then
 the root. Enter and Space activate leaves on reported press. Disabled leaves
 remain visible and are skipped; hidden/retired leaves occupy no row. Empty
 branches are disabled. Selection scrolls into the bounded viewport during layout.
-Panels prefer the right edge, flip left when space is scarce and remain clipped
-to the viewport. Their gaps preserve underlying paint. Outside left press closes
+The first submenu prefers the right side. After a flip at the viewport edge,
+descendants continue in that direction while space permits. The first submenu
+row aligns with its selected parent row unless the viewport clips that placement.
+A taller child does not move the root away from its opener. Near the bottom,
+the root opens above the opener when that side has more room. The complete
+bounded plane remains inside the viewport; a narrow viewport can still require
+panel overlap. Their gaps preserve underlying paint. Outside left press closes
 the whole popup and is consumed. Tab closes and resumes ordinary focus traversal.
 
 Mnemonics are explicit Unicode scalars shown in a hint column. Captions keep
@@ -188,11 +195,19 @@ Anchored opening requires an already arranged body frame. Opening before that fi
 
 ### Native popup recording
 
-The complete program opens a left popup, invokes a nested command, then opens
-the same menu at the right edge. Its submenu opens to the left; Escape restores
-the parent and then the opener. The recording also includes terminal resizing
-and the shared Save button. It uses keyboard input and the terminal's colors.
+The [complete program](examples/guide_popup_menu.cpp) is a document desk with
+File buttons at the top-left, top-right and bottom. F2, F3 and F4 open the same
+command tree from those buttons. Open Export / Format to see the cascade;
+selecting Markdown or CSV updates the export preview status without writing a file.
+Save is shared between the popup, the button and Ctrl+S. Escape closes one panel
+at a time and then returns focus to the opener. Themes switches Nord and Latte.
 
-\image html popup-menu.png "A submenu opens left at the viewport edge"
+The recordings show opening, three-level navigation, command execution,
+placement above the lower button and a terminal resize. Amber rings identify
+injected mouse clicks; the remaining frames come from the program's VT output.
 
-![Popup keyboard navigation and resizing](images/popup-menu.gif)
+\image html popup-menu.png "A three-level popup cascade at the right edge"
+
+![Popup placement in Nord](images/popup-menu-dark.gif)
+
+![Popup placement in Latte](images/popup-menu-light.gif)

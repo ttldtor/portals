@@ -4,6 +4,10 @@
 
 #include <portals/managed.hpp>
 
+namespace portals {
+class PopupMenu;
+}
+
 namespace portals::ui {
 /** @brief Owning shared command presentation; shortcut text does not install a global binding. */
 struct ActionMetadata {
@@ -42,6 +46,8 @@ struct ActionRecord;
 struct MountContext;
 struct MenuRegistration;
 
+struct PopupLayout;
+
 /** @brief Internal bridge to existing managed admission, routing and error receipts. */
 struct ActionAccess {
   static EditorCommandResult finish(ManagedScene &, std::expected<void, TreeError>);
@@ -51,6 +57,7 @@ struct ActionAccess {
   static std::expected<void, ManagedError> button(ManagedScene &, Node<Button>, const ActionRef &);
   static std::expected<void, ManagedError> menu(ManagedScene &, Node<Menu>, MountContext &);
   static void popupLayer(ManagedScene &, Node<Dialog>, Node<Menu>);
+  static std::expected<void, ManagedError> popupLayout(ManagedScene &, Node<PopupMenu>, std::shared_ptr<PopupLayout>);
   static std::expected<void, ManagedError> preparePopup(ManagedScene &, Node<Menu>);
   static std::expected<void, ManagedError> stageMenu(ManagedScene &, MenuRegistration &);
   static std::expected<void, ManagedError> validateMenu(ManagedScene &, const MenuRegistration &);
